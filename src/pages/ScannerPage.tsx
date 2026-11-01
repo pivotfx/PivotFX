@@ -29,6 +29,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { PillarHeaderBar } from '../components/common/PillarHeaderBar';
 
 interface ScannerPageProps {
   onNavigate: (tab: PageTab) => void;
@@ -242,6 +243,9 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
 
   return (
     <div className="space-y-8 pb-16">
+      {/* Pillar Navigation Header Bar */}
+      <PillarHeaderBar currentTab="ai-scanner" onNavigate={onNavigate} />
+
       {/* Top Heading */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
         <div>

@@ -22,6 +22,7 @@ import {
   Scale
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { PillarHeaderBar } from '../components/common/PillarHeaderBar';
 
 interface JournalPageProps {
   trades: JournalTrade[];
@@ -29,6 +30,7 @@ interface JournalPageProps {
   onDeleteTrade: (id: string) => void;
   xpPoints: number;
   onAwardXp: (amount: number, reason: string) => void;
+  onNavigate?: (tab: PageTab) => void;
 }
 
 export const JournalPage: React.FC<JournalPageProps> = ({
@@ -37,6 +39,7 @@ export const JournalPage: React.FC<JournalPageProps> = ({
   onDeleteTrade,
   xpPoints,
   onAwardXp,
+  onNavigate,
 }) => {
   const [activeTab, setActiveTab] = useState<'journal' | 'calculators' | 'gamification'>('journal');
   const [filterBroker, setFilterBroker] = useState<string>('all');
@@ -145,6 +148,9 @@ export const JournalPage: React.FC<JournalPageProps> = ({
 
   return (
     <div className="space-y-8 pb-16">
+      {/* Pillar Navigation Header Bar */}
+      {onNavigate && <PillarHeaderBar currentTab="journal" onNavigate={onNavigate} />}
+
       {/* Top Header */}
       <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-slate-800 pb-6">
         <div>
@@ -296,7 +302,7 @@ export const JournalPage: React.FC<JournalPageProps> = ({
                       <td className="p-4 text-white font-bold">{t.entryPrice}</td>
                       <td className="p-4 font-bold text-amber-400">{t.score}/100</td>
                       <td className="p-4 font-sans text-slate-300 max-w-xs truncate">{t.mode}</td>
-                      <td className="p-4 text-slate-300">${t.riskUsd.toFixed(2)}</td>
+                      <td className="p-4 text-slate-300">${(t.riskUsd ?? 0).toFixed(2)}</td>
                       <td className="p-4">
                         {t.pnlUsd !== undefined ? (
                           <span

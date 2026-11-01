@@ -20,6 +20,7 @@ import {
   Info
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { PillarHeaderBar } from '../components/common/PillarHeaderBar';
 
 interface TradingViewPageProps {
   onNavigate: (tab: PageTab) => void;
@@ -155,6 +156,9 @@ export const TradingViewPage: React.FC<TradingViewPageProps> = ({
 
   return (
     <div className="space-y-8 pb-16">
+      {/* Pillar Navigation Header Bar */}
+      <PillarHeaderBar currentTab="tradingview" onNavigate={onNavigate} />
+
       {/* Top Header & Strategy Controls */}
       <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-slate-800 pb-6">
         <div>

@@ -1,4 +1,13 @@
 export type PageTab = 
+  | 'landing'
+  | '/fx-academy'
+  | '/chart-mastery'
+  | '/strategy-vault'
+  | '/ai-scanner'
+  | '/risk-management'
+  | '/psychology'
+  | '/live-pulse'
+  | '/growth-lab'
   | 'start-here'
   | 'super-analysis'
   | 'tradingview'
@@ -20,12 +29,12 @@ export interface BrokerInfo {
   regulation: string;
   mpesaSupport: string;
   minDeposit: string;
-  baseSpread: number; // EURUSD pips
+  baseSpread: number;
   currentSpread: number;
   leverage: string;
   maxLeverageRatio: number;
   platforms: string[];
-  trustScore: number; // out of 10
+  trustScore: number;
   pros: string[];
   cons: string[];
   bestFor: string;
@@ -36,6 +45,64 @@ export interface BrokerInfo {
 export type CurrencyPair = 'EUR/USD' | 'GBP/USD' | 'USD/JPY' | 'GBP/JPY' | 'XAU/USD' | 'AUD/USD' | 'USD/CAD';
 
 export type Timeframe = 'M1' | 'M5' | 'M15' | 'H1' | 'H4' | 'D1';
+
+export interface PillarLesson {
+  id: string;
+  number: string;
+  title: string;
+  levelTag: 'Beginner' | 'Intermediate' | 'Advanced' | 'Pro / Institutional';
+  duration: string;
+  summary: string;
+  concept: string;
+  bulletPoints: string[];
+  illustration: {
+    type: 'chart' | 'diagram' | 'table' | 'formula' | 'steplist';
+    title: string;
+    caption: string;
+    content: string;
+  };
+  realWorldExample: {
+    pair: string;
+    context: string;
+    setup: string;
+    outcome: string;
+    keyTakeaway: string;
+  };
+  actionableChecklist: string[];
+}
+
+export interface PillarData {
+  id: PageTab;
+  route: string;
+  number: string;
+  title: string;
+  subtitle: string;
+  oneLineHook: string;
+  badge: string;
+  category: 'Foundation' | 'Technical' | 'Strategy' | 'Execution' | 'Risk & Mindset' | 'Institutional';
+  overview: string;
+  learningOutcomes: string[];
+  lessons: PillarLesson[];
+}
+
+export interface JournalTrade {
+  id: string;
+  timestamp: string;
+  pair: CurrencyPair;
+  type: 'BUY' | 'SELL';
+  lotSize?: number;
+  entryPrice: number;
+  exitPrice?: number;
+  pnlUsd?: number;
+  status: 'WON' | 'LOST' | 'OPEN' | 'BREAKEVEN';
+  setupName?: string;
+  mistakeTag?: string;
+  notes: string;
+  broker?: BrokerId;
+  score?: number;
+  mode?: string;
+  riskUsd?: number;
+}
 
 export interface AnalysisInput {
   broker: BrokerId;
@@ -48,16 +115,22 @@ export interface AnalysisInput {
 }
 
 export interface AnalysisResult {
-  score: number; // 0 to 100
+  score: number;
   verdict: 'WAIT_CHOP' | 'RISKY_EXTENDED' | 'HIGH_PROBABILITY_BUY' | 'HIGH_PROBABILITY_SELL';
   title: string;
   recommendation: string;
-  suggestedStake: number; // $2 rule or lot size
+  suggestedStake: number;
   suggestedLotSize: number;
   stopLossPips: number;
   takeProfitPips: number;
   riskReward: string;
   reasons: string[];
+  aiSynthesis?: {
+    sentimentSummary: string;
+    keyRiskFactor: string;
+    institutionalFootprint: string;
+    tradePlanSteps: string[];
+  };
   historicalReference: {
     title: string;
     description: string;
@@ -65,33 +138,75 @@ export interface AnalysisResult {
   };
 }
 
-export interface JournalTrade {
-  id: string;
-  timestamp: string;
+export interface ScannerScanResult {
+  source: 'chart' | 'camera';
   pair: CurrencyPair;
-  broker: BrokerId;
-  type: 'BUY' | 'SELL';
-  entryPrice: number;
-  exitPrice?: number;
+  timeframe: Timeframe;
+  price: number;
+  ema20: number;
+  ema50: number;
+  rsi: number;
+  detectedPattern: string;
   score: number;
-  mode: string;
-  riskUsd: number;
-  pnlUsd?: number;
-  status: 'OPEN' | 'WON' | 'LOST' | 'BREAKEVEN';
-  notes: string;
+  confidencePercent: number;
+  similarityToWin: number;
+  similarityToLoss: number;
+  recommendation: string;
+  timestamp: string;
+}
+
+export interface ScannerAnalysisResult {
+  pair: CurrencyPair;
+  timeframe: Timeframe;
+  price: number;
+  ema20: number;
+  ema50: number;
+  rsi: number;
+  score: number;
+  verdict: 'WAIT' | 'RISKY' | 'HIGH_PROBABILITY_BUY' | 'HIGH_PROBABILITY_SELL';
+  detectedPattern: string;
+  stopLoss: number;
+  takeProfit: number;
+  suggestedLot: number;
+  reasoning: string[];
+}
+
+export interface LessonSample {
+  title: string;
+  type: 'win_case' | 'loss_case' | 'broker_sample' | 'math_sample' | 'chart_sample';
+  description: string;
+  mathSnippet?: string;
+  chartDataHint?: string;
+  takeaway: string;
+}
+
+export interface SubTopic {
+  id: string;
+  title: string;
+  bulletPoints: string[];
+  practicalSample?: LessonSample;
 }
 
 export interface MasterclassLesson {
   id: string;
   belt: 'white' | 'blue' | 'purple' | 'black' | 'master';
+  levelTag: 'Beginner' | 'Intermediate' | 'Advanced' | 'Pro / Institutional';
   number: string;
   title: string;
   duration: string;
   summary: string;
+  learningObjectives?: string[];
   content: string[];
+  subTopics?: SubTopic[];
   realTimeNote: string;
   chartIllustrationType: 'candlestick_anatomy' | 'pinbar_tower' | 'ema_crossover' | 'rsi_divergence' | 'sessions_eat' | 'spread_trap' | 'two_dollar_rule';
-  liveMarketExample: string;
+  samplesAndCases?: LessonSample[];
+  liveMarketExample?: string;
+  practiceExercise?: {
+    prompt: string;
+    actionHint: string;
+    toolTarget?: PageTab;
+  };
   homework: string;
   quiz: {
     question: string;
@@ -114,21 +229,4 @@ export interface MasterclassStrategy {
     takeProfit: string;
   };
   gilgilLore: string;
-}
-
-export interface ScannerScanResult {
-  source: 'chart' | 'camera';
-  pair: CurrencyPair;
-  timeframe: Timeframe;
-  price: number;
-  ema20: number;
-  ema50: number;
-  rsi: number;
-  detectedPattern: string;
-  score: number;
-  confidencePercent: number;
-  similarityToWin: number;
-  similarityToLoss: number;
-  recommendation: string;
-  timestamp: string;
 }

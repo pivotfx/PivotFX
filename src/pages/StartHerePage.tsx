@@ -21,6 +21,7 @@ import {
   Zap
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { PillarHeaderBar } from '../components/common/PillarHeaderBar';
 
 interface StartHerePageProps {
   onNavigate: (tab: PageTab) => void;
@@ -96,7 +97,10 @@ export const StartHerePage: React.FC<StartHerePageProps> = ({ onNavigate, onAwar
   const progressPercentage = (completedSteps.length / 3) * 100;
 
   return (
-    <div className="space-y-12 pb-16">
+    <div className="space-y-8 pb-16">
+      {/* Pillar Navigation Header Bar */}
+      <PillarHeaderBar currentTab="start-here" onNavigate={onNavigate} />
+
       {/* 1. Top Unregistered Educational Notice Banner */}
       <div className="glass-panel-warning rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-red-200 border border-red-500/25">
         <div className="flex items-center gap-2.5">
@@ -558,54 +562,213 @@ export const StartHerePage: React.FC<StartHerePageProps> = ({ onNavigate, onAwar
           )}
         </div>
 
-        {/* Quick Shortcut Navigation Grid to all other sections */}
-        <div className="pt-8">
-          <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-400 mb-4">
-            Next Destinations in PivotFX Lab
-          </h3>
+        {/* All 8 Clickable Pillars Interactive Command Grid */}
+        <div className="pt-10 space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+            <div>
+              <span className="text-[11px] font-mono text-[#00C261] font-bold uppercase tracking-wider block">
+                Workstation Command Center
+              </span>
+              <h3 className="text-xl sm:text-2xl font-black text-white">
+                The 8 Core Pillars of PivotFX Lab (Click Any to Launch)
+              </h3>
+            </div>
+            <span className="text-xs text-slate-400 font-mono">
+              8 Specialised Workstations
+            </span>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Pillar 1 */}
+            <button
+              onClick={() => onNavigate('start-here')}
+              className="p-5 rounded-2xl bg-[#111827] border border-[#00C261]/40 hover:border-[#00C261] text-left transition group space-y-3 flex flex-col justify-between"
+            >
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-[#00C261]/20 text-[#00C261]">
+                    Pillar 01
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">Onboarding</span>
+                </div>
+                <h4 className="text-base font-bold text-white group-hover:text-[#00C261] transition">
+                  Start Here Journey
+                </h4>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  10-minute guided path covering currency pairs, CMA-licensed FXPesa demo, and first scan.
+                </p>
+              </div>
+              <span className="text-xs font-bold text-[#00C261] flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                Open Pillar 01 <ArrowRight className="w-3.5 h-3.5" />
+              </span>
+            </button>
+
+            {/* Pillar 2 */}
             <button
               onClick={() => onNavigate('super-analysis')}
-              className="p-5 rounded-2xl bg-[#111827] border border-slate-800 hover:border-[#00C261]/50 text-left transition group"
+              className="p-5 rounded-2xl bg-[#111827] border border-slate-800 hover:border-[#00C261]/60 text-left transition group space-y-3 flex flex-col justify-between"
             >
-              <div className="p-2.5 rounded-xl bg-[#00C261]/15 text-[#00C261] w-fit mb-3 group-hover:scale-110 transition-transform">
-                <TrendingUp className="w-5 h-5" />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
+                    Pillar 02
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">Analysis Engine</span>
+                </div>
+                <h4 className="text-base font-bold text-white group-hover:text-cyan-400 transition">
+                  Super Analysis Tool
+                </h4>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Input MT4/5 price, EMA 20/50, and RSI. Generates 0-100 score, $2 rule sizing, and 1-hour kill switch.
+                </p>
               </div>
-              <h4 className="text-sm font-bold text-white group-hover:text-[#00C261] transition">Super Analysis Tool</h4>
-              <p className="text-xs text-slate-400 mt-1">Input MT4/5 price, EMA 20/50, and RSI for instant 0-100 verdict.</p>
+              <span className="text-xs font-bold text-cyan-400 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                Open Pillar 02 <ArrowRight className="w-3.5 h-3.5" />
+              </span>
             </button>
 
+            {/* Pillar 3 */}
+            <button
+              onClick={() => onNavigate('tradingview')}
+              className="p-5 rounded-2xl bg-[#111827] border border-slate-800 hover:border-emerald-500/60 text-left transition group space-y-3 flex flex-col justify-between"
+            >
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-[#00C261]">
+                    Pillar 03
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">TradingView</span>
+                </div>
+                <h4 className="text-base font-bold text-white group-hover:text-[#00C261] transition">
+                  TradingView Studio
+                </h4>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Built-in chart with red tower tops, green winning entries, animated tower replay, and saved levels.
+                </p>
+              </div>
+              <span className="text-xs font-bold text-[#00C261] flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                Open Pillar 03 <ArrowRight className="w-3.5 h-3.5" />
+              </span>
+            </button>
+
+            {/* Pillar 4 */}
             <button
               onClick={() => onNavigate('ai-scanner')}
-              className="p-5 rounded-2xl bg-[#111827] border border-slate-800 hover:border-cyan-500/50 text-left transition group"
+              className="p-5 rounded-2xl bg-[#111827] border border-slate-800 hover:border-purple-500/60 text-left transition group space-y-3 flex flex-col justify-between"
             >
-              <div className="p-2.5 rounded-xl bg-cyan-500/15 text-cyan-400 w-fit mb-3 group-hover:scale-110 transition-transform">
-                <Scan className="w-5 h-5" />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-400">
+                    Pillar 04
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">Vision AI</span>
+                </div>
+                <h4 className="text-base font-bold text-white group-hover:text-purple-400 transition">
+                  Dual AI Scanner
+                </h4>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Option A web chart scanner + Option B phone camera lens to inspect laptop MT4 screen with OCR.
+                </p>
               </div>
-              <h4 className="text-sm font-bold text-white group-hover:text-cyan-400 transition">Dual AI Scanner</h4>
-              <p className="text-xs text-slate-400 mt-1">Scan internal chart or point camera at laptop MT4 screen.</p>
+              <span className="text-xs font-bold text-purple-400 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                Open Pillar 04 <ArrowRight className="w-3.5 h-3.5" />
+              </span>
             </button>
 
+            {/* Pillar 5 */}
             <button
               onClick={() => onNavigate('masterclass')}
-              className="p-5 rounded-2xl bg-[#111827] border border-slate-800 hover:border-amber-500/50 text-left transition group"
+              className="p-5 rounded-2xl bg-[#111827] border border-slate-800 hover:border-amber-500/60 text-left transition group space-y-3 flex flex-col justify-between"
             >
-              <div className="p-2.5 rounded-xl bg-amber-500/15 text-amber-400 w-fit mb-3 group-hover:scale-110 transition-transform">
-                <BookOpen className="w-5 h-5" />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-400">
+                    Pillar 05
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">5-Belt Class</span>
+                </div>
+                <h4 className="text-base font-bold text-white group-hover:text-amber-400 transition">
+                  5-Belt Masterclass
+                </h4>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  From White to Master Vault (5 battle-tested strategies, quizzes, homework, and printable Kenya cert).
+                </p>
               </div>
-              <h4 className="text-sm font-bold text-white group-hover:text-amber-400 transition">5-Belt Masterclass</h4>
-              <p className="text-xs text-slate-400 mt-1">From White Belt newbie to Master Belt Strategy Vault & Cert.</p>
+              <span className="text-xs font-bold text-amber-400 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                Open Pillar 05 <ArrowRight className="w-3.5 h-3.5" />
+              </span>
             </button>
 
+            {/* Pillar 6 */}
             <button
               onClick={() => onNavigate('brokers')}
-              className="p-5 rounded-2xl bg-[#111827] border border-slate-800 hover:border-emerald-500/50 text-left transition group"
+              className="p-5 rounded-2xl bg-[#111827] border border-slate-800 hover:border-emerald-500/60 text-left transition group space-y-3 flex flex-col justify-between"
             >
-              <div className="p-2.5 rounded-xl bg-emerald-500/15 text-emerald-400 w-fit mb-3 group-hover:scale-110 transition-transform">
-                <DollarSign className="w-5 h-5" />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400">
+                    Pillar 06
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">Execution Hub</span>
+                </div>
+                <h4 className="text-base font-bold text-white group-hover:text-emerald-400 transition">
+                  Broker Hub & Spreads
+                </h4>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Live EURUSD spreads comparing CMA-regulated FXPesa with offshore HFM and FBS + Kenya broker quiz.
+                </p>
               </div>
-              <h4 className="text-sm font-bold text-white group-hover:text-emerald-400 transition">Broker Hub</h4>
-              <p className="text-xs text-slate-400 mt-1">Compare FXPesa (CMA) vs HFM & FBS live spreads and M-Pesa.</p>
+              <span className="text-xs font-bold text-emerald-400 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                Open Pillar 06 <ArrowRight className="w-3.5 h-3.5" />
+              </span>
+            </button>
+
+            {/* Pillar 7 */}
+            <button
+              onClick={() => onNavigate('journal')}
+              className="p-5 rounded-2xl bg-[#111827] border border-slate-800 hover:border-cyan-500/60 text-left transition group space-y-3 flex flex-col justify-between"
+            >
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
+                    Pillar 07
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">Discipline</span>
+                </div>
+                <h4 className="text-base font-bold text-white group-hover:text-cyan-400 transition">
+                  Journal & 3 Calculators
+                </h4>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Auto-logged trades, CSV exporter, Pip/Margin calculators, $2 rule survival math, XP, and badges.
+                </p>
+              </div>
+              <span className="text-xs font-bold text-cyan-400 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                Open Pillar 07 <ArrowRight className="w-3.5 h-3.5" />
+              </span>
+            </button>
+
+            {/* Pillar 8 */}
+            <button
+              onClick={() => onNavigate('trust-legal')}
+              className="p-5 rounded-2xl bg-[#111827] border border-slate-800 hover:border-red-500/60 text-left transition group space-y-3 flex flex-col justify-between"
+            >
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400">
+                    Pillar 08
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">Trust & Safety</span>
+                </div>
+                <h4 className="text-base font-bold text-white group-hover:text-red-400 transition">
+                  Trust, Gilgil & Legal
+                </h4>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  The real Gilgil story of the 1296.56 loss to 1291.69 win, verified demo proof, CMA notice, and FAQs.
+                </p>
+              </div>
+              <span className="text-xs font-bold text-red-400 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                Open Pillar 08 <ArrowRight className="w-3.5 h-3.5" />
+              </span>
             </button>
           </div>
         </div>

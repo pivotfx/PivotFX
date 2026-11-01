@@ -17,6 +17,7 @@ import {
   FileText,
   AlertTriangle
 } from 'lucide-react';
+import { PillarHeaderBar } from '../components/common/PillarHeaderBar';
 
 interface TrustLegalPageProps {
   onNavigate: (tab: PageTab) => void;
@@ -41,6 +42,9 @@ export const TrustLegalPage: React.FC<TrustLegalPageProps> = ({ onNavigate, onOp
 
   return (
     <div className="space-y-8 pb-16">
+      {/* Pillar Navigation Header Bar */}
+      <PillarHeaderBar currentTab="trust-legal" onNavigate={onNavigate} />
+
       {/* Top Header */}
       <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-slate-800 pb-6">
         <div>

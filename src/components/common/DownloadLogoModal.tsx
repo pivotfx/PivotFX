@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { RAW_LOGO_SVG, Logo } from './Logo';
-import { Download, Copy, Check, X, Code, Image as ImageIcon } from 'lucide-react';
+import { Download, Copy, Check, X, Image as ImageIcon } from 'lucide-react';
 
 interface DownloadLogoModalProps {
   isOpen: boolean;
@@ -18,7 +18,7 @@ export const DownloadLogoModal: React.FC<DownloadLogoModalProps> = ({ isOpen, on
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'pivotfx-lab-logo.svg';
+    link.download = 'pivotfx-prop-firm-logo.svg';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -40,67 +40,64 @@ export const DownloadLogoModal: React.FC<DownloadLogoModalProps> = ({ isOpen, on
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-      <div className="relative w-full max-w-lg rounded-2xl bg-[#111827] border border-slate-700/80 shadow-2xl p-6 text-slate-100 animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+      <div className="relative w-full max-w-lg rounded-3xl bg-[#0F172A] border border-[#D4AF37]/40 shadow-2xl p-6 sm:p-8 text-slate-100 animate-in fade-in zoom-in-95 duration-200 space-y-6">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+          className="absolute top-4 right-4 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
         >
           <X className="w-5 h-5" />
         </button>
 
-        <div className="flex items-center gap-3 mb-4">
-          <div className="p-2.5 rounded-xl bg-[#00C261]/15 text-[#00C261] border border-[#00C261]/30">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-2xl bg-[#D4AF37]/15 text-[#D4AF37] border border-[#D4AF37]/30">
             <ImageIcon className="w-6 h-6" />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-white">PivotFX Lab Brand Assets</h3>
-            <p className="text-xs text-slate-400">Official Candlestick P + Momentum Arrow (M-Pesa Green #00C261)</p>
+            <h3 className="text-xl font-bold text-white">PivotFx Brand Asset Kit</h3>
+            <p className="text-xs text-slate-400">Official Gold #D4AF37 Candlestick P + Breakout Arrow Vector</p>
           </div>
         </div>
 
-        {/* Preview Container */}
-        <div className="flex flex-col items-center justify-center p-8 my-4 rounded-xl bg-[#0B0F17] border border-slate-800 text-center">
-          <Logo size="xl" showText={true} showBadge={true} />
-          <p className="text-xs text-slate-500 mt-4">
-            Vector SVG ready for GitHub repo, Favicon, MT4 templates, or Telegram community.
-          </p>
+        {/* Logo Preview */}
+        <div className="p-6 rounded-2xl bg-[#080C14] border border-slate-800 flex items-center justify-center">
+          <Logo size="lg" />
         </div>
 
         {/* Action Buttons */}
-        <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             onClick={handleDownloadSvg}
-            className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[#00C261] text-black font-bold hover:bg-[#00dc6e] transition shadow-lg shadow-[#00C261]/20 active:scale-95"
+            className="w-full py-3 rounded-xl btn-gold text-black font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2"
           >
             <Download className="w-4 h-4" />
-            Download SVG
+            <span>Download Vector SVG</span>
           </button>
+
           <button
             onClick={handleCopySvg}
-            className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-800 text-white font-medium hover:bg-slate-700 border border-slate-700 transition active:scale-95"
+            className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs border border-slate-700 flex items-center justify-center gap-2 transition"
           >
-            {copiedSvg ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-            {copiedSvg ? 'Copied SVG!' : 'Copy SVG Raw'}
+            {copiedSvg ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-[#D4AF37]" />}
+            <span>{copiedSvg ? 'SVG Code Copied!' : 'Copy Raw SVG Code'}</span>
           </button>
         </div>
 
-        {/* HTML Favicon snippet */}
-        <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5 font-mono">
-            <span className="flex items-center gap-1.5">
-              <Code className="w-3.5 h-3.5 text-cyan-400" /> Favicon HTML Link
-            </span>
+        {/* Favicon HTML */}
+        <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+          <div className="flex items-center justify-between text-xs font-mono">
+            <span className="text-slate-400">Favicon Link Tag:</span>
             <button
               onClick={handleCopyFavicon}
-              className="text-[#00C261] hover:underline flex items-center gap-1"
+              className="text-[#D4AF37] hover:underline flex items-center gap-1 font-bold"
             >
-              {copiedHtml ? 'Copied!' : 'Copy Link'}
+              {copiedHtml ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedHtml ? 'Copied' : 'Copy'}</span>
             </button>
           </div>
-          <p className="text-[11px] font-mono text-slate-300 truncate">
+          <pre className="text-[10px] font-mono text-slate-500 truncate overflow-x-auto">
             {faviconSnippet}
-          </p>
+          </pre>
         </div>
       </div>
     </div>

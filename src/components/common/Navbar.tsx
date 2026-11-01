@@ -2,28 +2,26 @@ import React, { useState, useEffect } from 'react';
 import { PageTab } from '../../types';
 import { Logo } from './Logo';
 import {
-  Compass,
-  SlidersHorizontal,
-  CandlestickChart,
-  Scan,
   GraduationCap,
-  Scale,
-  BookOpenCheck,
+  CandlestickChart,
+  Target,
+  Scan,
   ShieldCheck,
+  Brain,
+  Activity,
+  Award,
   Clock,
-  Flame,
-  Lock,
   Menu,
   X,
-  Download,
-  AlertCircle
+  Home,
+  Sparkles,
+  Lock
 } from 'lucide-react';
 
 interface NavbarProps {
   activeTab: PageTab;
   onSelectTab: (tab: PageTab) => void;
   killSwitchUntil: number | null;
-  xpPoints: number;
   onOpenLogoModal: () => void;
 }
 
@@ -31,21 +29,16 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   onSelectTab,
   killSwitchUntil,
-  xpPoints,
   onOpenLogoModal,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [eatTime, setEatTime] = useState<string>('');
-  const [sessionInfo, setSessionInfo] = useState<{ name: string; isHighVolume: boolean }>({
-    name: 'Calculating EAT...',
-    isHighVolume: false,
-  });
+  const [sessionLabel, setSessionLabel] = useState<string>('Nairobi EAT');
 
   // Clock in East Africa Time (UTC+3)
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      // Format to Nairobi EAT
       const timeStr = now.toLocaleTimeString('en-GB', {
         timeZone: 'Africa/Nairobi',
         hour: '2-digit',
@@ -54,22 +47,21 @@ export const Navbar: React.FC<NavbarProps> = ({
       });
       setEatTime(timeStr);
 
-      // Determine session based on Nairobi hour
       const eatHour = parseInt(
         now.toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', hour12: false }),
         10
       );
 
-      if (eatHour >= 11 && eatHour < 19) {
-        setSessionInfo({ name: 'London / NY Peak (High Vol)', isHighVolume: true });
-      } else if (eatHour >= 19 && eatHour < 23) {
-        setSessionInfo({ name: 'New York Session', isHighVolume: false });
+      if (eatHour >= 11 && eatHour < 15) {
+        setSessionLabel('London Open (High Vol)');
+      } else if (eatHour >= 15 && eatHour < 20) {
+        setSessionLabel('London/NY Overlap (Peak)');
+      } else if (eatHour >= 20 && eatHour < 23) {
+        setSessionLabel('NY Afternoon');
       } else if (eatHour === 23 || eatHour === 0) {
-        setSessionInfo({ name: 'Rollover Spread Warning', isHighVolume: false });
-      } else if (eatHour >= 3 && eatHour < 10) {
-        setSessionInfo({ name: 'Asian Range Session', isHighVolume: false });
+        setSessionLabel('Rollover (Caution)');
       } else {
-        setSessionInfo({ name: 'Pre-London Setup', isHighVolume: false });
+        setSessionLabel('Tokyo Asian Range');
       }
     };
 
@@ -78,34 +70,35 @@ export const Navbar: React.FC<NavbarProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  const navItems: { id: PageTab; label: string; icon: React.ReactNode; badge?: string }[] = [
-    { id: 'start-here', label: 'Start Here', icon: <Compass className="w-4 h-4" /> },
-    { id: 'super-analysis', label: 'Super Analysis', icon: <SlidersHorizontal className="w-4 h-4" />, badge: 'MT4/5' },
-    { id: 'tradingview', label: 'TradingView', icon: <CandlestickChart className="w-4 h-4" /> },
-    { id: 'ai-scanner', label: 'AI Scanner', icon: <Scan className="w-4 h-4" />, badge: 'Dual' },
-    { id: 'masterclass', label: 'Masterclass', icon: <GraduationCap className="w-4 h-4" />, badge: '5 Belts' },
-    { id: 'brokers', label: 'Broker Hub', icon: <Scale className="w-4 h-4" />, badge: 'Live' },
-    { id: 'journal', label: 'Journal & Calc', icon: <BookOpenCheck className="w-4 h-4" /> },
-    { id: 'trust-legal', label: 'Trust & Legal', icon: <ShieldCheck className="w-4 h-4" /> },
+  const navItems: { id: PageTab; label: string; icon: React.ReactNode; shortLabel: string }[] = [
+    { id: 'landing', label: 'Home', shortLabel: 'Home', icon: <Home className="w-3.5 h-3.5" /> },
+    { id: '/fx-academy', label: 'P1: FX Academy', shortLabel: 'P1 Academy', icon: <GraduationCap className="w-3.5 h-3.5" /> },
+    { id: '/chart-mastery', label: 'P2: Chart Mastery', shortLabel: 'P2 Charts', icon: <CandlestickChart className="w-3.5 h-3.5" /> },
+    { id: '/strategy-vault', label: 'P3: Strategy Vault', shortLabel: 'P3 Strategy', icon: <Target className="w-3.5 h-3.5" /> },
+    { id: '/ai-scanner', label: 'P4: AI Scanner', shortLabel: 'P4 AI Vision', icon: <Scan className="w-3.5 h-3.5" /> },
+    { id: '/risk-management', label: 'P5: Risk & Capital', shortLabel: 'P5 Risk', icon: <ShieldCheck className="w-3.5 h-3.5" /> },
+    { id: '/psychology', label: 'P6: Psychology', shortLabel: 'P6 Mindset', icon: <Brain className="w-3.5 h-3.5" /> },
+    { id: '/live-pulse', label: 'P7: Live Pulse', shortLabel: 'P7 Pulse', icon: <Activity className="w-3.5 h-3.5" /> },
+    { id: '/growth-lab', label: 'P8: Growth Lab', shortLabel: 'P8 Funded', icon: <Award className="w-3.5 h-3.5" /> },
   ];
 
   const isLocked = killSwitchUntil && killSwitchUntil > Date.now();
   const minutesLeft = isLocked ? Math.ceil((killSwitchUntil - Date.now()) / 60000) : 0;
 
   return (
-    <header className="sticky top-0 z-40 w-full bg-[#0B0F17]/90 backdrop-blur-xl border-b border-slate-800/80">
+    <header className="sticky top-0 z-40 w-full bg-[#080C14]/90 backdrop-blur-xl border-b border-slate-800/80">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between h-16">
           {/* Brand Logo */}
           <button
-            onClick={() => onSelectTab('start-here')}
+            onClick={() => onSelectTab('landing')}
             className="flex items-center text-left focus:outline-none"
           >
             <Logo size="md" />
           </button>
 
           {/* Desktop Navigation */}
-          <nav className="hidden lg:flex items-center gap-1">
+          <nav className="hidden xl:flex items-center gap-1">
             {navItems.map((item) => {
               const isActive = activeTab === item.id;
               return (
@@ -114,27 +107,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={() => onSelectTab(item.id)}
                   className={`relative flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all duration-200 ${
                     isActive
-                      ? 'text-white bg-[#111827] border border-[#00C261]/40 shadow-[0_0_15px_rgba(0,194,97,0.15)]'
+                      ? 'text-white bg-[#0F172A] border border-[#D4AF37]/50 shadow-[0_0_15px_rgba(212,175,55,0.2)]'
                       : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/50'
                   }`}
                 >
-                  <span className={isActive ? 'text-[#00C261]' : 'text-slate-400'}>
+                  <span className={isActive ? 'text-[#D4AF37]' : 'text-slate-400'}>
                     {item.icon}
                   </span>
                   <span>{item.label}</span>
-                  {item.badge && (
-                    <span
-                      className={`text-[9px] px-1 py-0.2 rounded font-mono font-semibold ${
-                        isActive
-                          ? 'bg-[#00C261]/25 text-[#00C261]'
-                          : 'bg-slate-800 text-slate-400 border border-slate-700/60'
-                      }`}
-                    >
-                      {item.badge}
-                    </span>
-                  )}
                   {isActive && (
-                    <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-[#00C261] rounded-full shadow-[0_0_8px_#00C261]" />
+                    <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-[#D4AF37] rounded-full shadow-[0_0_8px_#D4AF37]" />
                   )}
                 </button>
               );
@@ -142,53 +124,41 @@ export const Navbar: React.FC<NavbarProps> = ({
           </nav>
 
           {/* Right Status Items */}
-          <div className="hidden sm:flex items-center gap-2.5">
+          <div className="hidden sm:flex items-center gap-3">
             {/* Kill Switch Active Warning */}
             {isLocked && (
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-950/80 border border-red-500/40 text-red-300 text-xs font-mono animate-pulse">
                 <Lock className="w-3.5 h-3.5 text-red-400" />
-                <span>KILL SWITCH: {minutesLeft}m left</span>
+                <span>KILL SWITCH: {minutesLeft}m</span>
               </div>
             )}
 
             {/* Nairobi EAT Clock & Session */}
-            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs font-mono">
-              <Clock className="w-3.5 h-3.5 text-[#00C261]" />
-              <div className="flex flex-col text-[11px] leading-tight">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs font-mono">
+              <Clock className="w-3.5 h-3.5 text-[#D4AF37]" />
+              <div className="flex flex-col text-[11px] leading-tight text-left">
                 <span className="text-white font-bold">{eatTime} EAT</span>
-                <span className={sessionInfo.isHighVolume ? 'text-[#00C261] font-semibold' : 'text-slate-400'}>
-                  {sessionInfo.name}
+                <span className="text-slate-400 text-[10px] truncate max-w-[120px]">
+                  {sessionLabel}
                 </span>
               </div>
-            </div>
-
-            {/* XP Points Counter */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold font-mono">
-              <Flame className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-              <span>{xpPoints} XP</span>
             </div>
 
             {/* Logo Assets Trigger */}
             <button
               onClick={onOpenLogoModal}
-              title="Download Logo & Favicon"
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition active:scale-95"
+              title="Download PivotFx Logo"
+              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-[#D4AF37]/50 transition"
             >
-              <Download className="w-4 h-4 text-[#00C261]" />
+              <Sparkles className="w-4 h-4 text-[#D4AF37]" />
             </button>
           </div>
 
           {/* Mobile Menu Button */}
-          <div className="flex lg:hidden items-center gap-2">
-            <button
-              onClick={onOpenLogoModal}
-              className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
-            >
-              <Download className="w-4 h-4 text-[#00C261]" />
-            </button>
+          <div className="flex xl:hidden items-center gap-2">
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 rounded-xl bg-[#111827] border border-slate-800 text-slate-300 hover:text-white"
+              className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white"
             >
               {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
@@ -198,16 +168,13 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Mobile Drawer Navigation */}
       {mobileMenuOpen && (
-        <div className="lg:hidden bg-[#0e1422] border-b border-slate-800 px-4 pt-3 pb-6 space-y-2 animate-in slide-in-from-top-4 duration-200">
-          <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-mono mb-3">
+        <div className="xl:hidden bg-[#0A0E18] border-b border-slate-800 px-4 pt-3 pb-6 space-y-3 animate-in slide-in-from-top-4 duration-200">
+          <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-mono">
             <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-[#00C261]" />
+              <Clock className="w-4 h-4 text-[#D4AF37]" />
               <span className="text-white font-bold">{eatTime} EAT</span>
             </div>
-            <div className="flex items-center gap-1 text-amber-400 font-bold">
-              <Flame className="w-3.5 h-3.5 fill-amber-400" />
-              <span>{xpPoints} XP</span>
-            </div>
+            <span className="text-[#D4AF37] font-semibold">{sessionLabel}</span>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
@@ -220,13 +187,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                     onSelectTab(item.id);
                     setMobileMenuOpen(false);
                   }}
-                  className={`flex items-center gap-2 px-3 py-3 rounded-xl text-xs font-bold text-left transition ${
+                  className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold text-left transition ${
                     isActive
-                      ? 'bg-[#00C261] text-black shadow-lg shadow-[#00C261]/25'
+                      ? 'btn-gold text-black shadow-lg'
                       : 'bg-slate-900/80 text-slate-300 hover:bg-slate-800 border border-slate-800'
                   }`}
                 >
-                  <span className={isActive ? 'text-black' : 'text-[#00C261]'}>
+                  <span className={isActive ? 'text-black' : 'text-[#D4AF37]'}>
                     {item.icon}
                   </span>
                   <span className="truncate">{item.label}</span>

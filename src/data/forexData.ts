@@ -183,10 +183,16 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
   {
     id: 'w-1',
     belt: 'white',
+    levelTag: 'Beginner',
     number: '01',
     title: 'What Is Forex & The Kenya Broker Reality',
     duration: '8 mins',
     summary: 'Understanding currency pairs, how exchange rates move, and why CMA regulation matters in Kenya.',
+    learningObjectives: [
+      'Master the Base vs Quote currency quoting mechanism on MT4/MT5.',
+      'Differentiate between CMA-licensed Kenya brokers (FXPesa) and offshore entities (HFM, FBS).',
+      'Understand how interbank spreads are paid in Kenyan Shillings.'
+    ],
     content: [
       'Forex (Foreign Exchange) is simply exchanging one national currency for another — like exchanging Kenyan Shillings (KES) for US Dollars (USD). In forex trading, currencies are quoted in pairs like EUR/USD.',
       'The first currency is the BASE currency, and the second is the QUOTE currency. When EUR/USD is 1.0850, it means 1 Euro costs 1.0850 US Dollars.',
@@ -195,6 +201,26 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
     ],
     realTimeNote: 'Current Market Status: Major forex pairs trade 24 hours a day, 5 days a week from Monday morning Tokyo open to Friday evening New York close.',
     chartIllustrationType: 'candlestick_anatomy',
+    samplesAndCases: [
+      {
+        title: 'Sample Case: EUR/USD Price Quote Breakdown',
+        type: 'broker_sample',
+        description: 'EUR/USD quoted at Bid: 1.0850 / Ask: 1.0852 on FXPesa MT4.',
+        mathSnippet: 'Spread = Ask (1.0852) - Bid (1.0850) = 0.0002 = 2.0 Pips. On a 0.01 micro lot, 2.0 pips cost approx $0.20 (26 KES).',
+        takeaway: 'Always check the spread before placing an order. Wide spreads increase your hurdle to breakeven.'
+      },
+      {
+        title: 'Kenyan Reality: FXPesa vs Offshore Dispute Resolution',
+        type: 'broker_sample',
+        description: 'A trader has an unresolved withdrawal issue. FXPesa is supervised by CMA Kenya (Westlands office). Offshore brokers have desks in Seychelles or Vanuatu with no local recourse.',
+        takeaway: 'Beginners should always protect their principal by starting with CMA-regulated accounts.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Open the Broker Hub in Pillar 06 and compare the live floating spread of FXPesa against HFM.',
+      actionHint: 'Notice how FXPesa spread fluctuates around 1.2 pips while offshore leverage is higher.',
+      toolTarget: 'brokers'
+    },
     liveMarketExample: 'Check EUR/USD right now on your screen. You will see two prices: Bid (what you sell for) and Ask (what you buy for). The gap between them is the broker spread.',
     homework: 'Open your FXPesa demo account and locate EUR/USD and GBP/USD in the Market Watch window.',
     quiz: {
@@ -207,10 +233,16 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
   {
     id: 'w-2',
     belt: 'white',
+    levelTag: 'Beginner',
     number: '02',
     title: 'How to Use MT4, MT5 & Lipa Na M-Pesa',
     duration: '10 mins',
     summary: 'Navigating MetaTrader on phone and laptop, placing your first micro lot, and managing Kenyan mobile money.',
+    learningObjectives: [
+      'Navigate MT4/MT5 Quotes, Charts, Trade, and History tabs.',
+      'Calculate micro lot (0.01) pip risk on EUR/USD in KES.',
+      'Deposit securely into FXPesa via official Paybill 832900.'
+    ],
     content: [
       'MetaTrader 4 (MT4) and MetaTrader 5 (MT5) are the global software standards for placing forex orders. Your broker provides the server credentials (account number, trader password, server name).',
       'The three key windows: Market Watch (quotes), Chart Window (candlesticks), and Terminal/Trade Tab (open orders, equity, free margin).',
@@ -219,6 +251,20 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
     ],
     realTimeNote: 'Tip from Gilgil: Always verify the server name in MT4 search! For FXPesa demo, search "EGM-Demo" or "FXPesa-Demo".',
     chartIllustrationType: 'candlestick_anatomy',
+    samplesAndCases: [
+      {
+        title: 'Trade Sample: 0.01 Micro Lot EUR/USD Execution',
+        type: 'math_sample',
+        description: 'Balance: 4,000 KES ($30 USD). Entry: 1.0830 Buy. Stop Loss: 1.0810 (20 pips). Target: 1.0870 (40 pips).',
+        mathSnippet: 'Risk = 20 pips x $0.10/pip = $2.00 (260 KES). Reward = 40 pips x $0.10/pip = $4.00 (520 KES). Risk:Reward = 1:2.',
+        takeaway: 'Even on a small 4,000 KES deposit, you only risk 6.5% of your account with a clean 1:2 payout potential.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Use the Pip Calculator in Pillar 07 to calculate how much 35 pips is worth with a 0.01 micro lot on GBP/USD.',
+      actionHint: 'Expected result: approx $3.50 USD (around 455 KES).',
+      toolTarget: 'journal'
+    },
     liveMarketExample: 'A lot size of 0.01 on a $50 account means a 20-pip stop loss only risks $2.00 (approx 260 KES). This keeps you alive.',
     homework: 'Log into MT4 on your mobile device, add EUR/USD to favorites, and place a 0.01 buy demo trade with a 20 pip Stop Loss.',
     quiz: {
@@ -231,10 +277,16 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
   {
     id: 'w-3',
     belt: 'white',
+    levelTag: 'Beginner',
     number: '03',
     title: 'Candlesticks, Rejection Pinbars & The Anatomy of a Reversal',
     duration: '12 mins',
     summary: 'Mastering open, high, low, close (OHLC), long rejection shadows, and what a Pinbar reveals about buyers and sellers.',
+    learningObjectives: [
+      'Identify the 4 components of every candle: Open, High, Low, Close.',
+      'Spot bearish rejection pinbars with 2x wick-to-body ratios at key levels.',
+      'Recognize institutional absorption where retail traders get trapped.'
+    ],
     content: [
       'Every candlestick represents price action over a fixed timeframe (e.g., M15 = 15 minutes). A candle has a body (distance between open and close) and wicks/shadows (highest and lowest price touched).',
       'A Pinbar (Pinocchio bar) has a very small body and a long tail/wick protruding out that is at least 2x or 3x the body size.',
@@ -243,6 +295,19 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
     ],
     realTimeNote: 'Candlestick psychology: Wicks are where transactions were rejected. Bodies are where agreement happened.',
     chartIllustrationType: 'pinbar_tower',
+    samplesAndCases: [
+      {
+        title: 'Historical Sample: The M15 Rejection Wick at 1292.00',
+        type: 'win_case',
+        description: 'Price surged to 1292.15, printed a 14-pip upper shadow, and closed at 1291.60 with a tiny 2-pip body.',
+        takeaway: 'The long upper tail signaled sellers absorbing all breakout liquidity. Triggered our short reversal entry.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Open TradingView in Pillar 03 and locate the Tower Reversal animation step 3 to observe the pinbar formation.',
+      actionHint: 'Step through the animation to watch the long upper tail reject resistance.',
+      toolTarget: 'tradingview'
+    },
     liveMarketExample: 'The Gilgil 1291.69 win formed right after an M15 candle with a 14-pip upper wick rejecting the 1292.00 round psychological resistance.',
     homework: 'Find 3 pinbar rejection candles on the M15 timeframe of EUR/USD and note whether price reversed after.',
     quiz: {
@@ -260,10 +325,16 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
   {
     id: 'w-4',
     belt: 'white',
+    levelTag: 'Beginner',
     number: '04',
     title: 'The Ironclad $2 Risk Rule for Kenyan Traders',
     duration: '9 mins',
     summary: 'The mathematical secret to surviving the first 6 months. Why sizing your risk to $2 protects your capital from emotional wipeout.',
+    learningObjectives: [
+      'Calculate max risk per trade as strictly $2.00 USD (260 KES).',
+      'Compute account survival bounds: $50 account = 25 lives buffer.',
+      'Completely eliminate the psychological urge to revenge trade.'
+    ],
     content: [
       'Most beginner traders in Kenya start with small accounts ($20 to $50, approx 2,500 to 6,500 KES). If you risk $10 or $20 on one trade, two bad trades blow half your savings.',
       'The PivotFX $2 Rule states: On ANY single trade, your maximum allowed monetary risk is strictly $2.00 USD (approx 260 KES).',
@@ -272,6 +343,20 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
     ],
     realTimeNote: 'Emotional truth: You cannot revenge trade when a loss only costs 260 KES (the price of a cup of coffee and mandazi).',
     chartIllustrationType: 'two_dollar_rule',
+    samplesAndCases: [
+      {
+        title: 'Math Proof: Trader A ($15 Risk) vs Trader B ($2 Risk)',
+        type: 'math_sample',
+        description: 'Both start with 6,500 KES ($50). Both face an unpredictable 3-trade losing streak.',
+        mathSnippet: 'Trader A (-$45): Balance = $5. Account destroyed. Panic. Trader B (-$6): Balance = $44. Calmer than ever. Followed system to +$14 on next 3 trades.',
+        takeaway: 'Risk sizing, not prediction, is what separates blown accounts from professional traders.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Open the $2 Survival Rule Calculator in Pillar 07 and enter your intended M-Pesa deposit in KES.',
+      actionHint: 'See how many consecutive losses you can survive before running into trouble.',
+      toolTarget: 'journal'
+    },
     liveMarketExample: 'Compare Trader A (risking $15 on a $30 account, blown in 2 trades) vs Trader B (risking $2 per trade, took 20 trades, learned the edge, and grew the account to $65).',
     homework: 'Use the PivotFX $2 Rule Calculator on the Journal page to calculate your exact lot size and stop loss pips for EUR/USD.',
     quiz: {
@@ -286,10 +371,16 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
   {
     id: 'b-1',
     belt: 'blue',
+    levelTag: 'Intermediate',
     number: '05',
     title: 'The EMA 20 & 50 Confluence System',
     duration: '14 mins',
     summary: 'Using Exponential Moving Averages as dynamic support and resistance instead of static lines.',
+    learningObjectives: [
+      'Distinguish between Fast 20 EMA (momentum) and Slow 50 EMA (trend baseline).',
+      'Identify the institutional "Value Zone" between the two EMAs.',
+      'Filter out choppy consolidation ranges where EMAs are tangled.'
+    ],
     content: [
       'The 20 Exponential Moving Average (EMA) represents the short-term momentum of the last 20 periods. The 50 EMA represents the intermediate trend.',
       'Rule 1: When EMA 20 is above EMA 50, and both are sloping upward, look ONLY for BUY setups on pullbacks. Never short against the upward EMA slope.',
@@ -298,6 +389,19 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
     ],
     realTimeNote: 'Trend Filter: If price is tangled inside the 20 and 50 EMA and they are flat/horizontal, the market is CHOPPING. Close your terminal and walk away.',
     chartIllustrationType: 'ema_crossover',
+    samplesAndCases: [
+      {
+        title: 'Winning Case: EUR/USD Dynamic Pullback Bounce',
+        type: 'win_case',
+        description: 'H1 trend strongly bullish (EMA 20 > EMA 50). Price pulled back to 1.0825 directly into the 50 EMA, formed a bullish hammer, and rallied 33 pips to 1.0858.',
+        takeaway: 'Entering in the Value Zone gives tight stop losses directly beneath the 50 EMA.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Toggle EMA 20 and EMA 50 in Pillar 03 TradingView to see the cyan and orange dynamic lines.',
+      actionHint: 'Notice how price respects the dynamic slope during London session runs.',
+      toolTarget: 'tradingview'
+    },
     liveMarketExample: 'On GBP/USD H1 chart, notice how price bounces off the 20 EMA repeatedly during strong London session runs.',
     homework: 'Add EMA 20 (Cyan) and EMA 50 (Orange) to your MT4 chart. Highlight three instances where price bounced off the 20 EMA.',
     quiz: {
@@ -315,10 +419,16 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
   {
     id: 'b-2',
     belt: 'blue',
+    levelTag: 'Intermediate',
     number: '06',
     title: 'RSI Momentum & The Gilgil 1291.69 Case Study',
     duration: '15 mins',
     summary: 'The authentic story: Deconstructing the 1296.56 loss vs the disciplined 1291.69 to 1289.38 win.',
+    learningObjectives: [
+      'Deconstruct why buying at 1296.56 blew accounts in Gilgil.',
+      'Master the 3-step breakdown formula of the 1291.69 winning reversal.',
+      'Detect RSI divergence when price makes equal highs but RSI forms lower highs.'
+    ],
     content: [
       'The Relative Strength Index (RSI 14) measures the velocity and magnitude of price changes. Conventional textbooks say "buy at 30 and sell at 70". In real markets, strong trends can stay above 70 for hours.',
       'In Gilgil, we learned this the hard way: Buying Gold/GBP at 1296.56 because "the breakout looked massive" caused a devastating loss because price was already overstretched and RSI was at 83 with bearish divergence.',
@@ -327,6 +437,25 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
     ],
     realTimeNote: 'Formula: High probability setup = Overextended Tower + RSI exhaustion + Break back through 20 EMA.',
     chartIllustrationType: 'rsi_divergence',
+    samplesAndCases: [
+      {
+        title: 'Infamous Loss: The 1296.56 Parabolic Chaser',
+        type: 'loss_case',
+        description: 'Entered LONG after 4 giant green candles. Price was 42 pips above 20 EMA, RSI was 83.2. Blown in 15 minutes when a 70-pip reversal wick formed.',
+        takeaway: 'Never chase candles overextended from the 20 EMA when RSI is > 75.'
+      },
+      {
+        title: 'Disciplined Win: The 1291.69 Short Reversal',
+        type: 'win_case',
+        description: 'Waited for upper wick rejection, RSI drop below 60, and close below 20 EMA. Shorted at 1291.69 with 15 pip stop. Hit target at 1289.38 for +23.1 pips.',
+        takeaway: 'Let the trap form first. Enter with the institutional sellers on confirmed EMA crossover.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Load the 1291.69 preset in Pillar 02 (Super Analysis Tool) to inspect the 92/100 confluence score.',
+      actionHint: 'Observe how the tool analyzes distance to EMA 20 and confirms the entry.',
+      toolTarget: 'super-analysis'
+    },
     liveMarketExample: 'Compare 1296.56 (chasing at the top) vs 1291.69 (entering the confirmed reversal). That 5-pip difference in entry timing is the line between blown accounts and consistent profitability.',
     homework: 'Open the Super Analysis Tool on PivotFX Lab. Enter Price: 1291.69, EMA 20: 1292.80, EMA 50: 1294.50, RSI: 46. See the score generated.',
     quiz: {
@@ -344,10 +473,16 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
   {
     id: 'b-3',
     belt: 'blue',
+    levelTag: 'Intermediate',
     number: '07',
     title: 'Trading Sessions: London Open at 11:00 AM East Africa Time',
     duration: '11 mins',
     summary: 'Aligning your trading day with Kenyan time (EAT UTC+3). Why 11:00 AM and 3:30 PM are the only windows that matter.',
+    learningObjectives: [
+      'Master the 3 global forex sessions in Kenyan time: Asian (3 AM), London (11 AM), New York (3:30 PM).',
+      'Trade the London 11:00 AM EAT liquidity surge with tight spreads.',
+      'Avoid trading during the midnight bank rollover (11:55 PM to 12:30 AM EAT).'
+    ],
     content: [
       'Kenyan traders have one of the greatest geographical advantages in global finance: East Africa Time (EAT, UTC+3) is perfectly aligned with European market open.',
       'The Asian Session (3:00 AM – 10:00 AM EAT) is usually quiet and range-bound. Spreads on EUR/USD and GBP/USD can be tight, but volume is low.',
@@ -356,6 +491,19 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
     ],
     realTimeNote: 'Kenya Schedule: London Open = 11:00 AM EAT. NY Open = 3:30 PM EAT. Rollover Spread Danger = 11:55 PM to 12:30 AM EAT.',
     chartIllustrationType: 'sessions_eat',
+    samplesAndCases: [
+      {
+        title: 'Session Sample: London Judas Swing Breakdown',
+        type: 'win_case',
+        description: 'At 11:05 AM EAT, GBP/USD pushed 8 pips above the Asian high to fake out retail breakout buyers, then printed an M5 pinbar and dumped 45 pips.',
+        takeaway: 'Wait 15 minutes after 11:00 AM EAT to confirm whether the breakout is real or an institutional liquidity hunt.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Check the real-time Nairobi EAT Clock in the top navbar to see the active trading session.',
+      actionHint: 'Notice whether the clock displays "High Volume London/NY" or "Pre-London Setup".',
+      toolTarget: 'start-here'
+    },
     liveMarketExample: 'Notice how spreads on FXPesa are 1.2 pips at 11:30 AM EAT, but widen to 4-7 pips at midnight during broker bank roll.',
     homework: 'Set an alarm on your phone for 10:55 AM EAT. Observe GBP/USD on MT4 at 11:00 AM and watch the 5-minute candle surge.',
     quiz: {
@@ -370,10 +518,16 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
   {
     id: 'p-1',
     belt: 'purple',
+    levelTag: 'Advanced',
     number: '08',
     title: 'Multi-Timeframe Confluence (H4 Trend, M15 Entry)',
     duration: '16 mins',
     summary: 'Never trade a timeframe in isolation. Aligning Higher Timeframe direction with Lower Timeframe precision.',
+    learningObjectives: [
+      'Execute top-down analysis: H4 (macro trend) -> H1 (momentum) -> M15 (sniper entry).',
+      'Filter out counter-trend lower timeframe fakeouts.',
+      'Achieve minimum 1:2.5 Risk-to-Reward on every entry.'
+    ],
     content: [
       'Top-down analysis is the hallmark of professional trading: Look at H4 to identify the macro trend and major support/resistance barriers.',
       'Drop down to H1 to locate the intermediate EMA 20/50 trajectory.',
@@ -382,6 +536,19 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
     ],
     realTimeNote: 'Golden rule: The higher the timeframe, the stronger the support or resistance level.',
     chartIllustrationType: 'ema_crossover',
+    samplesAndCases: [
+      {
+        title: 'Triple Confluence Execution Example',
+        type: 'win_case',
+        description: 'H4 in clean uptrend (sloping 20 EMA). H1 retested 50 EMA support. M15 printed a bullish engulfing candle with RSI at 48. Won +28 pips.',
+        takeaway: 'Trading with H4 trend protection allows you to hold positions with confidence.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Open Pillar 03 TradingView and switch between H4, H1, and M15 timeframes to see the setup score adapt.',
+      actionHint: 'Notice how the setup score calculates dynamic confluence based on selected timeframe.',
+      toolTarget: 'tradingview'
+    },
     liveMarketExample: 'When H4 shows a clean bounce off 50 EMA, an M15 breakout trade rarely fails.',
     homework: 'Chart EUR/USD on H4, mark the trend, then find an M15 pullback entry in the same direction.',
     quiz: {
@@ -399,10 +566,16 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
   {
     id: 'p-2',
     belt: 'purple',
+    levelTag: 'Advanced',
     number: '09',
     title: 'Broker Price Tricks: Spread Widening, Rollover & Slippage',
     duration: '13 mins',
     summary: 'Unmasking the hidden traps: midnight swaps, weekend gaps, liquidity voids, and how to protect yourself.',
+    learningObjectives: [
+      'Understand the mechanics of bank rollover at 00:00 server time.',
+      'Prevent the "Midnight Ghost Stop" where spreads spike to 12+ pips.',
+      'Buffer swing trades with appropriate spread padding.'
+    ],
     content: [
       'Every night at 00:00 server time (12:00 AM / 1:00 AM EAT), global interbank trading desks close their daily books and settle interest swaps.',
       'During this 15-to-30-minute window, market liquidity drops near zero. Brokers widen spreads from 1.2 pips to 6, 8, or even 15 pips on major pairs.',
@@ -411,6 +584,19 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
     ],
     realTimeNote: 'Reality Check: CMA regulation protects FXPesa clients against unauthorized balance deductions, but interbank spread widening is an unavoidable market-wide reality.',
     chartIllustrationType: 'spread_trap',
+    samplesAndCases: [
+      {
+        title: 'Trap Case: The Midnight Ghost Stop Loss',
+        type: 'loss_case',
+        description: 'Trader entered EUR/USD buy with an 8-pip stop loss. At 12:03 AM EAT, spread widened from 1.2 to 9.5 pips. Stop triggered even though chart low was 4 pips away!',
+        takeaway: 'Never leave tight stops open through midnight rollover without at least a 15-pip spread buffer.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Check the Live Spread Comparison table in Pillar 06 to see how floating spreads tick in real-time.',
+      actionHint: 'Observe the difference in spread variance between FXPesa, HFM, and FBS.',
+      toolTarget: 'brokers'
+    },
     liveMarketExample: 'Check FXPesa or HFM spread display at 11:59 PM vs 11:30 AM. You will visually see the spread bar expand.',
     homework: 'Note down the spread on EUR/USD at 2:00 PM EAT, then check it again at 12:05 AM EAT. Compare the two numbers.',
     quiz: {
@@ -430,10 +616,16 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
   {
     id: 'k-1',
     belt: 'black',
+    levelTag: 'Pro / Institutional',
     number: '10',
     title: 'Building Your Mechanical Edge & Backtesting 100 Trades',
     duration: '18 mins',
     summary: 'Transforming intuition into a mathematical system. How to backtest 100 setups without risking a single Kenyan Shilling.',
+    learningObjectives: [
+      'Calculate mathematical expectancy: E = (Win% x Avg Win) - (Loss% x Avg Loss).',
+      'Execute a 100-trade backtest protocol without hindsight bias.',
+      'Verify drawdown limits before funding an account.'
+    ],
     content: [
       'A trader without backtesting data is just an unguided gambler hoping for luck. You need a verifiable mathematical expectancy: Expectancy = (Win% x Avg Win) - (Loss% x Avg Loss).',
       'Step 1: Pick ONE pair (e.g. EUR/USD) and ONE strategy (e.g. PivotFX Tower Reversal).',
@@ -443,6 +635,20 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
     ],
     realTimeNote: 'Professional mantra: If you cannot prove your edge over 100 historical trades, you do not have an edge.',
     chartIllustrationType: 'two_dollar_rule',
+    samplesAndCases: [
+      {
+        title: '100-Trade Backtest Statistical Sample',
+        type: 'math_sample',
+        description: '100 trades on GBP/USD M15 Tower Reversal with 1:2 R:R ($2 risk / $4 reward).',
+        mathSnippet: 'Wins: 64 trades (+$256). Losses: 36 trades (-$72). Net Profit: +$184 (+368% on a $50 account). Expectancy: +$1.84 per trade.',
+        takeaway: 'A mechanical edge gives you peace of mind because individual losses are merely business expenses.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Open the Trade Journal in Pillar 07 and export your current trade dataset to CSV to practice audit analysis.',
+      actionHint: 'Check your overall win rate and net realized PnL curve.',
+      toolTarget: 'journal'
+    },
     liveMarketExample: 'Our 100-trade backtest on the PivotFX Tower Reversal showed a 76% win rate on M15 when combined with EMA 20 slope confirmation.',
     homework: 'Backtest 10 trades on EUR/USD using the TradingView Bar Replay feature and record each trade in the PivotFX Journal.',
     quiz: {
@@ -460,10 +666,16 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
   {
     id: 'k-2',
     belt: 'black',
+    levelTag: 'Pro / Institutional',
     number: '11',
     title: 'Forex Ethics, Telegram Scams & Teaching Legally in Kenya',
     duration: '14 mins',
     summary: 'Protecting your community. CMA laws on investment advice, fake Telegram VIP signals, and running educational workshops ethically.',
+    learningObjectives: [
+      'Understand CMA Kenya regulations regarding fund management and PAMMs.',
+      'Identify fake Telegram forex scams, rented car videos, and fake M-Pesa screenshots.',
+      'Teach technical charting and risk management legally as free education.'
+    ],
     content: [
       'In Kenya, hundreds of youth are scammed every month by fake Telegram "forex gurus" promising 100% daily returns or managing "money pools".',
       'Under the Capital Markets Act of Kenya, it is strictly ILLEGAL to collect money from the public to trade on their behalf without a fund manager license from CMA.',
@@ -472,6 +684,19 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
     ],
     realTimeNote: 'Gilgil Code of Honor: We teach how to fish. We never sell fake "guaranteed" signals, and we never touch another person\'s money.',
     chartIllustrationType: 'spread_trap',
+    samplesAndCases: [
+      {
+        title: 'Community Ethics Case: The Pool Trading Trap',
+        type: 'loss_case',
+        description: 'An unregistered trader collected 50,000 KES from 10 friends promising 30% weekly profit. Blown within 3 days. Led to police arrest and criminal charges under the CMA Act.',
+        takeaway: 'Never accept client money to trade. Teach them how to trade their own accounts via the $2 rule.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Read the Transparency Statement in Pillar 08 (Trust & Legal) to understand compliance rules in Kenya.',
+      actionHint: 'See how PivotFX Lab structures its legal disclaimer for community protection.',
+      toolTarget: 'trust-legal'
+    },
     liveMarketExample: 'Real traders show verified Myfxbook or MT4 demo audit statements, not rented cars and fake M-Pesa screenshots.',
     homework: 'Read the Legal Disclaimer page of PivotFX Lab and understand the difference between licensed brokerage (CMA) and free community education.',
     quiz: {

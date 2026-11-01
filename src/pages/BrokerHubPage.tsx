@@ -19,13 +19,15 @@ import {
   Sparkles
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { PillarHeaderBar } from '../components/common/PillarHeaderBar';
 
 interface BrokerHubPageProps {
   onNavigate: (tab: PageTab) => void;
   onAwardXp: (amount: number, reason: string) => void;
+  onOpenMpesaModal?: () => void;
 }
 
-export const BrokerHubPage: React.FC<BrokerHubPageProps> = ({ onNavigate, onAwardXp }) => {
+export const BrokerHubPage: React.FC<BrokerHubPageProps> = ({ onNavigate, onAwardXp, onOpenMpesaModal }) => {
   const [filterType, setFilterType] = useState<string>('all');
   const [selectedBrokerReview, setSelectedBrokerReview] = useState<BrokerInfo | null>(null);
   const [showQuizModal, setShowQuizModal] = useState(false);
@@ -95,6 +97,9 @@ export const BrokerHubPage: React.FC<BrokerHubPageProps> = ({ onNavigate, onAwar
 
   return (
     <div className="space-y-8 pb-16">
+      {/* Pillar Navigation Header Bar */}
+      <PillarHeaderBar currentTab="brokers" onNavigate={onNavigate} />
+
       {/* Page Title & Actions */}
       <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-slate-800 pb-6">
         <div>
@@ -110,16 +115,28 @@ export const BrokerHubPage: React.FC<BrokerHubPageProps> = ({ onNavigate, onAwar
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            setShowQuizModal(true);
-            setQuizRecommendation(null);
-          }}
-          className="px-5 py-3 rounded-2xl bg-[#00C261] hover:bg-[#00dc6e] text-black font-extrabold text-xs uppercase tracking-wider transition shadow-lg shadow-[#00C261]/20 flex items-center gap-2 active:scale-95"
-        >
-          <HelpCircle className="w-4 h-4" />
-          <span>Which Broker is Best for Kenya? (30s Quiz)</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          {onOpenMpesaModal && (
+            <button
+              onClick={onOpenMpesaModal}
+              className="px-4 py-3 rounded-2xl bg-[#141E33] hover:bg-[#1b2944] text-[#00C261] border border-[#00C261]/40 font-bold text-xs uppercase tracking-wider transition flex items-center gap-2"
+            >
+              <Smartphone className="w-4 h-4 text-[#00C261]" />
+              <span>M-Pesa Paybill (832900)</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => {
+              setShowQuizModal(true);
+              setQuizRecommendation(null);
+            }}
+            className="px-5 py-3 rounded-2xl bg-[#00C261] hover:bg-[#00dc6e] text-black font-extrabold text-xs uppercase tracking-wider transition shadow-lg shadow-[#00C261]/20 flex items-center gap-2 active:scale-95"
+          >
+            <HelpCircle className="w-4 h-4" />
+            <span>Which Broker is Best for Kenya? (30s Quiz)</span>
+          </button>
+        </div>
       </div>
 
       {/* Filter and Live Refresh Ribbon */}

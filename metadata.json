@@ -1,6 +1,6 @@
 {
-  "name": "PivotFX Lab",
-  "description": "Educational forex platform from Gilgil, Kenya with MT4/MT5 analysis, AI chart scanner, 5-belt masterclass, live broker comparison (FXPesa, HFM, FBS), and risk management.",
+  "name": "PivotFx — Prop Firm & Forex Academy",
+  "description": "Zero to Funded Trader: Complete professional forex academy from basics to pro across 8 independent pillars with gold accents and working trading tools.",
   "requestFramePermissions": [
     "camera"
   ],
