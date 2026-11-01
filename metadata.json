@@ -1,0 +1,10 @@
+{
+  "name": "PivotFX Lab",
+  "description": "Educational forex platform from Gilgil, Kenya with MT4/MT5 analysis, AI chart scanner, 5-belt masterclass, live broker comparison (FXPesa, HFM, FBS), and risk management.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

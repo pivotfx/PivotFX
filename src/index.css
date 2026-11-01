@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --mpesa-green: #00C261;
+    --mpesa-dark: #008744;
+    --surface-bg: #0B0F17;
+    --surface-card: #111827;
+    --surface-card-hover: #172236;
+    --surface-border: #1E293B;
+  }
+
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #0B0F17;
+    color: #F3F4F6;
+    overflow-x: hidden;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0B0F17;
+}
+::-webkit-scrollbar-thumb {
+  background: #1E293B;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #00C261;
+}
+
+/* Glass card styling */
+.glass-panel {
+  background: rgba(17, 24, 39, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-panel-glow {
+  background: rgba(17, 24, 39, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 194, 97, 0.25);
+  box-shadow: 0 0 25px rgba(0, 194, 97, 0.08);
+}
+
+.glass-panel-warning {
+  background: rgba(26, 17, 20, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  box-shadow: 0 0 25px rgba(239, 68, 68, 0.1);
+}
+
+/* Candlestick animation */
+@keyframes pulseGreenGlow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(0, 194, 97, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(0, 194, 97, 0.6);
+  }
+}
+
+.glow-green {
+  animation: pulseGreenGlow 3s infinite ease-in-out;
+}
