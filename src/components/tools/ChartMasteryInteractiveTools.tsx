@@ -24,6 +24,7 @@ import {
   HelpCircle
 } from 'lucide-react';
 import { CandlestickVisualizer, CandleData } from '../common/CandlestickVisualizer';
+import { TradingViewNavigationGuide } from './TradingViewNavigationGuide';
 
 interface ChartToolElement {
   id: string;
@@ -53,7 +54,7 @@ interface ChartToolElement {
 }
 
 export const ChartMasteryInteractiveTools: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'live-chart' | 'tv-school' | 'mt4-school'>('live-chart');
+  const [activeTab, setActiveTab] = useState<'live-chart' | 'tv-basics' | 'tv-school' | 'mt4-school'>('live-chart');
   const [selectedPair, setSelectedPair] = useState<string>('EURUSD');
   const [selectedTimeframe, setSelectedTimeframe] = useState<string>('15');
   const [activeToolId, setActiveToolId] = useState<string>('trendline');
@@ -502,8 +503,8 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
           </p>
         </div>
 
-        {/* 3 Main Modes */}
-        <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-950 border border-slate-800">
+        {/* 4 Main Modes */}
+        <div className="flex items-center gap-1.5 p-1.5 rounded-2xl bg-slate-950 border border-slate-800 flex-wrap">
           <button
             onClick={() => setActiveTab('live-chart')}
             className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 ${
@@ -513,7 +514,19 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
             }`}
           >
             <CandlestickChart className="w-3.5 h-3.5" />
-            <span>Live TradingView</span>
+            <span>1. Live TradingView</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('tv-basics')}
+            className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+              activeTab === 'tv-basics'
+                ? 'bg-[#D4AF37] text-black shadow-[0_0_12px_rgba(212,175,55,0.4)]'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Compass className="w-3.5 h-3.5" />
+            <span>2. TV Basics & Buttons Guide</span>
           </button>
 
           <button
@@ -525,7 +538,7 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span>TradingView School (10 Tools)</span>
+            <span>3. TradingView School (10 Tools)</span>
           </button>
 
           <button
@@ -537,7 +550,7 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
             }`}
           >
             <Compass className="w-3.5 h-3.5" />
-            <span>MT4 / MT5 School</span>
+            <span>4. MT4 / MT5 School</span>
           </button>
         </div>
       </div>
@@ -622,7 +635,14 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 2: TRADINGVIEW SCHOOL — COMPLETE SUB-CARDS */}
+      {/* TAB 2: TRADINGVIEW BASICS & BUTTON NAVIGATION GUIDE */}
+      {activeTab === 'tv-basics' && (
+        <div className="animate-in fade-in duration-300">
+          <TradingViewNavigationGuide />
+        </div>
+      )}
+
+      {/* TAB 3: TRADINGVIEW SCHOOL — COMPLETE SUB-CARDS */}
       {activeTab === 'tv-school' && (
         <div className="space-y-6 animate-in fade-in duration-300">
           {/* Quick Sub-Cards Selector Grid */}

@@ -904,17 +904,22 @@ With Magnet Mode Enabled (Ctrl/Cmd Key):
     route: '/strategy-vault',
     number: '03',
     title: 'Strategy Vault Masterclass',
-    subtitle: '5 Core Institutional Setups & Execution Playbooks',
-    oneLineHook: 'Master 5 high-win-rate setups with exact entry rules, invalidation points, and profit target logic.',
+    subtitle: '15 Core Institutional Setups, ICT Masterclasses & Execution Playbooks',
+    oneLineHook: 'Master 15 high-win-rate setups including ICT Order Blocks, FVGs, Liquidity Pools, and OTE Killzones.',
     badge: 'Edge Playbook',
     category: 'Strategy',
-    overview: 'The institutional strategy vault contains 5 flagship quantitative and price-action setups tested over thousands of trading hours. Each setup is broken down into its core concept, strict entry criteria, stop loss placement, take profit rules, sessions to trade, and visual diagrammatic setups.',
+    overview: 'The institutional strategy vault contains 15 flagship quantitative, ICT (Inner Circle Trader), and price-action setups tested over thousands of trading hours. Master Order Blocks, Fair Value Gaps, Liquidity Pools (BSL/SSL), Market Structure Shifts, and OTE Fibonacci Killzone execution.',
     learningOutcomes: [
       'Master Flagship 1: Tower Top / Tower Bottom Liquidity Sweep Reversal',
       'Master Flagship 2: 20/50 EMA Confluence Bounce & Trend Continuation',
       'Master Flagship 3: RSI 70/30 Momentum Divergence & Volume Exhaustion',
       'Master Flagship 4: London Open Breakout (11:00 AM EAT Volatility Drive)',
       'Master Flagship 5: Asian Range Liquidity Sweep & New York Reversal',
+      'Master ICT Concept 1: Order Blocks & 50% Mean Threshold Mitigation',
+      'Master ICT Concept 2: Fair Value Gaps (FVG) & Consequent Encroachment',
+      'Master ICT Concept 3: Buy-Side (BSL) & Sell-Side Liquidity (SSL) Pools',
+      'Master ICT Concept 4: Market Structure Shift (MSS) with Displacement vs CHoCH',
+      'Master ICT Concept 5: Optimal Trade Entry (OTE 62%-79%) & London/NY Killzones',
       'Execute multi-target partial scale-outs with guaranteed risk-free breakeven rules'
     ],
     lessons: [
@@ -1374,6 +1379,237 @@ Step 3: Trail remaining 0.25 Lot behind H1 Higher Lows for ultimate runner profi
           'Calculate Target 1 (1:2 RRR) and mark it on your chart before entering.',
           'Practice partial close in MT4/MT5: Modify order -> Volume: 0.05 -> Click Close.',
           'Never move stop loss to breakeven prematurely before price has cleared 1.5R to 2R.'
+        ]
+      },
+      {
+        id: 'sv-11',
+        number: '11',
+        title: 'ICT Masterclass: Order Blocks (OB) & Mean Threshold (50% Mitigation Matrix)',
+        levelTag: 'Advanced',
+        duration: '24 mins',
+        summary: 'Identify the exact last opposite candle before institutional displacement, and use the 50% Mean Threshold for sniper limit entries.',
+        concept: 'An ICT Order Block is not just standard support or resistance. It is the footprint of smart money algorithmic accumulation or distribution. A Bullish Order Block is the last down-close (bearish) candle prior to an aggressive upward displacement that breaks market structure (MSS). A Bearish Order Block is the last up-close (bullish) candle before an aggressive drop. The 50% midpoint of the candle body is known as the "Mean Threshold" (M.T.). Algorithms will typically tap the top of the body or retrace to the Mean Threshold; if candle bodies close beyond the Mean Threshold, the Order Block is considered violated.',
+        bulletPoints: [
+          'High-Probability OB Criteria: Must have caused displacement and created an unmitigated Fair Value Gap.',
+          'Mean Threshold (50%): The algorithmic equilibrium of the candle body. Ideal limit order placement zone.',
+          'Wick vs Body Rule: Wick penetrations of the Mean Threshold are valid; a full candle body CLOSE beyond it invalidates the block.',
+          'Breaker Block Evolution: When an Order Block fails to hold price after liquidity has been swept, it flips into a Breaker Block.'
+        ],
+        illustration: {
+          type: 'diagram',
+          title: 'Bearish Order Block & Mean Threshold Anatomy',
+          caption: 'Smart Money Distribution & Sniper Limit Fill',
+          content: `   [ BEARISH ORDER BLOCK ]
+    (Last Up-Close Green Candle)
+           High Wick: 1.2965
+               ┌┴┐
+         ┌─────┤ ├─────┐  ◄── Open: 1.2940
+         │     │ │     │
+    ─────┼─────┼─┼─────┼─────► MEAN THRESHOLD (50% Midpoint): 1.2925 (LIMIT SELL ENTRY!)
+         │     │█│     │
+         └─────┤█├─────┘  ◄── Close: 1.2910
+               └┬┘
+                │
+                ▼
+         [ AGGRESSIVE RED DISPLACEMENT CANDLE ]
+         Drops 45 Pips & Breaks Previous Low!
+                │
+         Price slowly retraces to 1.2925 (Taps Mean Threshold) -> ACCELERATES DOWN!`
+        },
+        realWorldExample: {
+          pair: 'GBP/USD H1',
+          context: 'At London Open, GBP/USD printed an H1 green candle followed by an aggressive 60-pip cascade breaking previous day low.',
+          setup: 'Trader marked the H1 green candle body (1.2880 to 1.2920) and calculated Mean Threshold at 1.2900.',
+          outcome: 'Price retraced into 1.2902 at 15:30 EAT NY open, triggered sell order, and tumbled 95 pips.',
+          keyTakeaway: 'The Mean Threshold gives you the most favorable risk-reward entry with minimal drawdown.'
+        },
+        actionableChecklist: [
+          'Only mark Order Blocks that directly produced a Market Structure Shift (MSS).',
+          'Measure the candle body with the 50% Fibonacci or rectangle midpoint to find the Mean Threshold.',
+          'Place Stop Loss 3 to 5 pips beyond the Order Block extreme wick.'
+        ]
+      },
+      {
+        id: 'sv-12',
+        number: '12',
+        title: 'ICT Masterclass: Fair Value Gaps (FVG) & Consequent Encroachment (C.E.)',
+        levelTag: 'Advanced',
+        duration: '22 mins',
+        summary: 'Trade 3-candle algorithmic delivery imbalances by targeting Consequent Encroachment (50% midpoint) for precision wholesale entries.',
+        concept: 'Institutional market makers operate automated pricing algorithms that must maintain balanced price delivery. When large institutional orders enter the market with extreme force, price skips tick levels, leaving an imbalance where only one side of the market was delivered (buy-side or sell-side only). This creates a 3-candle Fair Value Gap (FVG). In a bullish FVG, Candle 1 high does not overlap Candle 3 low. The 50% midpoint of this empty gap is termed "Consequent Encroachment" (C.E.). Institutional limit orders rest at C.E. waiting for price to rebalance.',
+        bulletPoints: [
+          '3-Candle Imbalance: Candle 1 (preceding), Candle 2 (large displacement impulse), Candle 3 (following candle).',
+          'Consequent Encroachment (C.E.): The 50% midpoint of the imbalance between Candle 1 wick and Candle 3 wick.',
+          'Premium vs Discount: Bullish FVGs in Discount (< 50% of the dealing range) have the highest win rate.',
+          'Inversion FVG: When price blasts through an FVG without respecting it, that gap flips into an opposite support/resistance zone.'
+        ],
+        illustration: {
+          type: 'chart',
+          title: '3-Candle FVG & Consequent Encroachment Matrix',
+          caption: 'How Algorithmic Imbalance is Rebalanced',
+          content: `   [ Candle 1 ]           [ Candle 2 (Displacement) ]            [ Candle 3 ]
+        High                         Large Bullish                       Low
+         ┌─┐                              ┌─┐                            ┌─┐
+         │ │                              │ │                            │ │
+    ─────┴─┴──────────────────────────────┤ │                            │ │  ◄── Candle 3 Low: 1.0870
+                                          │ │
+         ═════════════════════════════════╪═╪═══════════════════════════════  ◄── CONSEQUENT ENCROACHMENT: 1.0855 (50%)
+                 [ FAIR VALUE GAP ]       │ │                                     (OPTIMAL LIMIT BUY ORDER!)
+    ──────────────────────────────────────┼─┼────────────────────────────┬─┬  ◄── Candle 1 High: 1.0840
+                                          │ │                            └─┘
+                                          └─┘
+    Price returns calmly to 1.0855 (Taps C.E.) -> Fills institutional orders -> Rallies +50 Pips!`
+        },
+        realWorldExample: {
+          pair: 'EUR/USD M15',
+          context: 'At 15:30 EAT US Core Retail Sales, EUR/USD surged 35 pips, leaving an M15 FVG between 1.0840 and 1.0870.',
+          setup: 'Trader set a Buy Limit order at the 50% Consequent Encroachment (1.0855) with SL at 1.0835 (20 pips).',
+          outcome: 'At 16:45 EAT, price retraced to 1.0856, wicked 1.0852, filled the order, and exploded to 1.0920 (+65 pips).',
+          keyTakeaway: 'Never chase the displacement candle. Algorithms almost always return to fill the imbalance.'
+        },
+        actionableChecklist: [
+          'Use the Rectangle tool to highlight the gap between Candle 1 wick and Candle 3 wick.',
+          'Set a price alert at the 50% Consequent Encroachment line.',
+          'Verify that Higher Timeframe (H1 or H4) directional bias agrees with the FVG trade direction.'
+        ]
+      },
+      {
+        id: 'sv-13',
+        number: '13',
+        title: 'ICT Masterclass: Liquidity Pools (BSL & SSL) & Induced Retail Traps',
+        levelTag: 'Advanced',
+        duration: '22 mins',
+        summary: 'Understand why institutions hunt equal highs (Buy-Side Liquidity) and equal lows (Sell-Side Liquidity) before making true trend runs.',
+        concept: 'Institutional market participants cannot buy with $500 Million without someone else selling to them. Liquidity pools are areas where retail traders place resting stop-loss orders. Above equal highs (Double Tops, Previous Day Highs) sit resting Buy Stops (Buy-Side Liquidity / BSL). Below equal lows (Double Bottoms, Previous Day Lows) sit resting Sell Stops (Sell-Side Liquidity / SSL). Smart money algorithms intentionally drive price into these pools to trigger retail stops, absorbing all the liquidity to fuel their true contrary positions.',
+        bulletPoints: [
+          'Buy-Side Liquidity (BSL): Resting Buy Stops above obvious swing highs, double tops, and daily/weekly highs.',
+          'Sell-Side Liquidity (SSL): Resting Sell Stops below obvious swing lows, double bottoms, and daily/weekly lows.',
+          'Inducement: A minor swing high or low engineered to tempt impatient retail traders into early positioning.',
+          'Turtle Soup Setup: Price purges 5 to 15 pips through an obvious liquidity pool, then immediately rejects with a wick.'
+        ],
+        illustration: {
+          type: 'diagram',
+          title: 'The Buy-Side Liquidity (BSL) Hunt & Reversal',
+          caption: 'Smart Money Sweeps Retail Breakout Traders',
+          content: `Retail "Double Top Resistance":
+          High 1                    High 2
+            /\                        /\
+           /  \                      /  \
+    ══════/════\════════════════════/════\══════════════════════ [ RETAIL RESISTANCE: 1.2850 ]
+                                          \                        ▲
+                                           \                       │ Retail Buy Stops (BSL) Accumulating Here!
+                                            \                      ▼
+                                             \                 [ LIQUIDITY PURGE / SWEEP ]
+                                              \                 Spikes to 1.2865! (Grabs BSL)
+                                               \                ▲
+                                                \              ┌┴┐ Bearish Rejection Wick!
+                                                 \             │█│ Closes back BELOW 1.2850!
+                                                  \____________│█│ ◄── INSTITUTIONAL SELL ENTRY!
+                                                               └┬┘
+                                                                ▼
+                                                        CRASHES 70 PIPS TO SSL!`
+        },
+        realWorldExample: {
+          pair: 'XAU/USD (Gold) M15',
+          context: 'Gold formed equal highs at 2040.00 during Asian session, prompting retail traders to place Sell Limit orders and Buy Stops at 2043.',
+          setup: 'At 10:30 AM EAT London open, price spiked to 2043.50, sweeping the BSL, and printed an M15 shooting star pinbar closing at 2038.',
+          outcome: 'Entered Short at 2037.50 with SL at 2044.50. Price collapsed to 2020.00 (+175 pips, 1:4.8 RRR).',
+          keyTakeaway: 'When retail traders see "strong resistance", institutions see an appetizing pool of stop losses.'
+        },
+        actionableChecklist: [
+          'Mark Previous Day High (PDH) and Previous Day Low (PDL) on every pair at 09:00 AM EAT.',
+          'Mark obvious Equal Highs (EQH) and Equal Lows (EQL) with horizontal rays labeled "BSL" and "SSL".',
+          'Do NOT trade breakouts of equal highs unless accompanied by confirmed displacement and macro news drivers.'
+        ]
+      },
+      {
+        id: 'sv-14',
+        number: '14',
+        title: 'ICT Masterclass: Market Structure Shift (MSS) vs False CHoCH with Displacement',
+        levelTag: 'Advanced',
+        duration: '20 mins',
+        summary: 'Distinguish between a deceitful wick sweep and a genuine algorithmic displacement that confirms an institutional change in trend.',
+        concept: 'Many traders lose money trying to trade every "Change of Character" (CHoCH) they see on 1-minute or 5-minute charts. Most of these are merely liquidity sweeps or internal consolidation wicks. A genuine ICT Market Structure Shift (MSS) requires "Displacement"—an energetic, forceful price move characterized by consecutive large-bodied candles that close with authority past the swing point and leave an unmitigated Fair Value Gap behind. Without displacement and an FVG, a break is presumed to be a trap.',
+        bulletPoints: [
+          'Wick vs Body Rule: A wick beyond a swing high/low is a LIQUIDITY SWEEP. Only a solid candle BODY close confirms MSS.',
+          'Displacement Signature: Wide-range candles with minimal wicks, demonstrating institutional commitment.',
+          'FVG Prerequisite: A valid MSS MUST leave an unmitigated Fair Value Gap in the displacement leg.',
+          'Higher Timeframe Alignment: An M15 MSS is only tradeable if it occurs at a Higher Timeframe (H1/H4) Key Level or Liquidity Pool.'
+        ],
+        illustration: {
+          type: 'chart',
+          title: 'False Wick Sweep vs Genuine MSS with Displacement',
+          caption: 'Visual Identification of True Institutional Shifts',
+          content: `Scenario A: FALSE BREAKOUT (Liquidity Sweep Trap)
+        Swing High: 1.2800 ───┬──────────────────┐
+                              │ Wick spikes to   │  Candle closes back at 1.2790!
+                              │ 1.2808 then wicks│  NO BODY CLOSE = NO MSS!
+                              ▼                  ▼  (Trap for retail breakout buyers)
+
+Scenario B: GENUINE MARKET STRUCTURE SHIFT (MSS)
+        Swing High: 1.2800 ───┬──────────────────┐
+                              │                  │
+                              │ Huge Green Body  │  Closes at 1.2835 with authority!
+                              │ Displaces Market │  Leaves Fair Value Gap below!
+                              ▼                  ▼  ═══════════════════════════════
+                                                    GENUINE MSS CONFIRMED!
+                                                    Wait for FVG retest to buy!`
+        },
+        realWorldExample: {
+          pair: 'USD/JPY M15',
+          context: 'USD/JPY had been in a downtrend. At 156.00 key level, an M15 candle closed with a large body above 156.40, leaving an FVG.',
+          setup: 'Trader waited for price to pull back into the M15 FVG at 156.20 and entered Long with 18-pip stop loss.',
+          outcome: 'Price surged 110 pips over the next 4 hours to 157.30.',
+          keyTakeaway: 'Displacement is the signature of institutional algorithms. Never trade structure shifts without it.'
+        },
+        actionableChecklist: [
+          'Look for displacement candles that are 2x to 3x larger than the average recent candle size.',
+          'Confirm that the displacement leg left behind an open Fair Value Gap.',
+          'Wait for price to retrace into the FVG before placing your limit order.'
+        ]
+      },
+      {
+        id: 'sv-15',
+        number: '15',
+        title: 'ICT Masterclass: Optimal Trade Entry (OTE 62%-79%) & London/NY Killzones',
+        levelTag: 'Advanced',
+        duration: '26 mins',
+        summary: 'Combine Fibonacci discount pricing (0.618 - 0.705 - 0.786) with the London (10:00-12:00 EAT) and NY (15:30-17:30 EAT) Killzone clocks.',
+        concept: 'Price without Time is meaningless; Time without Price is useless. In ICT methodology, institutional high-frequency algorithms execute during specific time windows called "Killzones". Outside these killzones, algorithms consolidate and engineer liquidity. Inside the London Killzone (10:00 - 12:00 EAT) and New York Killzone (15:30 - 17:30 EAT), algorithms expand price into discount/premium value areas. The Optimal Trade Entry (OTE) is the 0.618 to 0.786 Fibonacci retracement of the displacement impulse, with 0.705 acting as the sweet spot.',
+        bulletPoints: [
+          'London Killzone (10:00 - 12:00 EAT): Look for the Judas Swing (false move sweeping Asian High/Low) into OTE.',
+          'New York Killzone (15:30 - 17:30 EAT): London/NY overlap brings peak interbank liquidity. Perfect for trend continuation or reversal.',
+          'OTE Golden Pocket: 0.618 (Deep Discount), 0.705 (ICT Sweet Spot), 0.786 (Extreme Discount).',
+          'Equilibrium (0.50): Never buy above 0.50 (Premium); never sell below 0.50 (Discount).'
+        ],
+        illustration: {
+          type: 'steplist',
+          title: 'The Time + Price Institutional Execution Blueprint',
+          caption: 'Nairobi Time (EAT) Institutional Schedule',
+          content: `03:00 - 10:00 EAT: ASIAN ACCUMULATION
+   └── Asian High and Low marked as liquidity pools. No trade zone.
+
+10:00 - 12:00 EAT: LONDON KILLZONE (JUDAS SWING & EXPANSION)
+   └── 10:15 EAT: Judas Swing spikes through Asian High (Sweeps Buy Stops).
+   └── 10:45 EAT: M15 MSS prints downward displacement with an FVG!
+   └── 11:15 EAT: Price retraces into the 0.705 OTE Golden Pocket.
+   └── EXECUTION: SELL ENTRY! Target Asian Low & Daily ADR.
+
+15:30 - 17:30 EAT: NEW YORK KILLZONE (CONTINUATION / REVERSAL)
+   └── US Macro news release at 15:30 EAT.
+   └── Retracement into London afternoon FVG -> Second high-probability leg!`
+        },
+        realWorldExample: {
+          pair: 'GBP/USD M15',
+          context: 'At 10:30 AM EAT, London open pushed price to 1.29656, sweeping Asian High. M15 candle closed back at 1.29169.',
+          setup: 'Fibonacci pulled from 1.2885 (low) to 1.2965 (high). Retracement tapped 0.705 OTE at 1.2908 with 20 EMA confluence.',
+          outcome: 'Sold at 1.2915 with SL at 1.2970. Price plummeted to 1.2850 (+65 pips, 1:3.2 RRR).',
+          keyTakeaway: 'Trading inside the Killzones guarantees you trade alongside institutional liquidity, never against it.'
+        },
+        actionableChecklist: [
+          'Set a daily alarm on your phone for 09:50 AM EAT to prepare for the London Killzone.',
+          'Set an alarm for 15:15 PM EAT to prepare for the New York Killzone.',
+          'Apply Fibonacci Retracement only on displacement waves and execute at the 0.62 - 0.79 OTE zone.'
         ]
       }
     ]
