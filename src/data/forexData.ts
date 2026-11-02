@@ -83,6 +83,34 @@ export const BROKERS: BrokerInfo[] = [
     bestFor: 'Cent-account traders testing automated EA bots on ultra-high offshore leverage.',
     demoUrl: 'https://fbs.com/',
     realUrl: 'https://fbs.com/'
+  },
+  {
+    id: 'exness',
+    name: 'Exness',
+    badge: 'Global Tier-1 / Raw Spread',
+    cmaLicensed: false,
+    regulation: 'FSA Seychelles, CBCS Curaçao, FSC BVI, FSCA South Africa, CySEC Europe',
+    mpesaSupport: 'Instant M-Pesa automated gateway (Instant 24/7 deposits & withdrawals, 0% fee)',
+    minDeposit: '$10 (Approx 1,300 KES)',
+    baseSpread: 0.6,
+    currentSpread: 0.6,
+    leverage: 'Up to 1:2000 / Unlimited (Dynamic Margin)',
+    maxLeverageRatio: 2000,
+    platforms: ['MT4', 'MT5', 'Exness Terminal', 'Exness Trade App'],
+    trustScore: 9.4,
+    pros: [
+      'Raw Spread & Pro accounts with near-zero 0.0 - 0.6 pip spreads on EUR/USD',
+      'Instant automated M-Pesa withdrawals processed by computer algorithm in under 3 minutes',
+      'Negative balance protection and stop-out protection algorithm for volatile sessions',
+      'Unlimited dynamic leverage for low-capital micro lot precision trading'
+    ],
+    cons: [
+      'Not CMA licensed in Kenya (regulated by FSCA South Africa and CySEC Europe)',
+      'Unlimited leverage requires discipline: strictly obey the Gilgil $2 capital shield rule'
+    ],
+    bestFor: 'High-speed algorithmic EA execution, scalpers needing ultra-raw spreads and instant M-Pesa.',
+    demoUrl: 'https://www.exness.com/',
+    realUrl: 'https://www.exness.com/'
   }
 ];
 
@@ -94,6 +122,7 @@ export const PAIRS_PRESETS: Record<CurrencyPair, { defaultPrice: number; pipDeci
   'XAU/USD': { defaultPrice: 2742.50, pipDecimals: 2, pipValueKes: 130 },
   'AUD/USD': { defaultPrice: 0.6580, pipDecimals: 4, pipValueKes: 130 },
   'USD/CAD': { defaultPrice: 1.3890, pipDecimals: 4, pipValueKes: 120 },
+  'BTC/USD': { defaultPrice: 68450.00, pipDecimals: 2, pipValueKes: 130 },
 };
 
 // Gilgil Historical Case Studies

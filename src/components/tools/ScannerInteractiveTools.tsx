@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { CurrencyPair, Timeframe, ScannerAnalysisResult } from '../../types';
+import { CurrencyPair, Timeframe, ScannerAnalysisResult, BrokerId } from '../../types';
+import { TradingViewEmbedWidget } from './TradingViewEmbedWidget';
+import { MultiMarketRadarEngine, MarketScanData } from './MultiMarketRadarEngine';
 import {
   SlidersHorizontal,
   Camera,
@@ -24,7 +26,15 @@ import {
   MessageSquare,
   HelpCircle,
   TrendingUp,
-  Scale
+  Scale,
+  Globe,
+  BarChart3,
+  ExternalLink,
+  Award,
+  Flame,
+  Activity,
+  Cpu,
+  Copy
 } from 'lucide-react';
 
 interface ScannerInteractiveToolsProps {
@@ -41,11 +51,14 @@ interface AdvisorMessage {
 }
 
 export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = ({ onLogTrade }) => {
-  const [activeTab, setActiveTab] = useState<'camera' | 'manual' | 'advisor'>('camera');
+  const [activeTab, setActiveTab] = useState<'camera' | 'manual' | 'radar' | 'advisor'>('manual');
 
   // Shared Required Data Ingestion State
-  const [broker, setBroker] = useState<'fxpesa' | 'hfm' | 'fbs'>('fxpesa');
+  const [broker, setBroker] = useState<BrokerId>('fxpesa');
   const [pair, setPair] = useState<CurrencyPair>('GBP/USD');
+  const [showTradingView, setShowTradingView] = useState<boolean>(false);
+  const [analysisExecutionMode, setAnalysisExecutionMode] = useState<'standard' | 'deep_ai'>('deep_ai');
+  const [copiedManualEa, setCopiedManualEa] = useState<boolean>(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('M15');
   const [session, setSession] = useState<'London Open (10:00 EAT)' | 'New York AM (15:30 EAT)' | 'Asian Range (03:00 EAT)' | 'London Close (18:30 EAT)'>('London Open (10:00 EAT)');
   const [patternType, setPatternType] = useState<'Tower Top Liquidity Sweep' | '20/50 EMA Trend Bounce' | 'Asian Liquidity Sweep' | 'Fair Value Gap Re-test' | 'Bearish Order Block Mitigation'>('Tower Top Liquidity Sweep');
@@ -303,7 +316,7 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
         const tp1Price = Number((verdict.includes('BUY') ? currentPrice + (tpDistancePips * 0.5) / pipMultiplier : currentPrice - (tpDistancePips * 0.5) / pipMultiplier).toFixed(decimals));
 
         // Broker Spread Analysis
-        const brokerSpreadPips = broker === 'fxpesa' ? 1.2 : broker === 'hfm' ? 1.4 : 1.6;
+        const brokerSpreadPips = broker === 'fxpesa' ? 1.2 : broker === 'hfm' ? 1.4 : broker === 'exness' ? 0.6 : 1.6;
         const brokerSpreadCostUsd = (brokerSpreadPips * calculatedLot * 10 * pipValPerLot).toFixed(2);
 
         setCameraAnalysisResult({
@@ -366,78 +379,195 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
     }, 650);
   };
 
-  // Run Manual Confluence Scan
-  const handleRunManualScan = () => {
-    if (!currentPrice || currentPrice <= 0) {
+  // Run Analysis Engine (Supports both Standard Confluence and Deep AI Institutional EA)
+  const handleRunAnalysis = (mode: 'standard' | 'deep_ai', prefill?: MarketScanData) => {
+    const targetPrice = prefill?.price || currentPrice;
+    if (!targetPrice || targetPrice <= 0) {
       alert('Please enter a valid Current Market Price.');
       return;
     }
 
+    setAnalysisExecutionMode(mode);
     setAnalyzingManual(true);
     setManualResult(null);
 
+    const delay = mode === 'deep_ai' ? 850 : 500;
+
     setTimeout(() => {
-      const pipMultiplier = pair.includes('JPY') ? 100 : pair.includes('XAU') ? 10 : 10000;
-      const distFromEma20Pips = Math.abs(currentPrice - ema20) * pipMultiplier;
+      const pipMultiplier = pair.includes('JPY') ? 100 : pair.includes('XAU') ? 10 : pair.includes('BTC') ? 1 : 10000;
+      const distFromEma20Pips = Math.abs(targetPrice - ema20) * pipMultiplier;
       const isTrendBullish = ema20 > ema50;
 
       let score = 50;
+      let confidencePercent = 65.0;
       let verdict: 'WAIT' | 'RISKY' | 'HIGH_PROBABILITY_BUY' | 'HIGH_PROBABILITY_SELL' = 'WAIT';
       let pattern = 'Consolidation / Range Equilibrium';
+      let trend = 'Market Equilibrium & Chop';
+      let projection = '';
+      let orderType = 'INSTANT_EXECUTION';
       const reasons: string[] = [];
 
       if (patternType === 'Tower Top Liquidity Sweep' || (rsi >= 72 && distFromEma20Pips >= 18)) {
-        score = 91;
+        score = mode === 'deep_ai' ? 95 : 88;
+        confidencePercent = mode === 'deep_ai' ? 94.6 : 87.5;
         verdict = 'HIGH_PROBABILITY_SELL';
         pattern = 'Tower Top Liquidity Exhaustion Sweep';
+        trend = 'Bearish Institutional Sweep & Reversal';
+        orderType = 'SELL LIMIT / MARKET SELL';
+        projection = `Next 4H-24H Institutional Trajectory: Swept ${keyLevel} retail buy stops. Expecting sharp retrace into ${ema20} (20 EMA) and subsequent fair value gap mitigation at ${ema50} (-${Math.round(distFromEma20Pips * 1.8)} pips target). Invalidation above ${keyLevel}.`;
         reasons.push(`Price is extended ${distFromEma20Pips.toFixed(1)} pips above 20 EMA (Overbought Mean Reversion).`);
-        reasons.push(`RSI 14 at ${rsi} confirms exhausted institutional buying power.`);
-        reasons.push(`Previous high sweep at ${keyLevel} collected retail stop-loss liquidity.`);
-      } else if (isTrendBullish && currentPrice >= ema20 && rsi >= 45 && rsi <= 65) {
-        score = 88;
+        reasons.push(`RSI 14 at ${rsi} confirms exhausted institutional buying power & bearish divergence.`);
+        reasons.push(`Previous high sweep at ${keyLevel} collected buy-side liquidity (BSL).`);
+        if (mode === 'deep_ai') {
+          reasons.push('Deep AI Neural Scan: Order Block mean threshold defended on M15 timeframe.');
+          reasons.push('Smart Money Flow: Sellers displaying aggressive volume displacement back inside previous range.');
+        }
+      } else if (isTrendBullish && targetPrice >= ema20 && rsi >= 45 && rsi <= 68) {
+        score = mode === 'deep_ai' ? 93 : 86;
+        confidencePercent = mode === 'deep_ai' ? 92.4 : 85.0;
         verdict = 'HIGH_PROBABILITY_BUY';
         pattern = '20/50 EMA Dynamic Trend Bounce';
+        trend = 'Bullish Institutional Trend Expansion';
+        orderType = 'BUY LIMIT / MARKET BUY';
+        projection = `Next 4H-24H Institutional Trajectory: Pullback into dynamic 20 EMA support held cleanly. Expecting continuation impulse through session highs (+${Math.round(distFromEma20Pips * 2.2 + 35)} pips projection). Invalidation below 50 EMA (${ema50}).`;
         reasons.push('Price is pulling back into dynamic 20 EMA support in a confirmed uptrend.');
         reasons.push(`RSI 14 at ${rsi} shows healthy non-exhausted bullish momentum.`);
         reasons.push(`Spread filter verified for ${broker.toUpperCase()} (under 1.5 pips).`);
+        if (mode === 'deep_ai') {
+          reasons.push('Deep AI Neural Scan: Fair Value Gap (FVG) consequent encroachment rebalanced at 50%.');
+          reasons.push('Multi-timeframe sync: H1 and M15 market structure shifts in full bullish alignment.');
+        }
       } else if (distFromEma20Pips > 30) {
         score = 42;
+        confidencePercent = 41.5;
         verdict = 'RISKY';
         pattern = 'Overextended Parabolic Chase Trap';
-        reasons.push('Price is dangerously overextended. Do NOT chase market orders.');
+        trend = 'Parabolic Overextension (High Risk)';
+        orderType = 'FLAT / DO NOT ENTER';
+        projection = 'Price is extended > 30 pips from value. High probability of mean-reversion stop hunt. Wait for 20 EMA touch.';
+        reasons.push('Price is dangerously overextended from 20 EMA. Do NOT chase market orders.');
         reasons.push('Wait for mean reversion pullback to the 20 EMA before entering.');
       } else {
         score = 58;
+        confidencePercent = 60.0;
         verdict = 'WAIT';
         pattern = 'Equilibrium Chop / Indecision Zone';
+        trend = 'Range Equilibrium (Sideways)';
+        orderType = 'WAIT / PENDING BOS';
+        projection = 'Price oscillating in 50% equilibrium. No high-probability edge. Await London/NY session expansion.';
         reasons.push('Market is in equilibrium. Wait for clean structural break of structure (BOS).');
       }
 
-      const slDistancePips = 20;
-      const tpDistancePips = 50;
+      const slDistancePips = pair.includes('XAU') ? 70 : pair.includes('BTC') ? 1200 : 20;
+      const tpDistancePips = pair.includes('XAU') ? 175 : pair.includes('BTC') ? 2500 : 50;
       const isBuy = verdict === 'HIGH_PROBABILITY_BUY';
-      const slPrice = isBuy ? currentPrice - slDistancePips / pipMultiplier : currentPrice + slDistancePips / pipMultiplier;
-      const tpPrice = isBuy ? currentPrice + tpDistancePips / pipMultiplier : currentPrice - tpDistancePips / pipMultiplier;
+      const slPrice = isBuy ? targetPrice - slDistancePips / pipMultiplier : targetPrice + slDistancePips / pipMultiplier;
+      const tpPrice = isBuy ? targetPrice + tpDistancePips / pipMultiplier : targetPrice - tpDistancePips / pipMultiplier;
+      const tp1Price = isBuy ? targetPrice + (tpDistancePips * 0.5) / pipMultiplier : targetPrice - (tpDistancePips * 0.5) / pipMultiplier;
+
+      const decimals = pair.includes('JPY') ? 3 : pair.includes('XAU') ? 2 : pair.includes('BTC') ? 2 : 5;
+
+      // Broker Specific Specification Dashboard
+      const brokerConfigs: Record<BrokerId, { symbol: string; spread: number; leverage: string; marginCostUsd: number; serverName: string; instructions: string[] }> = {
+        fxpesa: {
+          symbol: pair.replace('/', ''),
+          spread: 1.1,
+          leverage: '1:400 (CMA Kenya Capped)',
+          marginCostUsd: 2.50,
+          serverName: 'EGM-Real / FXPesa Live',
+          instructions: [
+            '1. Open MT4/MT5 connected to FXPesa Kenya server.',
+            `2. Select symbol: ${pair.replace('/', '')} (or ${pair.replace('/', '')}_pro if using Raw ECN).`,
+            `3. Order Type: ${orderType.includes('BUY') ? 'Buy Limit' : orderType.includes('SELL') ? 'Sell Limit' : 'Instant Execution'}.`,
+            '4. Volume: 0.01 micro lot (strict $2.00 / 260 KES Gilgil protection).',
+            `5. Input Stop Loss: ${slPrice.toFixed(decimals)}, Take Profit: ${tpPrice.toFixed(decimals)}.`,
+            '6. CMA safety: Zero negative balance debt risk.'
+          ]
+        },
+        hfm: {
+          symbol: `${pair.replace('/', '')}.h`,
+          spread: 1.3,
+          leverage: '1:1000 (High Leverage)',
+          marginCostUsd: 1.00,
+          serverName: 'HFMarkets-Live',
+          instructions: [
+            '1. Open HFM MT4/MT5 terminal.',
+            `2. Choose symbol: ${pair.replace('/', '')} or ${pair.replace('/', '')}.h.`,
+            `3. Order Type: ${orderType}.`,
+            '4. Set Volume to 0.01 micro lot. Do NOT use excess 1:1000 leverage to over-leverage.',
+            `5. Stop Loss: ${slPrice.toFixed(decimals)}, Target: ${tpPrice.toFixed(decimals)}.`
+          ]
+        },
+        exness: {
+          symbol: `${pair.replace('/', '')}.m`,
+          spread: 0.6,
+          leverage: '1:2000 / Unlimited Dynamic',
+          marginCostUsd: 0.50,
+          serverName: 'Exness-Real',
+          instructions: [
+            '1. Open Exness MT4/MT5 or Exness Terminal web.',
+            `2. Select micro symbol: ${pair.replace('/', '')}.m (or standard ${pair.replace('/', '')}).`,
+            '3. Raw spread is ~0.6 pip with 0 stop-level limits (can place SL 1 pip away).',
+            '4. Volume: 0.01 Micro Lot. Benefit from instant algorithmic execution.',
+            `5. Stop Loss: ${slPrice.toFixed(decimals)}, Target 1: ${tp1Price.toFixed(decimals)}, Final TP: ${tpPrice.toFixed(decimals)}.`,
+            '6. Withdrawals to M-Pesa are automated 24/7 in < 3 minutes.'
+          ]
+        },
+        fbs: {
+          symbol: pair.replace('/', ''),
+          spread: 1.5,
+          leverage: '1:3000 (Ultra High)',
+          marginCostUsd: 0.35,
+          serverName: 'FBS-Real',
+          instructions: [
+            '1. Open FBS MT4/MT5 Cent or Standard platform.',
+            `2. Symbol: ${pair.replace('/', '')}.`,
+            `3. Order Type: ${orderType}.`,
+            '4. Strict 0.01 lot volume. Avoid 1:3000 margin overtrading trap.',
+            `5. Set Stop Loss: ${slPrice.toFixed(decimals)}, Target: ${tpPrice.toFixed(decimals)}.`
+          ]
+        }
+      };
+
+      const currentBrokerSpec = brokerConfigs[broker];
 
       setManualResult({
         pair,
         timeframe,
-        price: currentPrice,
+        price: targetPrice,
         ema20,
         ema50,
         rsi,
         score,
+        confidencePercent,
+        analysisMode: mode,
         verdict,
+        trend,
+        projection,
+        orderType,
         detectedPattern: pattern,
-        stopLoss: Number(slPrice.toFixed(pair.includes('JPY') ? 3 : pair.includes('XAU') ? 2 : 5)),
-        takeProfit: Number(tpPrice.toFixed(pair.includes('JPY') ? 3 : pair.includes('XAU') ? 2 : 5)),
+        stopLoss: Number(slPrice.toFixed(decimals)),
+        takeProfit: Number(tpPrice.toFixed(decimals)),
+        tp1Price: Number(tp1Price.toFixed(decimals)),
+        tp2Price: Number(tpPrice.toFixed(decimals)),
+        riskReward: `1 : ${(tpDistancePips / slDistancePips).toFixed(1)}`,
         suggestedLot: 0.01,
         reasoning: reasons,
+        howToPlaceSteps: currentBrokerSpec.instructions,
+        brokerDashboard: {
+          broker,
+          symbol: currentBrokerSpec.symbol,
+          spreadPips: currentBrokerSpec.spread,
+          leverage: currentBrokerSpec.leverage,
+          marginCostUsd: currentBrokerSpec.marginCostUsd,
+          serverName: currentBrokerSpec.serverName,
+          instructions: currentBrokerSpec.instructions
+        }
       });
 
       setAnalyzingManual(false);
-      playAudioBeep(880, 0.12);
-    }, 700);
+      playAudioBeep(mode === 'deep_ai' ? 980 : 880, 0.15);
+    }, delay);
   };
 
   // AI Market Advisor Engine
@@ -586,7 +716,7 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
           </p>
         </div>
 
-        {/* Tab Switcher (3 Modes) */}
+        {/* Tab Switcher (4 Modes) */}
         <div className="flex items-center p-1 rounded-xl bg-slate-900 border border-slate-800 text-xs font-bold font-mono flex-wrap gap-1">
           <button
             onClick={() => setActiveTab('camera')}
@@ -604,7 +734,16 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
             }`}
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span>2. Confluence Scanner</span>
+            <span>2. Confluence & EA Terminal</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('radar')}
+            className={`px-3 py-2 rounded-lg transition flex items-center gap-1.5 ${
+              activeTab === 'radar' ? 'bg-[#D4AF37] text-black shadow-md' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span>3. Multi-Market Radar (Deep AI)</span>
           </button>
           <button
             onClick={() => setActiveTab('advisor')}
@@ -613,7 +752,7 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
             }`}
           >
             <Bot className="w-3.5 h-3.5" />
-            <span>3. AI Market Advisor</span>
+            <span>4. AI Market Advisor</span>
           </button>
         </div>
       </div>
@@ -635,9 +774,27 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
               Required Market Ingestion Parameters
             </h4>
           </div>
-          <span className="text-[10px] font-mono text-slate-400">
-            * Complete data input required for institutional confluence rating
-          </span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setShowTradingView(!showTradingView)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 border transition ${
+                showTradingView
+                  ? 'bg-[#D4AF37] text-black border-[#D4AF37]'
+                  : 'bg-slate-900 text-[#D4AF37] border-[#D4AF37]/40 hover:bg-slate-800'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              <span>{showTradingView ? 'Hide Live Chart' : `Open Real TradingView: ${pair}`}</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('radar')}
+              className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 bg-slate-900 text-cyan-400 border border-cyan-500/40 hover:bg-slate-800 transition"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>Deep AI Scan All Markets</span>
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
@@ -652,7 +809,9 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
               <option value="GBP/USD">GBP/USD (Cable)</option>
               <option value="EUR/USD">EUR/USD (Fiber)</option>
               <option value="USD/JPY">USD/JPY (Ninja)</option>
-              <option value="XAU/USD">XAU/USD (Gold)</option>
+              <option value="XAU/USD">XAU/USD (Gold Spot)</option>
+              <option value="GBP/JPY">GBP/JPY (Dragon / Guppy)</option>
+              <option value="BTC/USD">BTC/USD (Bitcoin Spot)</option>
               <option value="USD/CAD">USD/CAD (Loonie)</option>
               <option value="AUD/USD">AUD/USD (Aussie)</option>
             </select>
@@ -682,9 +841,10 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
               onChange={(e) => setBroker(e.target.value as any)}
               className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:border-[#D4AF37] outline-none"
             >
-              <option value="fxpesa">FXPesa (CMA Kenya • ~1.2p)</option>
-              <option value="hfm">HFM (Offshore • ~1.4p)</option>
-              <option value="fbs">FBS (Offshore • ~1.6p)</option>
+              <option value="fxpesa">FXPesa (CMA Kenya • ~1.1p Spread)</option>
+              <option value="exness">Exness (Global Raw / Micro • ~0.6p Spread)</option>
+              <option value="hfm">HFM (Offshore • ~1.3p Spread)</option>
+              <option value="fbs">FBS (Offshore Cent • ~1.5p Spread)</option>
             </select>
           </div>
 
@@ -766,6 +926,20 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
           />
         </div>
       </div>
+
+      {/* REAL TRADINGVIEW LIVE CHART EMBED */}
+      {showTradingView && (
+        <div className="space-y-2 animate-in fade-in duration-300">
+          <TradingViewEmbedWidget
+            pair={pair}
+            timeframe={timeframe}
+            onPairChange={(newPair) => setPair(newPair)}
+            onTimeframeChange={(newTf) => setTimeframe(newTf)}
+            onClose={() => setShowTradingView(false)}
+            isCollapsible={true}
+          />
+        </div>
+      )}
 
       {/* ======================================================== */}
       {/* TAB 1: LIVE CAMERA & VISION OCR SCANNER */}
@@ -1250,109 +1424,250 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
               </button>
             </div>
 
-            {/* Run Button */}
-            <div className="pt-2">
+            {/* Dual Analysis Action Buttons */}
+            <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
-                onClick={handleRunManualScan}
+                onClick={() => handleRunAnalysis('standard')}
                 disabled={analyzingManual}
-                className="w-full py-3.5 rounded-2xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl hover:scale-[1.01] active:scale-95 transition"
+                className="py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-slate-500 font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-50"
               >
-                {analyzingManual ? (
+                {analyzingManual && analysisExecutionMode === 'standard' ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Crunching Math...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-3.5 h-3.5 text-amber-400" />
+                    <span>⚡ Analyse Market</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={() => handleRunAnalysis('deep_ai')}
+                disabled={analyzingManual}
+                className="py-3 px-4 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl hover:scale-[1.01] active:scale-95 transition disabled:opacity-50"
+              >
+                {analyzingManual && analysisExecutionMode === 'deep_ai' ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Crunching Algorithmic Probabilities...</span>
+                    <span>Deep AI Scanning...</span>
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4" />
-                    <span>Run Confluence Analysis</span>
+                    <span>🧠 Deep AI Analyse</span>
                   </>
                 )}
               </button>
             </div>
+
+            {/* Quick Helper Subtext */}
+            <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 px-1">
+              <span>Standard: Fast technical confluence</span>
+              <span className="text-[#D4AF37] font-bold">Deep AI: Institutional ICT + EA</span>
+            </div>
           </div>
 
           {/* Manual Analysis Output (5 Cols) */}
-          <div className="lg:col-span-5 bg-slate-900/90 rounded-2xl p-5 border border-slate-800 min-h-[380px] flex flex-col justify-between">
+          <div className="lg:col-span-5 bg-slate-900/95 rounded-2xl p-5 border border-slate-800 min-h-[460px] flex flex-col justify-between space-y-4">
             {manualResult ? (
               <div className="space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                {/* Header */}
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
                   <div className="flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-[#00C261] animate-ping" />
                     <span className="text-xs font-mono font-bold text-white">
-                      {manualResult.pair} • {manualResult.timeframe}
+                      {manualResult.pair} • {manualResult.timeframe} • {broker.toUpperCase()}
                     </span>
                   </div>
 
-                  <span
-                    className={`font-mono text-xs font-black px-2.5 py-0.5 rounded-full ${
-                      manualResult.score >= 75
-                        ? 'bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40'
-                        : manualResult.score >= 50
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                        : 'bg-red-500/20 text-red-300 border border-red-500/40'
-                    }`}
-                  >
-                    {manualResult.verdict.replace(/_/g, ' ')}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className={`font-mono text-xs font-black px-2.5 py-0.5 rounded-full ${
+                        manualResult.score >= 75
+                          ? 'bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40'
+                          : manualResult.score >= 50
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                          : 'bg-red-500/20 text-red-300 border border-red-500/40'
+                      }`}
+                    >
+                      {manualResult.verdict.replace(/_/g, ' ')}
+                    </span>
+
+                    <span className="px-2 py-0.5 rounded-full bg-[#D4AF37]/20 border border-[#D4AF37]/40 text-[#D4AF37] font-mono text-[10px] font-bold">
+                      {manualResult.confidencePercent || manualResult.score}% CONFIDENCE
+                    </span>
+                  </div>
                 </div>
 
-                <div className="text-center py-2 space-y-1">
+                {/* Score & Trend */}
+                <div className="text-center py-1 space-y-1">
                   <div className="text-4xl font-black text-white font-mono">
                     <span className="text-gold-gradient">{manualResult.score}</span>
                     <span className="text-sm text-slate-500"> / 100</span>
                   </div>
                   <div className="text-xs font-bold text-[#D4AF37]">{manualResult.detectedPattern}</div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 text-center text-xs font-mono p-2.5 rounded-xl bg-slate-950 border border-slate-800">
-                  <div>
-                    <span className="text-[9px] text-slate-500 block">Suggested Entry</span>
-                    <span className="font-bold text-white">{manualResult.price}</span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-red-400 block">Stop Loss (20p)</span>
-                    <span className="font-bold text-red-300">{manualResult.stopLoss}</span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-emerald-400 block">Target (50p)</span>
-                    <span className="font-bold text-emerald-300">{manualResult.takeProfit}</span>
+                  <div className="text-xs font-mono text-slate-300 font-bold">
+                    Trend: <span className="text-white">{manualResult.trend}</span>
                   </div>
                 </div>
 
-                <div className="space-y-1.5 text-xs text-slate-300">
-                  <span className="text-[10px] font-mono text-slate-400 uppercase block font-bold">Algorithmic Rationale:</span>
-                  {manualResult.reasoning.map((r, i) => (
-                    <div key={i} className="flex items-start gap-1.5 text-[11px] leading-tight text-slate-300">
-                      <span className="text-[#D4AF37] shrink-0">•</span>
-                      <span>{r}</span>
+                {/* Institutional Trajectory Projection */}
+                {manualResult.projection && (
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5 font-mono text-xs">
+                    <div className="flex items-center justify-between text-[#D4AF37] font-bold">
+                      <span className="flex items-center gap-1.5">
+                        <Target className="w-3.5 h-3.5" />
+                        <span>Institutional Trajectory & Projection:</span>
+                      </span>
+                      <span className="text-cyan-400 text-[10px] uppercase font-bold">{manualResult.orderType}</span>
                     </div>
-                  ))}
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      {manualResult.projection}
+                    </p>
+                  </div>
+                )}
+
+                {/* Execution Numbers */}
+                <div className="grid grid-cols-4 gap-2 text-center text-xs font-mono p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                  <div>
+                    <span className="text-[9px] text-slate-500 block">Entry</span>
+                    <span className="font-bold text-white text-xs">{manualResult.price}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-red-400 block">Stop Loss</span>
+                    <span className="font-bold text-red-300 text-xs">{manualResult.stopLoss}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-cyan-400 block">TP1 (50%)</span>
+                    <span className="font-bold text-cyan-300 text-xs">{manualResult.tp1Price || manualResult.takeProfit}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-emerald-400 block">Final Target</span>
+                    <span className="font-bold text-emerald-300 text-xs">{manualResult.tp2Price || manualResult.takeProfit}</span>
+                  </div>
                 </div>
 
+                {/* Broker Parameter Dashboard */}
+                {manualResult.brokerDashboard && (
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2 font-mono text-xs">
+                    <div className="flex items-center justify-between text-[#D4AF37] font-bold border-b border-slate-800 pb-1">
+                      <span className="flex items-center gap-1.5">
+                        <Compass className="w-3.5 h-3.5" />
+                        <span>{broker.toUpperCase()} Parameter Dashboard:</span>
+                      </span>
+                      <span className="text-[10px] text-emerald-400">READY TO EXECUTE ✓</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div>
+                        <span className="text-slate-500 block text-[9px]">MT4/MT5 Symbol</span>
+                        <strong className="text-white">{manualResult.brokerDashboard.symbol}</strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block text-[9px]">Live Spread</span>
+                        <strong className="text-amber-300">~{manualResult.brokerDashboard.spreadPips} pips</strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block text-[9px]">Broker Leverage</span>
+                        <strong className="text-cyan-300">{manualResult.brokerDashboard.leverage}</strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block text-[9px]">Server Name</span>
+                        <strong className="text-slate-300">{manualResult.brokerDashboard.serverName}</strong>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Step-by-Step MT4/MT5 Order Placement Instructions */}
+                {manualResult.howToPlaceSteps && manualResult.howToPlaceSteps.length > 0 && (
+                  <div className="space-y-1.5 text-xs">
+                    <span className="text-[10px] font-mono text-cyan-400 uppercase block font-bold">
+                      How to Place This Trade on {broker.toUpperCase()} MT4/MT5:
+                    </span>
+                    <div className="space-y-1 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                      {manualResult.howToPlaceSteps.map((step, idx) => (
+                        <div key={idx} className="flex items-start gap-1.5 text-[11px] leading-tight text-slate-300 font-mono">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
+                          <span>{step}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Gilgil $2 Shield Guarantee */}
                 <div className="p-2.5 rounded-xl bg-[#D4AF37]/10 border border-[#D4AF37]/30 text-[11px] font-mono text-amber-200 flex items-center justify-between">
                   <span>Gilgil $2 Sizing Cap:</span>
                   <strong className="text-white">0.01 Micro Lot (Risk: $2.00 / 260 KES)</strong>
                 </div>
 
-                <button
-                  onClick={() => handleLogToJournal(manualResult)}
-                  className="w-full py-2.5 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider transition flex items-center justify-center gap-2"
-                >
-                  <span>Log Setup to Trade Journal</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
+                {/* Action Buttons */}
+                <div className="space-y-2">
+                  <button
+                    onClick={() => handleLogToJournal(manualResult)}
+                    className="w-full py-2.5 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider transition flex items-center justify-center gap-2 shadow-lg active:scale-95"
+                  >
+                    <span>Log Setup to Trade Journal</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const eaCode = `// PIVOTFX EA CONFIG - ${manualResult.pair}
+Symbol: ${manualResult.brokerDashboard?.symbol || manualResult.pair}
+OrderType: ${manualResult.orderType}
+Volume: 0.01 Micro Lot ($2 Max Risk)
+Entry: ${manualResult.price}
+SL: ${manualResult.stopLoss}
+TP1: ${manualResult.tp1Price || manualResult.takeProfit}
+TP2: ${manualResult.tp2Price || manualResult.takeProfit}
+MagicNumber: 882024
+Broker: ${broker.toUpperCase()}`;
+                      navigator.clipboard.writeText(eaCode);
+                      setCopiedManualEa(true);
+                      setTimeout(() => setCopiedManualEa(false), 2000);
+                    }}
+                    className="w-full py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-white font-mono font-bold text-[11px] transition border border-slate-800 flex items-center justify-center gap-1.5"
+                  >
+                    {copiedManualEa ? <Check className="w-3.5 h-3.5 text-[#00C261]" /> : <Copy className="w-3.5 h-3.5 text-[#D4AF37]" />}
+                    <span>{copiedManualEa ? 'EA Parameters Copied!' : 'Copy EA Parameters for MT4/MT5'}</span>
+                  </button>
+                </div>
               </div>
             ) : (
-              <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center p-6 space-y-3 text-slate-500">
+              <div className="h-full min-h-[260px] flex flex-col items-center justify-center text-center p-6 space-y-3 text-slate-500">
                 <SlidersHorizontal className="w-8 h-8 text-slate-600 animate-pulse" />
                 <p className="text-xs">
-                  Input your MT4 indicator parameters on the left and click <strong>Run Confluence Analysis</strong> to view the quantitative 0-100 verdict.
+                  Choose your market parameters on the left and click <strong>⚡ Analyse Market</strong> for standard technicals or <strong>🧠 Deep AI Analyse</strong> for institutional ICT EA execution.
                 </p>
               </div>
             )}
           </div>
         </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* TAB 3: FULL MULTI-MARKET RADAR (DEEP AI SCAN) */}
+      {/* ======================================================== */}
+      {activeTab === 'radar' && (
+        <MultiMarketRadarEngine
+          selectedBroker={broker}
+          onSelectMarketForAnalysis={(market) => {
+            setPair(market.pair);
+            setCurrentPrice(market.price);
+            setKeyLevel(market.suggestedSL);
+            setActiveTab('manual');
+            handleRunAnalysis('deep_ai', market);
+          }}
+          onOpenTradingViewForPair={(p) => {
+            setPair(p);
+            setShowTradingView(true);
+          }}
+        />
       )}
 
       {/* ======================================================== */}

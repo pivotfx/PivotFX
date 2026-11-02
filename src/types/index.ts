@@ -19,7 +19,7 @@ export type PageTab =
 
 export type UserPersona = 'newbie' | 'demo_losing' | 'scanner_only';
 
-export type BrokerId = 'fxpesa' | 'hfm' | 'fbs';
+export type BrokerId = 'fxpesa' | 'hfm' | 'exness' | 'fbs';
 
 export interface BrokerInfo {
   id: BrokerId;
@@ -42,7 +42,7 @@ export interface BrokerInfo {
   realUrl: string;
 }
 
-export type CurrencyPair = 'EUR/USD' | 'GBP/USD' | 'USD/JPY' | 'GBP/JPY' | 'XAU/USD' | 'AUD/USD' | 'USD/CAD';
+export type CurrencyPair = 'EUR/USD' | 'GBP/USD' | 'USD/JPY' | 'GBP/JPY' | 'XAU/USD' | 'AUD/USD' | 'USD/CAD' | 'BTC/USD';
 
 export type Timeframe = 'M1' | 'M5' | 'M15' | 'H1' | 'H4' | 'D1';
 
@@ -163,12 +163,30 @@ export interface ScannerAnalysisResult {
   ema50: number;
   rsi: number;
   score: number;
+  confidencePercent?: number;
   verdict: 'WAIT' | 'RISKY' | 'HIGH_PROBABILITY_BUY' | 'HIGH_PROBABILITY_SELL';
+  analysisMode?: 'standard' | 'deep_ai';
+  trend?: string;
+  projection?: string;
+  orderType?: string;
   detectedPattern: string;
   stopLoss: number;
   takeProfit: number;
+  tp1Price?: number;
+  tp2Price?: number;
+  riskReward?: string;
   suggestedLot: number;
   reasoning: string[];
+  howToPlaceSteps?: string[];
+  brokerDashboard?: {
+    broker: BrokerId;
+    symbol: string;
+    spreadPips: number;
+    leverage: string;
+    marginCostUsd: number;
+    serverName: string;
+    instructions: string[];
+  };
 }
 
 export interface LessonSample {
