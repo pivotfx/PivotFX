@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { MasterclassLesson, MasterclassStrategy, PageTab } from '../types';
+import { MasterclassLesson, MasterclassStrategy, PageTab, CurrencyPair, Timeframe } from '../types';
 import { MASTERCLASS_LESSONS, MASTER_STRATEGIES } from '../data/forexData';
+import { TradingViewEmbedWidget } from '../components/tools/TradingViewEmbedWidget';
+import { TradingViewNavigationGuide } from '../components/tools/TradingViewNavigationGuide';
 import {
   GraduationCap,
   Search,
@@ -30,7 +32,9 @@ import {
   Lock,
   ChevronRight,
   ExternalLink,
-  Target
+  Target,
+  BarChart3,
+  Cpu
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { PillarHeaderBar } from '../components/common/PillarHeaderBar';
@@ -42,11 +46,12 @@ interface MasterclassPageProps {
 
 export const MasterclassPage: React.FC<MasterclassPageProps> = ({ onNavigate, onAwardXp }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedBelt, setSelectedBelt] = useState<'all' | 'white' | 'blue' | 'purple' | 'black' | 'master'>('all');
+  const [selectedBelt, setSelectedBelt] = useState<'all' | 'white' | 'blue' | 'purple' | 'black' | 'master' | 'ict'>('all');
   
   // Dedicated Classroom Mode: null = Catalog View; lessonId = Inside Classroom Page View
   const [activeClassroomId, setActiveClassroomId] = useState<string | null>(null);
-  const [classroomTab, setClassroomTab] = useState<'lecture' | 'samples' | 'diagram' | 'practice' | 'quiz'>('lecture');
+  const [classroomTab, setClassroomTab] = useState<'lecture' | 'samples' | 'diagram' | 'practice' | 'quiz' | 'tradingview'>('lecture');
+  const [showTvNavModal, setShowTvNavModal] = useState(false);
 
   // Completed lesson IDs persisted in localStorage
   const [completedLessonIds, setCompletedLessonIds] = useState<string[]>(() => {
@@ -123,6 +128,7 @@ export const MasterclassPage: React.FC<MasterclassPageProps> = ({ onNavigate, on
     { id: 'purple', label: 'Advanced (Purple)', subtitle: 'Multi-Timeframe & Spreads', color: 'border-purple-500 text-purple-400 bg-purple-950/40' },
     { id: 'black', label: 'Pro / Institutional (Black)', subtitle: 'Mechanical Edge & Ethics', color: 'border-emerald-500 text-[#00C261] bg-emerald-950/40' },
     { id: 'master', label: 'Strategy Vault (Master)', subtitle: '5 Battle Strategies', color: 'border-amber-500 text-amber-400 bg-amber-950/40' },
+    { id: 'ict', label: 'ICT Institutional (Gold)', subtitle: 'FVG, Order Blocks & Silver Bullet', color: 'border-[#D4AF37] text-[#D4AF37] bg-amber-950/40' },
   ];
 
   // Active classroom lesson object if inside a classroom
@@ -245,7 +251,7 @@ export const MasterclassPage: React.FC<MasterclassPageProps> = ({ onNavigate, on
 
             {/* Right Main Column: Active Class Lecture & Workshop (8 cols) */}
             <div className="lg:col-span-8 space-y-6">
-              {/* Classroom Tabs: Lecture, Samples & Cases, Diagram, Practice, Quiz */}
+              {/* Classroom Tabs: Lecture, Samples & Cases, Diagram, Practice, Quiz, Live TradingView */}
               <div className="flex items-center gap-1.5 p-1.5 rounded-2xl bg-slate-900 border border-slate-800 overflow-x-auto text-xs font-bold font-mono">
                 <button
                   onClick={() => setClassroomTab('lecture')}
@@ -296,6 +302,56 @@ export const MasterclassPage: React.FC<MasterclassPageProps> = ({ onNavigate, on
                   <HelpCircle className="w-3.5 h-3.5" />
                   <span>5. Graded Exam</span>
                 </button>
+
+                <button
+                  onClick={() => setClassroomTab('tradingview')}
+                  className={`px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 whitespace-nowrap ${
+                    classroomTab === 'tradingview' ? 'bg-[#D4AF37] text-black shadow-md font-black' : 'text-amber-300 hover:text-white'
+                  }`}
+                >
+                  <BarChart3 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>6. Live TradingView Chart</span>
+                  <span className="w-2 h-2 rounded-full bg-[#00C261] animate-ping" />
+                </button>
+              </div>
+
+              {/* Quick Institutional Action Bar */}
+              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-[#0C1220] via-slate-900 to-[#0C1220] border border-[#D4AF37]/35 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono text-slate-300 flex items-center gap-1.5 font-bold">
+                    <Sparkles className="w-3.5 h-3.5 text-[#D4AF37]" />
+                    <span>Active Instrument:</span>
+                  </span>
+                  <span className="text-xs font-mono px-2.5 py-0.5 rounded bg-slate-800 text-[#D4AF37] border border-slate-700 font-bold">
+                    {activeClass.tvSymbol || 'GBPUSD'} ({activeClass.tvTimeframe || '15'}m)
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => setClassroomTab('tradingview')}
+                    className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 text-xs font-mono font-bold flex items-center gap-1.5 transition active:scale-95"
+                  >
+                    <BarChart3 className="w-3.5 h-3.5 text-[#00C261]" />
+                    <span>🚀 View Live Candles</span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowTvNavModal(true)}
+                    className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-yellow-500/20 hover:from-amber-500/30 hover:to-yellow-500/30 text-[#D4AF37] border border-[#D4AF37]/50 text-xs font-mono font-bold flex items-center gap-1.5 transition active:scale-95"
+                  >
+                    <Compass className="w-3.5 h-3.5 text-[#D4AF37]" />
+                    <span>🧭 TradingView Buttons Guide</span>
+                  </button>
+
+                  <button
+                    onClick={() => onNavigate('/ai-scanner')}
+                    className="px-3.5 py-1.5 rounded-xl bg-cyan-950/40 hover:bg-cyan-900/50 text-cyan-300 border border-cyan-800/60 text-xs font-mono font-bold flex items-center gap-1.5 transition active:scale-95"
+                  >
+                    <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>⚡ Send to Deep AI EA</span>
+                  </button>
+                </div>
               </div>
 
               {/* TAB 1: LECTURE & THEORY */}
@@ -475,6 +531,55 @@ export const MasterclassPage: React.FC<MasterclassPageProps> = ({ onNavigate, on
                         <text x="200" y="85" fill="#C084FC" fontSize="10" fontFamily="monospace">Lower High RSI (Divergence)</text>
                       </svg>
                     )}
+                    {activeClass.chartIllustrationType === 'liquidity_pool' && (
+                      <svg className="w-full h-full max-w-lg" viewBox="0 0 300 120">
+                        <line x1="20" y1="50" x2="280" y2="50" stroke="#D4AF37" strokeWidth="2" strokeDasharray="4 4" />
+                        <text x="25" y="42" fill="#D4AF37" fontSize="10" fontFamily="monospace" fontWeight="bold">Buy-Side Liquidity (BSL) Pool: 1.2965</text>
+                        <line x1="80" y1="50" x2="80" y2="90" stroke="#00C261" strokeWidth="3" />
+                        <line x1="160" y1="50" x2="160" y2="90" stroke="#00C261" strokeWidth="3" />
+                        <line x1="230" y1="15" x2="230" y2="105" stroke="#EF4444" strokeWidth="2.5" />
+                        <rect x="222" y="65" width="16" height="30" fill="#EF4444" rx="2" />
+                        <text x="140" y="20" fill="#EF4444" fontSize="10" fontFamily="monospace" fontWeight="bold">Wick Sweeps BSL</text>
+                        <text x="120" y="112" fill="#00C261" fontSize="9" fontFamily="monospace">Institutional Short Entry 1.2916</text>
+                      </svg>
+                    )}
+                    {activeClass.chartIllustrationType === 'fvg_imbalance' && (
+                      <svg className="w-full h-full max-w-lg" viewBox="0 0 300 120">
+                        <line x1="50" y1="40" x2="50" y2="100" stroke="#00C261" strokeWidth="2" />
+                        <rect x="44" y="55" width="12" height="35" fill="#00C261" />
+                        <text x="30" y="32" fill="#94A3B8" fontSize="8" fontFamily="monospace">C1 High: 1.0840</text>
+                        <rect x="110" y="15" width="20" height="90" fill="#00C261" fillOpacity="0.8" />
+                        <line x1="120" y1="5" x2="120" y2="115" stroke="#00C261" strokeWidth="2" />
+                        <line x1="190" y1="10" x2="190" y2="70" stroke="#00C261" strokeWidth="2" />
+                        <rect x="184" y="20" width="12" height="35" fill="#00C261" />
+                        <text x="170" y="85" fill="#94A3B8" fontSize="8" fontFamily="monospace">C3 Low: 1.0870</text>
+                        <rect x="65" y="40" width="115" height="30" fill="#D4AF37" fillOpacity="0.15" stroke="#D4AF37" strokeWidth="1.5" strokeDasharray="3 3" />
+                        <line x1="65" y1="55" x2="180" y2="55" stroke="#38BDF8" strokeWidth="2" />
+                        <text x="75" y="52" fill="#38BDF8" fontSize="9" fontFamily="monospace" fontWeight="bold">50% C.E. (1.0855 Limit Buy)</text>
+                      </svg>
+                    )}
+                    {activeClass.chartIllustrationType === 'order_block' && (
+                      <svg className="w-full h-full max-w-lg" viewBox="0 0 300 120">
+                        <line x1="70" y1="10" x2="70" y2="90" stroke="#00C261" strokeWidth="2" />
+                        <rect x="60" y="25" width="20" height="50" fill="#00C261" rx="2" />
+                        <text x="25" y="20" fill="#00C261" fontSize="9" fontFamily="monospace">Last Up-Close Candle (OB)</text>
+                        <line x1="60" y1="50" x2="220" y2="50" stroke="#D4AF37" strokeWidth="2" strokeDasharray="4 2" />
+                        <text x="90" y="45" fill="#D4AF37" fontSize="9" fontFamily="monospace" fontWeight="bold">50% Mean Threshold (1.2925)</text>
+                        <rect x="120" y="55" width="22" height="60" fill="#EF4444" rx="2" />
+                        <line x1="131" y1="40" x2="131" y2="118" stroke="#EF4444" strokeWidth="2" />
+                        <text x="150" y="90" fill="#EF4444" fontSize="9" fontFamily="monospace">Displacement Red Candle</text>
+                      </svg>
+                    )}
+                    {activeClass.chartIllustrationType === 'judas_swing' && (
+                      <svg className="w-full h-full max-w-lg" viewBox="0 0 300 120">
+                        <rect x="20" y="45" width="85" height="40" rx="4" fill="#1E293B" stroke="#64748B" strokeWidth="1" />
+                        <text x="25" y="68" fill="#94A3B8" fontSize="9" fontFamily="monospace">Asian 03:00 - 10:00</text>
+                        <path d="M 105 50 Q 150 10 180 30" stroke="#EF4444" strokeWidth="2.5" fill="none" />
+                        <text x="120" y="18" fill="#EF4444" fontSize="9" fontFamily="monospace" fontWeight="bold">10:15 Judas Fake Pump</text>
+                        <path d="M 180 30 Q 210 100 280 110" stroke="#00C261" strokeWidth="3" fill="none" />
+                        <text x="200" y="80" fill="#00C261" fontSize="9" fontFamily="monospace" fontWeight="bold">True Trend Collapse</text>
+                      </svg>
+                    )}
                   </div>
                 </div>
               )}
@@ -488,6 +593,36 @@ export const MasterclassPage: React.FC<MasterclassPageProps> = ({ onNavigate, on
                     </span>
                     <h3 className="text-lg font-bold text-white">Interactive Assignment</h3>
                   </div>
+
+                  {activeClass.tvNavButtonLesson && (
+                    <div className="p-5 rounded-2xl bg-[#090D18] border border-[#D4AF37]/50 space-y-3">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                        <span className="text-xs font-mono font-bold text-[#D4AF37] flex items-center gap-1.5">
+                          <Compass className="w-4 h-4 text-[#D4AF37]" />
+                          <span>TradingView Button & Shortcut Lesson:</span>
+                        </span>
+                        {activeClass.tvNavButtonLesson.shortcut && (
+                          <kbd className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-cyan-300 font-mono text-[11px] font-bold">
+                            {activeClass.tvNavButtonLesson.shortcut}
+                          </kbd>
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-200 space-y-1">
+                        <strong className="text-white block font-mono">{activeClass.tvNavButtonLesson.buttonName}</strong>
+                        <p className="text-slate-300">{activeClass.tvNavButtonLesson.action}</p>
+                        <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-emerald-300">
+                          <strong>How-to Sample: </strong>{activeClass.tvNavButtonLesson.howToSample}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setClassroomTab('tradingview')}
+                        className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-mono font-bold flex items-center gap-1.5 transition"
+                      >
+                        <BarChart3 className="w-3.5 h-3.5 text-[#00C261]" />
+                        <span>Practice in Live TradingView Tab</span>
+                      </button>
+                    </div>
+                  )}
 
                   {activeClass.practiceExercise && (
                     <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
@@ -587,6 +722,50 @@ export const MasterclassPage: React.FC<MasterclassPageProps> = ({ onNavigate, on
                         {completedLessonIds.includes(activeClass.id) ? 'Class Completed ✓' : 'Mark Complete'}
                       </button>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 6: REAL LIVE TRADINGVIEW EMBED */}
+              {classroomTab === 'tradingview' && (
+                <div className="glass-panel rounded-3xl p-4 sm:p-6 border border-[#D4AF37]/40 space-y-4">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div>
+                      <span className="text-xs font-mono text-[#D4AF37] font-bold uppercase block">
+                        Interactive Real-Time Workstation
+                      </span>
+                      <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+                        <span>Live TradingView Feed: {activeClass.tvSymbol || 'GBPUSD'}</span>
+                        <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-cyan-300 border border-slate-700">
+                          {activeClass.tvTimeframe || '15'}m Timeframe
+                        </span>
+                        <span className="w-2 h-2 rounded-full bg-[#00C261] animate-ping" />
+                      </h3>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setShowTvNavModal(true)}
+                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-[#D4AF37] border border-slate-700 text-xs font-mono font-bold flex items-center gap-1.5 transition"
+                      >
+                        <Compass className="w-3.5 h-3.5" />
+                        <span>Buttons Guide</span>
+                      </button>
+                      <button
+                        onClick={() => onNavigate('/ai-scanner')}
+                        className="px-3.5 py-1.5 rounded-xl bg-cyan-950/40 hover:bg-cyan-900 border border-cyan-800 text-cyan-300 text-xs font-mono font-bold flex items-center gap-1.5 transition"
+                      >
+                        <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Deep AI EA Scanner</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl overflow-hidden border border-slate-800 bg-[#080C14] min-h-[520px]">
+                    <TradingViewEmbedWidget
+                      pair={(activeClass.tvSymbol === 'EURUSD' ? 'EUR/USD' : activeClass.tvSymbol === 'USDJPY' ? 'USD/JPY' : activeClass.tvSymbol?.includes('XAU') ? 'XAU/USD' : 'GBP/USD') as CurrencyPair}
+                      timeframe={(activeClass.tvTimeframe === '60' ? 'H1' : activeClass.tvTimeframe === 'D' ? 'D1' : 'M15') as Timeframe}
+                      isCollapsible={false}
+                    />
                   </div>
                 </div>
               )}
@@ -938,6 +1117,60 @@ export const MasterclassPage: React.FC<MasterclassPageProps> = ({ onNavigate, on
               >
                 <Printer className="w-4 h-4" />
                 Print / Save PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          TRADINGVIEW NAVIGATION & BUTTON DIRECTORY MODAL
+         ========================================================================= */}
+      {showTvNavModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+          <div className="relative w-full max-w-5xl rounded-3xl bg-[#090D16] border border-[#D4AF37]/50 shadow-[0_0_50px_rgba(212,175,55,0.25)] flex flex-col max-h-[92vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-800 bg-[#0F172A] flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-[#D4AF37]/15 border border-[#D4AF37]/35 text-[#D4AF37]">
+                  <Compass className="w-5 h-5 animate-spin-slow" />
+                </span>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+                    <span>TradingView Navigation & Button Directory</span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40">
+                      Live Academy
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Learn what every button does, exact keyboard shortcuts, and real newbie sample charts.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowTvNavModal(false)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4">
+              <TradingViewNavigationGuide />
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center justify-between">
+              <span className="text-xs font-mono text-slate-400">
+                Hotkeys: <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-white font-mono text-[10px]">Alt + T</kbd> Trendline • <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-white font-mono text-[10px]">Alt + F</kbd> OTE Fib • <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-white font-mono text-[10px]">Alt + J</kbd> Liquidity Ray
+              </span>
+              <button
+                onClick={() => setShowTvNavModal(false)}
+                className="px-5 py-2 rounded-xl btn-gold text-black font-extrabold text-xs uppercase tracking-wider"
+              >
+                Back to Lesson
               </button>
             </div>
           </div>

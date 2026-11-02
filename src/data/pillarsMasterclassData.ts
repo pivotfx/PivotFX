@@ -1611,6 +1611,136 @@ Scenario B: GENUINE MARKET STRUCTURE SHIFT (MSS)
           'Set an alarm for 15:15 PM EAT to prepare for the New York Killzone.',
           'Apply Fibonacci Retracement only on displacement waves and execute at the 0.62 - 0.79 OTE zone.'
         ]
+      },
+      {
+        id: 'sv-16',
+        number: '16',
+        title: 'ICT Masterclass: The London Judas Swing Breakdown (10:00 - 11:30 AM EAT)',
+        levelTag: 'Advanced',
+        duration: '24 mins',
+        summary: 'Deconstruct why London Open intentionally produces an aggressive deceptive move sweeping the Asian Range highs/lows before reversing into the true daily trend.',
+        concept: 'The London Judas Swing is the premier algorithmic trap of the European morning session. During the Asian Session (03:00 - 10:00 EAT), the market consolidates into a narrow range. Impatient retail breakout traders place Buy Stops above the Asian high and Sell Stops below the Asian low. When London opens at 10:00 AM EAT, institutional algorithms intentionally inject aggressive fake volume to drive price through the Asian High/Low, triggering all retail breakout orders. Once the resting liquidity is absorbed by Tier-1 dealing desks, price violently rejects, prints an M15 Market Structure Shift (MSS), and cascades in the true institutional direction for the remainder of the day.',
+        bulletPoints: [
+          'The 30-Minute Patience Rule: Never execute between 10:00 and 10:15 AM EAT. Let the Judas fakeout manifest first.',
+          'Liquidity Sweep Threshold: The Judas Swing typically pierces the Asian high/low by 8 to 22 pips before stalling.',
+          'Displacement Confirmation: Demand an M5 or M15 candle closing firmly back INSIDE the Asian range before shorting/buying.',
+          'Targeting the Opposing Pool: A Judas sweep of the Asian High has its primary algorithmic objective at the Asian Low.'
+        ],
+        illustration: {
+          type: 'diagram',
+          title: 'The Mechanical Anatomy of a London Judas Swing',
+          caption: 'How Institutions Engineer Liquidity at 10:00 AM Nairobi Time',
+          content: `Asian Session Range (03:00 - 10:00 EAT):
+  ══════════════════════════════════════════════════════════ [ ASIAN HIGH: 1.2930 ]
+   ▲  Consolidation Range (25 Pips)
+  ══════════════════════════════════════════════════════════ [ ASIAN LOW: 1.2905 ]
+  
+  10:00 AM EAT: LONDON OPEN INJECTIONS!
+    └── 10:15 EAT: Fast parabolic spike to 1.2965! (Sweeps Asian High by +35 pips!)
+    └── Retail traders FOMO BUY thinking "It's a breakout!" (Trapped at 1.29656!)
+    └── 10:45 EAT: M15 candle prints a massive upper wick & closes at 1.2916!
+    └── 11:00 EAT: Institutional SELL order filled!
+    └── 12:30 EAT: Cascades all the way through the Asian Low to 1.2860! (+56 PIPS PROFIT!)`
+        },
+        realWorldExample: {
+          pair: 'GBP/USD M15',
+          context: 'Asian High was 1.2930. At 10:15 AM EAT, price was artificially spiked to 1.29656 to trap breakout buyers.',
+          setup: 'Waited for the 10:45 AM EAT M15 close at 1.29169 (back inside Asian range). Shorted with SL at 1.2940 (23 pips).',
+          outcome: 'Targeted Asian Low at 1.2905 (+26.9 pips) and London expansion low at 1.2860 (+56.9 pips).',
+          keyTakeaway: 'The first mouse gets caught in the trap; the second mouse gets the cheese. Never buy London open breakouts.'
+        },
+        actionableChecklist: [
+          'Box out the Asian Session (03:00 - 10:00 EAT) on your chart every morning.',
+          'Set a price alert 3 pips above the Asian High and 3 pips below the Asian Low.',
+          'Wait for a candle to close back inside the Asian range after a sweep before pulling the trigger.'
+        ]
+      },
+      {
+        id: 'sv-17',
+        number: '17',
+        title: 'ICT Masterclass: The New York Silver Bullet Strategy (15:30 - 16:30 EAT)',
+        levelTag: 'Advanced',
+        duration: '26 mins',
+        summary: 'The battle-tested 60-minute algorithmic execution window: 15-pip minimum institutional draw on liquidity targeting M5/M15 Fair Value Gaps.',
+        concept: 'The ICT Silver Bullet is a time-authoritative execution model designed specifically for the 15:30 - 16:30 EAT (10:00 - 11:00 AM NY) window. During this hour, algorithmic trading desks at global investment banks execute institutional macro rebalancing. If the market has an established directional bias, the algorithm will deliver a minimum 15 to 35 pips run toward a visible draw on liquidity (e.g. Previous Session High/Low, Clean Equal Highs, or unmitigated Higher Timeframe FVGs). You wait for a 5-minute Market Structure Shift (MSS), identify the freshly printed Fair Value Gap, and place a Limit Order directly inside the gap with a 10 to 15 pip stop loss.',
+        bulletPoints: [
+          'Execution Clock: Active ONLY between 15:30 and 16:30 EAT (Nairobi time). Disregard outside this window.',
+          'Draw on Liquidity (DOL): Must have a crystal-clear target (e.g. London Session Low or Daily Equal Highs).',
+          'The 5-Minute Setup: Wait for displacement creating an M5 FVG inside the Silver Bullet hour.',
+          'Fixed 1:2 R:R Model: Risk strictly $2.00 (260 KES) for a $4.00+ reward, banking profits at the liquidity pool.'
+        ],
+        illustration: {
+          type: 'steplist',
+          title: 'The 4-Step Silver Bullet Execution Matrix',
+          caption: 'Mechanical Rules from 15:30 to 16:30 EAT',
+          content: `Step 1 (15:30 EAT): Identify the Draw on Liquidity (DOL)
+   └── Find resting Buy-Side (BSL) or Sell-Side Liquidity (SSL) 20-30 pips away.
+
+Step 2 (15:35 - 15:45 EAT): Wait for Displacement & MSS
+   └── Large body M5 candle breaks recent swing point in direction of the DOL.
+
+Step 3 (15:45 - 16:00 EAT): Place Limit Order at M5 FVG
+   └── Set Buy/Sell Limit at the 50% Consequent Encroachment (C.E.) of the gap.
+   └── Stop Loss placed 2 pips beyond the displacement candle origin.
+
+Step 4 (16:00 - 16:30 EAT): Algorithmic Delivery & Take Profit
+   └── Algorithm fills order and delivers directly into the liquidity pool target!`
+        },
+        realWorldExample: {
+          pair: 'EUR/USD M5',
+          context: 'At 15:30 EAT US Core CPI data released. Higher Timeframe bias was Bearish toward 1.0800.',
+          setup: 'At 15:40 EAT, an M5 candle displaced down 28 pips, leaving an FVG at 1.0842-1.0854. Limit Sell placed at 1.0848 (C.E.).',
+          outcome: 'Tapped at 15:52 EAT, dropped straight to 1.0818 by 16:20 EAT (+30 pips profit, 1:2.5 RRR).',
+          keyTakeaway: 'The Silver Bullet eliminates second-guessing. You trade only 60 minutes a day with algorithmic precision.'
+        },
+        actionableChecklist: [
+          'Set a phone calendar alarm for 15:25 PM EAT Monday through Friday.',
+          'Identify whether the London session left behind an obvious unvisited high or low.',
+          'Execute strictly inside the M5 Fair Value Gap; never chase market orders.'
+        ]
+      },
+      {
+        id: 'sv-18',
+        number: '18',
+        title: 'ICT Masterclass: Power of 3 (AMD: Accumulation, Manipulation, Distribution)',
+        levelTag: 'Advanced',
+        duration: '25 mins',
+        summary: 'Deconstruct how daily institutional candlesticks are formed: Asian Accumulation, London Manipulation, and New York Distribution.',
+        concept: 'Every completed daily candlestick consists of Open, High, Low, and Close. The ICT Power of 3 (AMD) explains the sequence through which smart money engineers the daily candle. In a Bullish expansion day, the Open price occurs in Asia; London manipulates price BELOW the open (creating the low of the day / Judas wick); and New York expands and distributes positions into the close (creating the high of the day). Understanding AMD allows you to reliably buy below the opening price on bullish days and sell above the opening price on bearish days, guaranteeing maximum trade location edge.',
+        bulletPoints: [
+          'Accumulation (Asian 03:00 - 10:00 EAT): Equilibrium trading range building resting orders.',
+          'Manipulation (London 10:00 - 12:00 EAT): Deceptive push against true trend to create the extreme wick of the day.',
+          'Distribution (New York 15:30 - 20:00 EAT): Sustained institutional repricing into opposite liquidity pools.',
+          'Trade Location Law: In an uptrend, always buy BELOW the daily opening price; in a downtrend, always sell ABOVE the daily open.'
+        ],
+        illustration: {
+          type: 'diagram',
+          title: 'The Daily Candlestick AMD Architecture',
+          caption: 'How the 3 Global Sessions Build the Daily Candle',
+          content: `       BULLISH DAILY CANDLE ANATOMY:
+       High of Day ──────────────┬─┬  ◄── NY Distribution Session Peak (18:00 EAT)
+                                 │ │
+                                 │█│
+       Close Price ──────────────┤█│  ◄── NY Session Close (23:00 EAT)
+                                 │█│
+                                 │█│
+       Open Price  ──────────────┤█├  ◄── Asian Accumulation Open (00:00 UTC / 03:00 EAT)
+                                 │ │
+       Low of Day  ──────────────┴─┴  ◄── London Manipulation (Judas Swing Low: 10:30 EAT!)
+                                          (BUY HERE BELOW THE OPENING PRICE!)`
+        },
+        realWorldExample: {
+          pair: 'EUR/USD Daily',
+          context: 'Macro bias was bullish. Daily open was at 1.0820. Asian session traded tightly between 1.0815 and 1.0828.',
+          setup: 'At 10:20 AM EAT, London manipulated down to 1.0792 (28 pips below open). Printed an M15 hammer candle.',
+          outcome: 'Bought at 1.0805 (below open). Price rallied all afternoon, closing the day at 1.0885 (+80 pips).',
+          keyTakeaway: 'Buying below the daily open on a bullish bias day gives the absolute safest and lowest entry possible.'
+        },
+        actionableChecklist: [
+          'Mark the Daily Opening Price (00:00 UTC / 03:00 EAT) with a distinct blue horizontal ray.',
+          'If your daily bias is bullish, only consider buy setups that form BELOW the blue open line.',
+          'If your daily bias is bearish, only consider sell setups that form ABOVE the blue open line.'
+        ]
       }
     ]
   },

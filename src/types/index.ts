@@ -207,8 +207,8 @@ export interface SubTopic {
 
 export interface MasterclassLesson {
   id: string;
-  belt: 'white' | 'blue' | 'purple' | 'black' | 'master';
-  levelTag: 'Beginner' | 'Intermediate' | 'Advanced' | 'Pro / Institutional';
+  belt: 'white' | 'blue' | 'purple' | 'black' | 'master' | 'ict';
+  levelTag: 'Beginner' | 'Intermediate' | 'Advanced' | 'Pro / Institutional' | 'ICT Institutional Master';
   number: string;
   title: string;
   duration: string;
@@ -217,9 +217,17 @@ export interface MasterclassLesson {
   content: string[];
   subTopics?: SubTopic[];
   realTimeNote: string;
-  chartIllustrationType: 'candlestick_anatomy' | 'pinbar_tower' | 'ema_crossover' | 'rsi_divergence' | 'sessions_eat' | 'spread_trap' | 'two_dollar_rule';
+  chartIllustrationType: 'candlestick_anatomy' | 'pinbar_tower' | 'ema_crossover' | 'rsi_divergence' | 'sessions_eat' | 'spread_trap' | 'two_dollar_rule' | 'fvg_imbalance' | 'order_block' | 'liquidity_pool' | 'judas_swing';
   samplesAndCases?: LessonSample[];
   liveMarketExample?: string;
+  tvSymbol?: string;
+  tvTimeframe?: string;
+  tvNavButtonLesson?: {
+    buttonName: string;
+    shortcut?: string;
+    action: string;
+    howToSample: string;
+  };
   practiceExercise?: {
     prompt: string;
     actionHint: string;

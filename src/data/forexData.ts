@@ -739,6 +739,373 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       correctIndex: 1,
       explanation: 'Under Kenyan law and CMA regulations, pooling or managing third-party investment capital without a formal license is prohibited.'
     }
+  },
+
+  // ==========================================
+  // ICT INSTITUTIONAL MASTERCLASS FULL COURSE
+  // ==========================================
+  {
+    id: 'ict-1',
+    belt: 'ict',
+    levelTag: 'ICT Institutional Master',
+    number: '12',
+    title: 'ICT Liquidity Pools: BSL & SSL Engineering (Sweeps vs Breakouts)',
+    duration: '22 mins',
+    summary: 'Master how smart money algorithms intentionally sweep resting Buy-Side Liquidity (BSL) and Sell-Side Liquidity (SSL) to engineer counter-trend fuel.',
+    learningObjectives: [
+      'Identify Buy-Side Liquidity (BSL) above double tops and previous day highs.',
+      'Identify Sell-Side Liquidity (SSL) below double bottoms and previous day lows.',
+      'Differentiate between an institutional liquidity sweep (wick) and a real structural breakout (body close).',
+      'Execute the Turtle Soup reversal entry immediately following a liquidity purge.'
+    ],
+    content: [
+      'In traditional retail textbooks, double tops are considered "strong resistance" and double bottoms "strong support". To institutional algorithms, however, these areas represent dense clusters of resting stop-loss orders known as Liquidity Pools.',
+      'Above every double top or Previous Day High (PDH) sit thousands of retail Buy Stop orders. This is Buy-Side Liquidity (BSL). When large banks need to fill a $500M short position, they cannot buy at the top—they need sellers. By driving price up through the double top, they trigger the retail Buy Stops, instantly acquiring the counterpart liquidity needed to dump the market.',
+      'Below double bottoms or Previous Day Lows (PDL) sit resting Sell Stops (Sell-Side Liquidity / SSL). Smart money sweeps SSL to accumulate long positions at wholesale discount pricing.',
+      'The Gilgil 1296.56 loss vs 1291.69 win is the quintessential liquidity lesson: 1296.56 bought directly into the BSL purge. 1291.69 entered with smart money AFTER the BSL was absorbed and price closed back under resistance.'
+    ],
+    realTimeNote: 'Institutional Law: Price moves from one liquidity pool (BSL) directly to the opposing liquidity pool (SSL). Never buy at BSL or sell at SSL.',
+    chartIllustrationType: 'liquidity_pool',
+    tvSymbol: 'GBPUSD',
+    tvTimeframe: '15',
+    tvNavButtonLesson: {
+      buttonName: 'Horizontal Ray (Alt + J)',
+      shortcut: 'Alt + J',
+      action: 'Click exactly on the swing high wick to project Buy-Side Liquidity (BSL) ray forward into future candles.',
+      howToSample: 'Press Alt + J at yesterday high (1.2965). Label the ray "BSL Pool". Wait for a 5-to-10 pip sweep with an upper wick rejection.'
+    },
+    samplesAndCases: [
+      {
+        title: 'The Gilgil 1296.56 BSL Purge Disaster',
+        type: 'loss_case',
+        description: 'Retail traders bought the breakout at 1.29656 as price pierced the Asian high. Banks swept 8 pips of BSL and dumped 75 pips straight down.',
+        mathSnippet: 'Retail Loss: Bought 1.29656 -> Stopped out at 1.29350 (-30.6 pips). On 0.10 lot = -$306 loss in 25 minutes.',
+        takeaway: 'Never buy breakouts of clean double tops. Assume the first breakout is a liquidity sweep until proven by a displacement retest.'
+      },
+      {
+        title: 'The 1291.69 Institutional Short Reversal',
+        type: 'win_case',
+        description: 'Waited for the BSL sweep to complete at 1.2965, watched M15 candle body slam back below 1.2925, and shorted at 1.29169 targeting SSL at 1.2885.',
+        mathSnippet: 'Win Result: Entry: 1.29169, SL: 1.29369 (20 pips / $2 rule), Exit: 1.28850 (+31.9 pips). Reward:Risk = 1:1.6 (+$3.19 on 0.01 micro lot).',
+        takeaway: 'Enter on the second mouse principle: The first mouse (breakout chaser) gets caught in the trap; the second mouse gets the cheese.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Open TradingView in Pillar 03 and draw a Horizontal Ray (Alt + J) at the highest high of yesterday on GBP/USD.',
+      actionHint: 'Look at how price reacts when testing that level: Does it cleanly break with displacement or poke a wick and reverse?',
+      toolTarget: '/chart-mastery'
+    },
+    liveMarketExample: 'Check GBP/USD or XAU/USD right now. Locate the previous day high. You will see resting buy stops pooled right above it waiting for London open.',
+    homework: 'Mark the Previous Day High (PDH) and Previous Day Low (PDL) on EUR/USD and note whether London open swept one of them.',
+    quiz: {
+      question: 'What orders are resting above an obvious double top resistance level in the market?',
+      options: [
+        'Institutional Take Profit orders',
+        'Retail Buy Stop orders (Buy-Side Liquidity / BSL)',
+        'Central bank intervention orders',
+        'Broker spread fees'
+      ],
+      correctIndex: 1,
+      explanation: 'Retail traders who shorted double tops place their protective stop losses (which are Buy Stops) right above the highs, creating Buy-Side Liquidity (BSL) for institutions.'
+    }
+  },
+  {
+    id: 'ict-2',
+    belt: 'ict',
+    levelTag: 'ICT Institutional Master',
+    number: '13',
+    title: 'ICT Fair Value Gaps (FVG) & Consequent Encroachment (C.E. 50%)',
+    duration: '24 mins',
+    summary: 'Deconstruct 3-candle algorithmic delivery imbalances and enter sniper wholesale limit orders at the 50% Consequent Encroachment midpoint.',
+    learningObjectives: [
+      'Identify the 3-candle Fair Value Gap (Candle 1 wick does not touch Candle 3 wick).',
+      'Calculate the exact 50% Consequent Encroachment (C.E.) midpoint price.',
+      'Differentiate between Premium FVGs (for selling) and Discount FVGs (for buying).',
+      'Understand Inversion FVGs when an imbalance fails and flips polarity.'
+    ],
+    content: [
+      'The interbank pricing algorithm is programmed to offer balanced two-sided auction pricing. When aggressive institutional volume enters the market, price displaces rapidly across several tick increments, leaving a one-sided imbalance where only buyers or only sellers participated.',
+      'This creates a 3-Candle Fair Value Gap (FVG): Candle 1 (preceding baseline), Candle 2 (large displacement candle), and Candle 3 (following candle). In a Bullish FVG, the low of Candle 3 does NOT overlap the high of Candle 1. The empty price void between them is the FVG.',
+      'Consequent Encroachment (C.E.) is the exact 50% mathematical midpoint of the FVG. Algorithms will systematically reprice back to the C.E. level to rebalance liquidity. When price taps C.E., institutional limit orders are filled and price expands violently toward the next liquidity draw.',
+      'In Gilgil, we NEVER chase the giant green candle 2! We patiently drop a Buy Limit order at the 50% Consequent Encroachment with our stop loss comfortably sheltered behind Candle 1.'
+    ],
+    realTimeNote: 'Golden ICT Rule: Never chase the impulse candle. The Fair Value Gap is the magnet that pulls price back for your entry.',
+    chartIllustrationType: 'fvg_imbalance',
+    tvSymbol: 'EURUSD',
+    tvTimeframe: '15',
+    tvNavButtonLesson: {
+      buttonName: 'Rectangle Tool (Left Toolbar)',
+      shortcut: 'Alt + R / 4th Tool Menu',
+      action: 'Click the Rectangle tool on the left toolbar to shade the imbalance area from Candle 1 High to Candle 3 Low.',
+      howToSample: 'Select Rectangle, click Candle 1 high wick at 1.0840, drag across to Candle 3 low wick at 1.0870. The 50% line inside is Consequent Encroachment (1.0855).'
+    },
+    samplesAndCases: [
+      {
+        title: 'EUR/USD M15 Consequent Encroachment (C.E.) Execution',
+        type: 'win_case',
+        description: 'Displacement surge created an M15 FVG between 1.0840 (Candle 1 High) and 1.0870 (Candle 3 Low). C.E. calculated at 1.0855.',
+        mathSnippet: 'C.E. = 1.0840 + ((1.0870 - 1.0840) / 2) = 1.0855. Buy Limit placed at 1.0855. Tapped at 16:45 EAT, rallied to 1.0920 (+65 pips).',
+        takeaway: 'Entering at 50% C.E. cut the required stop loss in half and doubled the reward-to-risk ratio from 1:1.5 to 1:3.2.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Open TradingView in Pillar 03 and find the most recent 3-candle displacement on EUR/USD M15.',
+      actionHint: 'Measure the distance between Candle 1 and Candle 3 with the Rectangle tool and locate the 50% midline.',
+      toolTarget: '/chart-mastery'
+    },
+    liveMarketExample: 'On EUR/USD M15 during the New York session, watch how price retraces exactly into the 50% level of the 15:30 EAT displacement candle.',
+    homework: 'Identify 3 unmitigated Fair Value Gaps on your MT4/MT5 demo chart and set an alert at their Consequent Encroachment.',
+    quiz: {
+      question: 'What is Consequent Encroachment (C.E.) in ICT methodology?',
+      options: [
+        'The highest price of the year',
+        'The 50% mathematical midpoint of a Fair Value Gap imbalance',
+        'The broker commission fee on MT5',
+        'The moment trading closes on Friday'
+      ],
+      correctIndex: 1,
+      explanation: 'Consequent Encroachment (C.E.) is the 50% equilibrium level of a Fair Value Gap where institutional limit orders typically fill.'
+    }
+  },
+  {
+    id: 'ict-3',
+    belt: 'ict',
+    levelTag: 'ICT Institutional Master',
+    number: '14',
+    title: 'ICT Order Blocks (OB) & Mean Threshold: 50% Mitigation Matrix',
+    duration: '26 mins',
+    summary: 'Identify the exact last opposite candle before institutional displacement, and use the 50% Mean Threshold for sniper limit entries.',
+    learningObjectives: [
+      'Validate institutional Order Blocks: Must create displacement and an unmitigated FVG.',
+      'Calculate the Mean Threshold (50% midpoint of the Order Block candle body).',
+      'Distinguish between Order Blocks, Mitigation Blocks, and Breaker Blocks.',
+      'Place structural stop losses behind the Order Block wick with a 3-pip buffer.'
+    ],
+    content: [
+      'An Order Block (OB) is not arbitrary retail support or resistance. It is the footprint of algorithmic accumulation or distribution by Tier-1 institutions.',
+      'A Bearish Order Block is the LAST up-close (green/bullish) candle before an aggressive downward displacement that breaks market structure. A Bullish Order Block is the LAST down-close (red/bearish) candle before an energetic upward displacement.',
+      'The candle body is where real volume was accumulated. The 50% midpoint of the Order Block body is termed the "Mean Threshold" (M.T.). When price returns to mitigate the Order Block, smart money defends the Mean Threshold.',
+      'If candle bodies close beyond the Mean Threshold, the Order Block is considered violated and often flips into a Breaker Block. As long as only wicks pierce M.T. while bodies respect it, the setup remains 100% valid.'
+    ],
+    realTimeNote: 'Order Block Law: High-probability Order Blocks MUST produce a Market Structure Shift (MSS) and leave an open Fair Value Gap. Without displacement, it is just a normal candle.',
+    chartIllustrationType: 'order_block',
+    tvSymbol: 'GBPUSD',
+    tvTimeframe: '60',
+    tvNavButtonLesson: {
+      buttonName: 'Fibonacci Retracement (Alt + F)',
+      shortcut: 'Alt + F',
+      action: 'Pull Fibonacci from the Order Block body open to close, configuring only 0, 0.5 (Mean Threshold), and 1.0.',
+      howToSample: 'On GBP/USD H1, anchor 0 at body open 1.2940 and 1 at body close 1.2910. The 0.5 level at 1.2925 is your sniper Sell Limit entry.'
+    },
+    samplesAndCases: [
+      {
+        title: 'GBP/USD H1 Bearish Order Block Mean Threshold Fill',
+        type: 'win_case',
+        description: 'At London open, GBP/USD printed an H1 green candle followed by an aggressive 60-pip drop breaking previous day low.',
+        mathSnippet: 'OB Body: 1.2940 to 1.2910. Mean Threshold (50%): 1.2925. Sell Limit filled at 1.2925, SL: 1.2970 (45 pips), Target: 1.2800 (+125 pips).',
+        takeaway: 'Entering at the Mean Threshold rather than the front edge gives 15 extra pips of profit and lower drawdown.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Load the Super Analysis Tool in Pillar 02 and test an entry at the Mean Threshold of a recent H1 Order Block.',
+      actionHint: 'Notice how the confluence score checks whether price is within 5 pips of the 20/50 EMA dynamic line.',
+      toolTarget: '/strategy-vault'
+    },
+    liveMarketExample: 'Examine the H1 chart on GBP/USD. Find the last green candle before the London morning sell-off. Price tapped its 50% Mean Threshold before collapsing.',
+    homework: 'Identify one Bullish Order Block on M15 EUR/USD that resulted in a break of structure. Mark its 50% Mean Threshold.',
+    quiz: {
+      question: 'What is the "Mean Threshold" of an ICT Order Block?',
+      options: [
+        'The highest wick of the day',
+        'The 50% midpoint of the Order Block candle body',
+        'The 200 Simple Moving Average',
+        'The spread charged by FXPesa'
+      ],
+      correctIndex: 1,
+      explanation: 'The Mean Threshold is the 50% mathematical midpoint of the Order Block body, serving as the primary algorithmic defense level.'
+    }
+  },
+  {
+    id: 'ict-4',
+    belt: 'ict',
+    levelTag: 'ICT Institutional Master',
+    number: '15',
+    title: 'ICT Market Structure Shift (MSS) with Displacement vs Retail Fakeouts',
+    duration: '22 mins',
+    summary: 'Distinguish between a deceitful wick sweep and a genuine algorithmic displacement that confirms an institutional change in trend.',
+    learningObjectives: [
+      'Differentiate between a liquidity sweep (wick only) and a Market Structure Shift (candle body close).',
+      'Recognize displacement candles: Long bodies, tiny wicks, expanding volume.',
+      'Verify the presence of an unmitigated FVG before taking a continuation trade.',
+      'Avoid entering early before structure confirms.'
+    ],
+    content: [
+      'Many retail traders lose money trying to trade every "Change of Character" (CHoCH) they see on 1-minute or 5-minute charts. Most of these are merely liquidity sweeps or internal consolidation wicks.',
+      'A genuine ICT Market Structure Shift (MSS) requires "Displacement"—an energetic, forceful price move characterized by consecutive large-bodied candles that close with authority past the swing point and leave an unmitigated Fair Value Gap behind.',
+      'Candle Body vs Wick Rule: A wick beyond a swing high/low is a LIQUIDITY SWEEP. Only a solid candle BODY close confirms an MSS.',
+      'Once an MSS is verified, do NOT chase the market. Wait for the retracement into the newly created Fair Value Gap or Order Block for your sniper entry.'
+    ],
+    realTimeNote: 'Displacement is the signature of institutional algorithms. Without large bodies and an FVG, a break is presumed to be a retail trap.',
+    chartIllustrationType: 'pinbar_tower',
+    tvSymbol: 'USDJPY',
+    tvTimeframe: '15',
+    tvNavButtonLesson: {
+      buttonName: 'Crosshair Tool (Ctrl + Click / Mousewheel)',
+      shortcut: 'Alt + C',
+      action: 'Use the Crosshair tool to precisely measure candle body close prices relative to the previous swing high/low line.',
+      howToSample: 'Hover Crosshair over swing high at 156.00. Check the displacement candle close: 156.35. A 35-pip body close confirms MSS.'
+    },
+    samplesAndCases: [
+      {
+        title: 'USD/JPY M15 Genuine MSS with Displacement',
+        type: 'win_case',
+        description: 'Downtrend in USD/JPY shifted when a massive 30-pip green candle closed above 156.00 with an open FVG below.',
+        mathSnippet: 'Entry on FVG retest: 156.20, SL: 155.95 (25 pips), TP: 157.30 (+110 pips). R:R = 1:4.4.',
+        takeaway: 'Displacement provides institutional validation that smart money has flipped net positioning from short to long.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Check the AI Scanner in Pillar 04 and select USD/JPY M15 to run a structural displacement check.',
+      actionHint: 'See if the scanner scores the setup as HIGH PROBABILITY (>75%) based on EMA and momentum alignment.',
+      toolTarget: '/ai-scanner'
+    },
+    liveMarketExample: 'Compare a wick poke that instantly reverses (Sweep) vs two large candles closing 20 pips past the level (Displacement). That is the difference between getting trapped and winning.',
+    homework: 'Find 2 examples of false wick breakouts on M15 EUR/USD and 2 examples of true displacement MSS.',
+    quiz: {
+      question: 'What confirms a genuine ICT Market Structure Shift (MSS) as opposed to a false liquidity sweep?',
+      options: [
+        'A single pip wick poke beyond the level',
+        'A solid candle BODY close beyond the swing point accompanied by displacement and an FVG',
+        'The MACD crossing the zero line',
+        'A news headline on Twitter'
+      ],
+      correctIndex: 1,
+      explanation: 'A genuine MSS requires a solid candle body close past structure with displacement (large bodies) and an unmitigated FVG.'
+    }
+  },
+  {
+    id: 'ict-5',
+    belt: 'ict',
+    levelTag: 'ICT Institutional Master',
+    number: '16',
+    title: 'ICT London Judas Swing & NY AM Silver Bullet (EAT Nairobi Clocks)',
+    duration: '28 mins',
+    summary: 'Master the high-probability institutional execution clocks in East Africa Time (EAT UTC+3): London Open 10:00 AM Judas Swing & NY AM 15:30 Silver Bullet.',
+    learningObjectives: [
+      'Map the Asian Range (03:00 - 10:00 EAT) and identify its high and low as liquidity targets.',
+      'Trade the London Judas Swing (10:00 - 11:30 AM EAT) false move.',
+      'Execute the New York AM Silver Bullet (15:30 - 16:30 EAT) 60-minute window.',
+      'Target a minimum of 15 pips draw on liquidity with strict 1:2 R:R.'
+    ],
+    content: [
+      'Price without Time is meaningless; Time without Price is useless. In ICT methodology, high-frequency algorithms do not trade randomly all day. They operate inside strict institutional time windows called Killzones.',
+      'Kenyan traders enjoy the supreme geographical privilege of East Africa Time (EAT, UTC+3), perfectly synced with European and American banking desks.',
+      'Window 1: The London Judas Swing (10:00 - 11:30 AM EAT). London opens and intentionally pushes price in the OPPOSITE direction of the true daily trend to sweep the Asian Session High or Low. Between 10:15 and 10:45 AM EAT, price purges liquidity, prints an MSS, and reverses into the true daily expansion.',
+      'Window 2: The New York AM Silver Bullet (15:30 - 16:30 EAT). This 60-minute window occurs during peak US economic releases and London/NY overlap. An algorithmic draw on liquidity creates an M5 or M15 Fair Value Gap that delivers a crisp 15 to 35 pips move.'
+    ],
+    realTimeNote: 'Kenya Schedule: London Judas = 10:00 - 11:30 AM EAT. NY AM Silver Bullet = 15:30 - 16:30 EAT. Never enter new market orders during midnight rollover (11:55 PM - 12:30 AM EAT)!',
+    chartIllustrationType: 'judas_swing',
+    tvSymbol: 'GBPUSD',
+    tvTimeframe: '15',
+    tvNavButtonLesson: {
+      buttonName: 'Timezone Clock (Bottom Right of TradingView)',
+      shortcut: 'Click "UTC" at bottom right',
+      action: 'Click the UTC timezone at the bottom right corner of TradingView and set to "UTC+3 Nairobi".',
+      howToSample: 'Click UTC -> Select "(UTC+3) Nairobi". All candle timestamps on your screen will now match your phone clock and Kenyan bank hours perfectly!'
+    },
+    samplesAndCases: [
+      {
+        title: 'The London Judas Swing Execution on GBP/USD',
+        type: 'win_case',
+        description: 'Asian range was 1.2890 to 1.2930. At 10:15 AM EAT, London open spiked to 1.29656 (+35 pips above Asian high). At 10:45 AM EAT, M15 candle closed back at 1.29169.',
+        mathSnippet: 'Short at 1.29169, SL: 1.29400 (23 pips), TP: Asian Low 1.28900 (+26.9 pips). Won cleanly in 45 minutes.',
+        takeaway: 'Wait 30 minutes after London open (10:30 AM EAT) before pulling the trigger. The first move is almost always the Judas fakeout.'
+      },
+      {
+        title: 'The NY AM Silver Bullet M5 FVG on EUR/USD',
+        type: 'win_case',
+        description: 'At 15:30 EAT US Core CPI release, price displaced down 40 pips. At 15:45 EAT, price retraced into M5 FVG at 1.0850 and delivered 25 pips straight to previous day low.',
+        mathSnippet: 'Risk: 12 pips ($1.20 on 0.01 lot). Reward: 25 pips ($2.50). Clean 1:2.08 payout.',
+        takeaway: 'Silver Bullet setups are mechanical: Identify the liquidity draw, wait for the FVG, set limit order, take profit at pool.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Check the real-time Nairobi EAT Clock in the navbar and determine which session is currently active.',
+      actionHint: 'If London or NY is active, switch to M15 to look for Killzone Fair Value Gaps.',
+      toolTarget: '/live-pulse'
+    },
+    liveMarketExample: 'Set an alarm on your phone for 10:15 AM EAT. Observe how GBP/USD moves during London open. You will witness the Judas Swing firsthand.',
+    homework: 'Record 5 consecutive London Opens (10:00 - 11:00 AM EAT) and note whether the initial move swept Asian high or Asian low.',
+    quiz: {
+      question: 'What is the "Judas Swing" during the London Open session in East Africa Time (EAT)?',
+      options: [
+        'A religious ceremony in London',
+        'A deceptive false move that sweeps Asian range liquidity before reversing into the true daily trend',
+        'The closing bell of the London Stock Exchange',
+        'A spread widening by CMA Kenya'
+      ],
+      correctIndex: 1,
+      explanation: 'The Judas Swing is the institutional deception move that drives price into Asian high/low liquidity before reversing in the true direction.'
+    }
+  },
+  {
+    id: 'ict-6',
+    belt: 'ict',
+    levelTag: 'ICT Institutional Master',
+    number: '17',
+    title: 'ICT Power of 3 (AMD) & Institutional Order Flow Mastery',
+    duration: '25 mins',
+    summary: 'The ultimate institutional blueprint: Accumulation (Asian), Manipulation (London), Distribution (New York). Predicting daily candlestick anatomy.',
+    learningObjectives: [
+      'Master the Power of 3 (AMD): Accumulation, Manipulation, Distribution.',
+      'Predict whether the Daily candle will be a Bullish Expansion or Bearish Expansion.',
+      'Use the Long/Short Position Tool on TradingView to calculate precise 1:3 R:R setups.',
+      'Synthesize ICT with the Gilgil $2 rule to build a scalable prop firm strategy.'
+    ],
+    content: [
+      'Every candlestick has 4 values: Open, High, Low, and Close (OHLC). The ICT Power of 3 (AMD) explains how smart money creates the daily bar:',
+      '1. Accumulation (Asian Session 03:00 - 10:00 EAT): Smart money establishes initial positions quietly within a narrow consolidation range.',
+      '2. Manipulation (London Open 10:00 - 12:00 EAT): The algorithm intentionally moves price BELOW the daily open (for a bullish day) or ABOVE the daily open (for a bearish day). This creates the high or low of the day (the Judas Swing wick).',
+      '3. Distribution (NY Session 15:30 - 20:00 EAT): The market expands powerfully in the true institutional direction toward opposing liquidity, distributing positions into the hands of breakout chasers.',
+      'If your daily bias is Bullish, you look to BUY BELOW THE DAILY OPEN during the London manipulation wick. If your bias is Bearish, you look to SELL ABOVE THE DAILY OPEN. This is the holy grail of institutional timing.'
+    ],
+    realTimeNote: 'AMD Law: In a bullish day, Open is near the bottom, Manipulation creates the Low of the day, Distribution creates the High, and price Closes near the top.',
+    chartIllustrationType: 'sessions_eat',
+    tvSymbol: 'EURUSD',
+    tvTimeframe: 'D',
+    tvNavButtonLesson: {
+      buttonName: 'Long / Short Position Tool (Left Toolbar)',
+      shortcut: 'Alt + P / 7th Tool Menu',
+      action: 'Click Long Position or Short Position to visually place your Entry, Stop Loss, and Take Profit targets.',
+      howToSample: 'Select Short Position tool, click entry at 1.29169, drag red SL zone to 1.29369 (20 pips), drag green TP zone to 1.28569 (60 pips). Tool displays exact 1:3 Risk-to-Reward ratio!'
+    },
+    samplesAndCases: [
+      {
+        title: 'Full Daily AMD Cycle on EUR/USD',
+        type: 'win_case',
+        description: 'Daily open at 1.0820. Asian consolidation 1.0815 to 1.0830. London manipulated down to 1.0790 (creating Low of the Day). Retested M15 FVG. NY expanded to 1.0880.',
+        mathSnippet: 'Bought London Low at 1.0805, SL: 1.0785 (20 pips), TP: 1.0875 (+70 pips). R:R = 1:3.5. Account gained +$7.00 on 260 KES risk.',
+        takeaway: 'Buying below the daily open during London manipulation guarantees entry at the absolute low of the day.'
+      }
+    ],
+    practiceExercise: {
+      prompt: 'Open TradingView in Pillar 03 and plot the Long/Short Position tool on EUR/USD with a 1:3 Risk-to-Reward ratio.',
+      actionHint: 'Notice how the green profit box and red risk box clearly display your target pips and percentage.',
+      toolTarget: '/chart-mastery'
+    },
+    liveMarketExample: 'Look at yesterday daily candle on EUR/USD or GBP/USD. Observe how the lower wick was formed between 10:00 AM and 11:30 AM EAT before expanding all afternoon.',
+    homework: 'Chart 3 previous daily candles. Mark the Asian Accumulation box, London Manipulation wick, and NY Distribution body.',
+    quiz: {
+      question: 'In the ICT Power of 3 (AMD) framework for a bullish day, where should you look to buy?',
+      options: [
+        'At the daily high after New York close',
+        'Below the Daily Open during the London session manipulation wick',
+        'During the weekend',
+        'Only on M-Pesa paybill confirmation'
+      ],
+      correctIndex: 1,
+      explanation: 'In a bullish AMD cycle, institutions create the low of the day by manipulating price below the daily open during London open before expanding upward.'
+    }
   }
 ];
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PillarData, PillarLesson, PageTab } from '../types';
+import { PillarData, PillarLesson, PageTab, CurrencyPair, Timeframe } from '../types';
 import { PILLARS_LIST_META } from '../data/pillarsMasterclassData';
 import { FxAcademyInteractiveTools } from '../components/tools/FxAcademyInteractiveTools';
 import { ChartMasteryInteractiveTools } from '../components/tools/ChartMasteryInteractiveTools';
@@ -10,6 +10,8 @@ import { PsychologyInteractiveTools } from '../components/tools/PsychologyIntera
 import { LivePulseInteractiveTools } from '../components/tools/LivePulseInteractiveTools';
 import { GrowthLabInteractiveTools } from '../components/tools/GrowthLabInteractiveTools';
 import { LessonCandleIllustration } from '../components/common/LessonCandleIllustration';
+import { TradingViewEmbedWidget } from '../components/tools/TradingViewEmbedWidget';
+import { TradingViewNavigationGuide } from '../components/tools/TradingViewNavigationGuide';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -27,7 +29,13 @@ import {
   FileText,
   Copy,
   Zap,
-  ChevronRight
+  ChevronRight,
+  Compass,
+  BarChart3,
+  ExternalLink,
+  X,
+  Maximize2,
+  Cpu
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -44,6 +52,11 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedLessonId, setExpandedLessonId] = useState<string>(pillar.lessons[0]?.id || '');
+
+  // Modals for TradingView Navigation & Live TradingView
+  const [showTvGuideModal, setShowTvGuideModal] = useState(false);
+  const [liveChartModalPair, setLiveChartModalPair] = useState<CurrencyPair | null>(null);
+  const [liveChartModalTf, setLiveChartModalTf] = useState<Timeframe>('M15');
 
   // Completed Lessons per pillar stored in localStorage
   const [completedLessons, setCompletedLessons] = useState<string[]>(() => {
@@ -78,6 +91,17 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
     100,
     Math.round((completedLessons.length / pillar.lessons.length) * 100)
   );
+
+  const extractPair = (raw: string): CurrencyPair => {
+    if (raw.includes('EUR/USD')) return 'EUR/USD';
+    if (raw.includes('USD/JPY')) return 'USD/JPY';
+    if (raw.includes('GBP/JPY')) return 'GBP/JPY';
+    if (raw.includes('XAU/USD') || raw.toLowerCase().includes('gold')) return 'XAU/USD';
+    if (raw.includes('AUD/USD')) return 'AUD/USD';
+    if (raw.includes('USD/CAD')) return 'USD/CAD';
+    if (raw.includes('BTC/USD') || raw.toLowerCase().includes('btc')) return 'BTC/USD';
+    return 'GBP/USD';
+  };
 
   const filteredLessons = pillar.lessons.filter((l) =>
     l.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -140,6 +164,37 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
               style={{ width: `${progressPercent}%` }}
             />
           </div>
+        </div>
+
+        {/* Quick Institutional Action Toolbar */}
+        <div className="flex items-center gap-3 flex-wrap pt-3 border-t border-slate-800/80">
+          <button
+            onClick={() => setShowTvGuideModal(true)}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#D4AF37]/20 via-amber-500/20 to-[#F3E5AB]/20 hover:from-[#D4AF37]/30 hover:to-amber-500/30 text-[#D4AF37] border border-[#D4AF37]/50 text-xs font-mono font-bold flex items-center gap-2 transition shadow-sm"
+          >
+            <Compass className="w-4 h-4 text-[#D4AF37]" />
+            <span>🧭 TradingView Navigation & Buttons Guide</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setLiveChartModalPair('GBP/USD');
+              setLiveChartModalTf('M15');
+            }}
+            className="px-4 py-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-white border border-slate-700 hover:border-emerald-500 text-xs font-mono font-bold flex items-center gap-2 transition"
+          >
+            <BarChart3 className="w-4 h-4 text-[#00C261]" />
+            <span>📈 Open Real TradingView Chart</span>
+            <span className="w-2 h-2 rounded-full bg-[#00C261] animate-ping" />
+          </button>
+
+          <button
+            onClick={() => onNavigatePillar('/ai-scanner')}
+            className="px-4 py-2.5 rounded-xl bg-cyan-950/40 hover:bg-cyan-900/50 text-cyan-300 border border-cyan-700/50 text-xs font-mono font-bold flex items-center gap-2 transition"
+          >
+            <Cpu className="w-4 h-4 text-cyan-400" />
+            <span>⚡ Deep AI EA Scanner</span>
+          </button>
         </div>
       </div>
 
@@ -307,6 +362,49 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
                   {/* Lesson Detailed Content (Visible when expanded) */}
                   {isExpanded && (
                     <div className="p-5 sm:p-7 border-t border-slate-800/80 space-y-6 animate-in slide-in-from-top-2 duration-200">
+                      {/* Interactive Lesson Navigation Strip: TradingView + Real Samples + EA Scanner */}
+                      <div className="p-3.5 rounded-2xl bg-gradient-to-r from-slate-950 via-[#0B101D] to-slate-950 border border-[#D4AF37]/40 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-mono font-bold text-slate-300 flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-[#D4AF37]" />
+                            <span>Interactive Practice:</span>
+                          </span>
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-900 text-[#D4AF37] border border-slate-800 font-bold">
+                            {extractPair(lesson.realWorldExample.pair)}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            onClick={() => {
+                              const p = extractPair(lesson.realWorldExample.pair);
+                              setLiveChartModalPair(p);
+                              setLiveChartModalTf(lesson.realWorldExample.pair.includes('H1') ? 'H1' : lesson.realWorldExample.pair.includes('H4') ? 'H4' : lesson.realWorldExample.pair.includes('Daily') ? 'D1' : 'M15');
+                            }}
+                            className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white border border-slate-700 hover:border-[#D4AF37] text-[11px] font-mono font-bold flex items-center gap-1.5 transition active:scale-95 shadow-sm"
+                          >
+                            <BarChart3 className="w-3.5 h-3.5 text-[#00C261]" />
+                            <span>🚀 Open in TradingView</span>
+                          </button>
+
+                          <button
+                            onClick={() => setShowTvGuideModal(true)}
+                            className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-slate-700 hover:border-[#D4AF37] text-[11px] font-mono font-bold flex items-center gap-1.5 transition active:scale-95"
+                          >
+                            <Compass className="w-3.5 h-3.5 text-[#D4AF37]" />
+                            <span>🧭 TV Buttons Lesson</span>
+                          </button>
+
+                          <button
+                            onClick={() => onNavigatePillar('/ai-scanner')}
+                            className="px-3 py-1.5 rounded-xl bg-cyan-950/40 hover:bg-cyan-900/50 text-cyan-300 border border-cyan-800/60 text-[11px] font-mono font-bold flex items-center gap-1.5 transition active:scale-95"
+                          >
+                            <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>⚡ Deep AI EA Scan</span>
+                          </button>
+                        </div>
+                      </div>
+
                       {/* Deep Concept Description */}
                       <div className="space-y-3">
                         <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-[#D4AF37] flex items-center gap-1.5">
@@ -487,6 +585,121 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
           </div>
         </div>
       </div>
+
+      {/* =========================================================================
+          MODAL 1: TRADINGVIEW NAVIGATION & BUTTONS LESSON GUIDE
+         ========================================================================= */}
+      {showTvGuideModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+          <div className="relative w-full max-w-5xl rounded-3xl bg-[#090D16] border border-[#D4AF37]/50 shadow-[0_0_50px_rgba(212,175,55,0.25)] flex flex-col max-h-[92vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-800 bg-[#0F172A] flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-[#D4AF37]/15 border border-[#D4AF37]/35 text-[#D4AF37]">
+                  <Compass className="w-5 h-5 animate-spin-slow" />
+                </span>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+                    <span>TradingView Navigation & Button Directory</span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40">
+                      Live Academy
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Comprehensive interactive lessons for every TradingView button, shortcut, ICT setup, and newbie mistake.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowTvGuideModal(false)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4">
+              <TradingViewNavigationGuide />
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center justify-between">
+              <span className="text-xs font-mono text-slate-400">
+                Pro Tip: Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-white font-mono text-[10px]">Alt + F</kbd> for OTE Fibonacci & <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-white font-mono text-[10px]">Alt + J</kbd> for BSL/SSL Rays
+              </span>
+              <button
+                onClick={() => setShowTvGuideModal(false)}
+                className="px-5 py-2 rounded-xl btn-gold text-black font-extrabold text-xs uppercase tracking-wider"
+              >
+                Close Guide
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODAL 2: LIVE EMBEDDED TRADINGVIEW CHART
+         ========================================================================= */}
+      {liveChartModalPair && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+          <div className="relative w-full max-w-6xl rounded-3xl bg-[#090D16] border border-[#D4AF37]/50 shadow-[0_0_50px_rgba(212,175,55,0.25)] flex flex-col max-h-[94vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-800 bg-[#0F172A] flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-emerald-400">
+                  <BarChart3 className="w-5 h-5" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base sm:text-lg font-black text-white">
+                      Live TradingView Embed: {liveChartModalPair} ({liveChartModalTf})
+                    </h3>
+                    <span className="w-2 h-2 rounded-full bg-[#00C261] animate-ping" />
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Real-time market candlestick feed with dynamic indicators, volume, and timeframe switching.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setLiveChartModalPair(null);
+                    onNavigatePillar('/ai-scanner');
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-700 text-cyan-300 text-xs font-mono font-bold flex items-center gap-1.5 transition"
+                >
+                  <Cpu className="w-3.5 h-3.5" />
+                  <span>Send to Deep AI EA</span>
+                </button>
+
+                <button
+                  onClick={() => setLiveChartModalPair(null)}
+                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 bg-[#080C14]">
+              <TradingViewEmbedWidget
+                pair={liveChartModalPair}
+                timeframe={liveChartModalTf}
+                onPairChange={(p) => setLiveChartModalPair(p)}
+                onTimeframeChange={(tf) => setLiveChartModalTf(tf)}
+                onClose={() => setLiveChartModalPair(null)}
+                isCollapsible={false}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
