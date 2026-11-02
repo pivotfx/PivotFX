@@ -85,11 +85,6 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
     l.concept.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Find previous and next pillar
-  const currentIndex = PILLARS_LIST_META.findIndex((p) => p.id === pillar.id);
-  const prevPillar = currentIndex > 0 ? PILLARS_LIST_META[currentIndex - 1] : null;
-  const nextPillar = currentIndex < PILLARS_LIST_META.length - 1 ? PILLARS_LIST_META[currentIndex + 1] : null;
-
   return (
     <div className="space-y-8 pb-20">
       {/* 1. Header with Back to Landing & Progress Bar */}
@@ -376,6 +371,61 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
                         </div>
                       </div>
 
+                      {/* 2026 Institutional Master Notes & Execution Blueprint */}
+                      <div className="p-5 rounded-2xl bg-gradient-to-br from-[#0F172A] to-[#0A0E18] border border-[#D4AF37]/35 space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-[#D4AF37] animate-pulse" />
+                            <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-[#D4AF37]">
+                              Institutional Master Notes & Execution Blueprint (2026 Updated)
+                            </h4>
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-400">Gilgil • Nairobi • Global ECN</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                          {/* Note 1: Gilgil $2 Rule */}
+                          <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 space-y-1">
+                            <span className="text-[10px] font-mono text-[#D4AF37] font-bold block uppercase">
+                              1. Gilgil $2 Sizing Law (Capital Shield):
+                            </span>
+                            <p className="text-slate-300 leading-relaxed text-[11px]">
+                              Never risk more than $2.00 (approx 260 KES) on any single setup. Sizing formula: <code className="text-amber-300 font-mono">Lot Size = $2.00 / (SL Pips × $0.10)</code>. On a 20-pip stop loss, trade strictly 0.01 micro lot. If stop is 10 pips, maximum is 0.02 micro lots.
+                            </p>
+                          </div>
+
+                          {/* Note 2: EAT Liquidity Window */}
+                          <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 space-y-1">
+                            <span className="text-[10px] font-mono text-cyan-400 font-bold block uppercase">
+                              2. East Africa Time (EAT) Liquidity Windows:
+                            </span>
+                            <p className="text-slate-300 leading-relaxed text-[11px]">
+                              London Open kicks off at <strong>10:00 AM EAT</strong> with Judas liquidity sweeps. New York Session opens at <strong>3:30 PM EAT</strong> with peak momentum. Avoid opening new market orders between 7:00 PM and 2:00 AM EAT during low-liquidity rollover spread spikes.
+                            </p>
+                          </div>
+
+                          {/* Note 3: Broker Environment */}
+                          <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 space-y-1">
+                            <span className="text-[10px] font-mono text-emerald-400 font-bold block uppercase">
+                              3. Kenyan Broker & M-Pesa Economics:
+                            </span>
+                            <p className="text-slate-300 leading-relaxed text-[11px]">
+                              Prefer <strong>FXPesa</strong> (CMA Kenya regulated, zero-fee instant M-Pesa deposits & withdrawals, tight EUR/USD & GBP/USD spreads ~1.2 pips). For offshore accounts (HFM, FBS), ensure leverage does not exceed 1:100 to prevent psychological overleveraging.
+                            </p>
+                          </div>
+
+                          {/* Note 4: MT4/MT5 Execution Hotkeys */}
+                          <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 space-y-1">
+                            <span className="text-[10px] font-mono text-purple-400 font-bold block uppercase">
+                              4. Pro MetaTrader Hotkeys & Discipline:
+                            </span>
+                            <p className="text-slate-300 leading-relaxed text-[11px]">
+                              Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-white">F9</kbd> for instant order ticket. Use <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-white">Ctrl + T</kbd> to toggle the terminal. Always set your Stop Loss before clicking Buy or Sell. Never move your Stop Loss backwards during drawdown.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
                       {/* Actionable Execution Checklist */}
                       <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2">
                         <span className="text-[11px] font-mono font-bold uppercase text-slate-400">
@@ -416,35 +466,24 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
             })}
           </div>
 
-          {/* Next / Prev Pillar Navigation Footer */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-6 border-t border-slate-800">
-            {prevPillar ? (
-              <button
-                onClick={() => onNavigatePillar(prevPillar.id)}
-                className="w-full sm:w-auto p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-left transition group space-y-1"
-              >
-                <span className="text-[10px] font-mono text-slate-500 uppercase block">
-                  ← Previous Masterclass
-                </span>
-                <span className="text-xs font-bold text-white group-hover:text-[#D4AF37] transition-colors block">
-                  Pillar {prevPillar.number}: {prevPillar.title}
-                </span>
-              </button>
-            ) : <div />}
+          {/* Standalone Return to Home Portal (Enforcing Pillar Independence) */}
+          <div className="pt-8 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="space-y-1 text-center sm:text-left">
+              <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#D4AF37] block">
+                Independent Masterclass Chamber
+              </span>
+              <p className="text-xs text-slate-400">
+                Pillars are isolated curriculum environments. Return to the Home Portal to enter another academy.
+              </p>
+            </div>
 
-            {nextPillar && (
-              <button
-                onClick={() => onNavigatePillar(nextPillar.id)}
-                className="w-full sm:w-auto p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-[#D4AF37] text-right transition group space-y-1"
-              >
-                <span className="text-[10px] font-mono text-[#D4AF37] uppercase block">
-                  Next Masterclass →
-                </span>
-                <span className="text-xs font-bold text-white group-hover:text-[#D4AF37] transition-colors block">
-                  Pillar {nextPillar.number}: {nextPillar.title}
-                </span>
-              </button>
-            )}
+            <button
+              onClick={onBackToLanding}
+              className="w-full sm:w-auto px-6 py-3.5 rounded-2xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl hover:scale-105 active:scale-95 transition"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Return to Home Portal (All 8 Pillars)</span>
+            </button>
           </div>
         </div>
       </div>
