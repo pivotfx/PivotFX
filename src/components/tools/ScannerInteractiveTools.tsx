@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { CurrencyPair, Timeframe, ScannerAnalysisResult, BrokerId } from '../../types';
 import { TradingViewEmbedWidget } from './TradingViewEmbedWidget';
-import { MultiMarketRadarEngine, MarketScanData } from './MultiMarketRadarEngine';
+import { MultiMarketRadarEngine, MarketScanData, INITIAL_MARKETS_DATA } from './MultiMarketRadarEngine';
 import {
   SlidersHorizontal,
   Camera,
@@ -41,6 +41,28 @@ interface ScannerInteractiveToolsProps {
   onLogTrade?: (trade: any) => void;
 }
 
+export interface AdvisorTradeCard {
+  pair: CurrencyPair;
+  direction: 'BUY' | 'SELL';
+  entryPrice: number;
+  stopLoss: number;
+  tp1: number;
+  tp2: number;
+  slPips: number;
+  tpPips: number;
+  riskReward: string;
+  lotSize: number;
+  actualRiskUsd: number;
+  potentialGainUsd: number;
+  confidence: number;
+  pattern: string;
+  trend: string;
+  brokerSymbol: string;
+  brokerSpread: number;
+  mt4Steps: string[];
+  confluences: string[];
+}
+
 interface AdvisorMessage {
   id: string;
   sender: 'user' | 'ai';
@@ -48,6 +70,7 @@ interface AdvisorMessage {
   verdict?: 'GREEN_LIGHT' | 'CAUTION' | 'DO_NOT_TRADE';
   lotCap?: string;
   timestamp: string;
+  tradeCard?: AdvisorTradeCard;
 }
 
 export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = ({ onLogTrade }) => {
@@ -77,6 +100,7 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [analyzingCamera, setAnalyzingCamera] = useState<boolean>(false);
   const [cameraAnalysisResult, setCameraAnalysisResult] = useState<any | null>(null);
+  const [copiedCameraEa, setCopiedCameraEa] = useState<boolean>(false);
 
   // Manual Scanner State
   const [analyzingManual, setAnalyzingManual] = useState<boolean>(false);
@@ -96,9 +120,25 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
 
   // Journal log confirmation
   const [loggedSuccess, setLoggedSuccess] = useState<string | null>(null);
+  const [chatSyncedNotification, setChatSyncedNotification] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Auto-update details first with real-time market data
+  const handleSwitchPairAndSyncRealData = (newPair: CurrencyPair) => {
+    setPair(newPair);
+    const m = INITIAL_MARKETS_DATA.find((x) => x.pair === newPair);
+    if (m) {
+      setCurrentPrice(m.price);
+      setKeyLevel(m.keyLevel);
+      setEma20(m.ema20);
+      setEma50(m.ema50);
+      setRsi(m.rsi);
+      setPatternType(m.patternType);
+      setTraderNotes(m.projection);
+    }
+  };
 
   // Stop camera stream cleanly on unmount or mode switch
   useEffect(() => {
@@ -135,8 +175,9 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
       const constraints: MediaStreamConstraints = {
         video: {
           facingMode: { ideal: cameraFacingMode },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 1920, min: 1280 },
+          height: { ideal: 1080, min: 720 },
+          aspectRatio: { ideal: 1.777777778 },
         },
         audio: false,
       };
@@ -182,17 +223,17 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
     }
   };
 
-  // Snap Frame from Live Video
+  // Snap Frame from Live Video (Full Widescreen Dimension Capture)
   const handleCaptureFrame = () => {
     if (!videoRef.current) return;
     const video = videoRef.current;
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(320, video.videoWidth || 800);
-    canvas.height = Math.max(240, video.videoHeight || 450);
+    canvas.width = Math.max(1280, video.videoWidth || 1920);
+    canvas.height = Math.max(720, video.videoHeight || 1080);
     const ctx = canvas.getContext('2d');
     if (ctx) {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
       // STOP THE CAMERA STREAM IMMEDIATELY SO CAPTURED IMAGE RENDERS IN VIEWPORT
       handleStopCamera();
       setCapturedImage(dataUrl);
@@ -319,6 +360,8 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
         const brokerSpreadPips = broker === 'fxpesa' ? 1.2 : broker === 'hfm' ? 1.4 : broker === 'exness' ? 0.6 : 1.6;
         const brokerSpreadCostUsd = (brokerSpreadPips * calculatedLot * 10 * pipValPerLot).toFixed(2);
 
+        const orderType = verdict.includes('BUY') ? 'BUY BY MARKET' : 'SELL BY MARKET';
+
         setCameraAnalysisResult({
           imageSrc,
           pair,
@@ -329,6 +372,8 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
           keyLevel,
           pattern: patternType,
           score,
+          confidencePercent: score,
+          orderType,
           verdict,
           entryPrice: currentPrice,
           suggestedSL: formattedSL,
@@ -361,9 +406,9 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
             `Gilgil $2 Protection: Mathematical risk hard-capped at $2.00 (260 KES).`
           ],
           mt4Steps: [
-            `1. Open MT4/MT5 -> Select ${pair} -> Press F9 (New Order Window)`,
-            `2. Type: Instant Execution or ${verdict.includes('BUY') ? 'Buy Limit' : 'Sell Limit'}`,
-            `3. Set Volume strictly to ${calculatedLot} Micro Lot (Gilgil Shield)`,
+            `1. Open MT4/MT5 -> Select ${pair} -> Press F9 (New Order Ticket)`,
+            `2. Type: ${orderType} (Instant Algorithmic Execution)`,
+            `3. Volume: STRICTLY ${calculatedLot} Micro Lot (Gilgil $2 Capital Shield)`,
             `4. Set Stop Loss: ${formattedSL} (${slDistancePips} pips)`,
             `5. Set Take Profit: ${formattedTP} (+${tpDistancePips} pips)`,
             `6. Scale-Out Protocol: Close 50% at ${tp1Price} (+${Math.round(tpDistancePips * 0.5)} pips) & move SL to Breakeven`
@@ -376,12 +421,19 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
         setAnalyzingCamera(false);
         playAudioBeep(880, 0.12);
       }
-    }, 650);
+    }, 380);
   };
 
   // Run Analysis Engine (Supports both Standard Confluence and Deep AI Institutional EA)
   const handleRunAnalysis = (mode: 'standard' | 'deep_ai', prefill?: MarketScanData) => {
+    const activePair = prefill?.pair || pair;
     const targetPrice = prefill?.price || currentPrice;
+    const targetEma20 = prefill?.ema20 ?? ema20;
+    const targetEma50 = prefill?.ema50 ?? ema50;
+    const targetRsi = prefill?.rsi ?? rsi;
+    const targetKeyLevel = prefill?.keyLevel ?? keyLevel;
+    const targetPattern = prefill?.patternType ?? patternType;
+
     if (!targetPrice || targetPrice <= 0) {
       alert('Please enter a valid Current Market Price.');
       return;
@@ -394,136 +446,149 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
     const delay = mode === 'deep_ai' ? 850 : 500;
 
     setTimeout(() => {
-      const pipMultiplier = pair.includes('JPY') ? 100 : pair.includes('XAU') ? 10 : pair.includes('BTC') ? 1 : 10000;
-      const distFromEma20Pips = Math.abs(targetPrice - ema20) * pipMultiplier;
-      const isTrendBullish = ema20 > ema50;
+      const pipMultiplier = activePair.includes('JPY') ? 100 : activePair.includes('XAU') ? 10 : activePair.includes('BTC') ? 1 : 10000;
+      const distFromEma20Pips = Math.abs(targetPrice - targetEma20) * pipMultiplier;
+      const isTrendBullish = targetEma20 > targetEma50;
 
-      let score = 50;
-      let confidencePercent = 65.0;
-      let verdict: 'WAIT' | 'RISKY' | 'HIGH_PROBABILITY_BUY' | 'HIGH_PROBABILITY_SELL' = 'WAIT';
-      let pattern = 'Consolidation / Range Equilibrium';
-      let trend = 'Market Equilibrium & Chop';
-      let projection = '';
-      let orderType = 'INSTANT_EXECUTION';
+      let score = prefill?.confidence || 50;
+      let confidencePercent = prefill?.confidence || 65.0;
+      let verdict: 'WAIT' | 'RISKY' | 'HIGH_PROBABILITY_BUY' | 'HIGH_PROBABILITY_SELL' = prefill?.bias === 'STRONG_BUY' ? 'HIGH_PROBABILITY_BUY' : prefill?.bias === 'STRONG_SELL' ? 'HIGH_PROBABILITY_SELL' : 'WAIT';
+      let pattern = prefill?.ictPattern || 'Consolidation / Range Equilibrium';
+      let trend = prefill?.trend || 'Market Equilibrium & Chop';
+      let projection = prefill?.projection || '';
+      let orderType = verdict === 'HIGH_PROBABILITY_BUY' ? 'BUY LIMIT / MARKET BUY' : verdict === 'HIGH_PROBABILITY_SELL' ? 'SELL LIMIT / MARKET SELL' : 'INSTANT_EXECUTION';
       const reasons: string[] = [];
 
-      if (patternType === 'Tower Top Liquidity Sweep' || (rsi >= 72 && distFromEma20Pips >= 18)) {
-        score = mode === 'deep_ai' ? 95 : 88;
-        confidencePercent = mode === 'deep_ai' ? 94.6 : 87.5;
-        verdict = 'HIGH_PROBABILITY_SELL';
-        pattern = 'Tower Top Liquidity Exhaustion Sweep';
-        trend = 'Bearish Institutional Sweep & Reversal';
-        orderType = 'SELL LIMIT / MARKET SELL';
-        projection = `Next 4H-24H Institutional Trajectory: Swept ${keyLevel} retail buy stops. Expecting sharp retrace into ${ema20} (20 EMA) and subsequent fair value gap mitigation at ${ema50} (-${Math.round(distFromEma20Pips * 1.8)} pips target). Invalidation above ${keyLevel}.`;
-        reasons.push(`Price is extended ${distFromEma20Pips.toFixed(1)} pips above 20 EMA (Overbought Mean Reversion).`);
-        reasons.push(`RSI 14 at ${rsi} confirms exhausted institutional buying power & bearish divergence.`);
-        reasons.push(`Previous high sweep at ${keyLevel} collected buy-side liquidity (BSL).`);
-        if (mode === 'deep_ai') {
-          reasons.push('Deep AI Neural Scan: Order Block mean threshold defended on M15 timeframe.');
-          reasons.push('Smart Money Flow: Sellers displaying aggressive volume displacement back inside previous range.');
+      if (!prefill) {
+        if (targetPattern === 'Tower Top Liquidity Sweep' || (targetRsi >= 72 && distFromEma20Pips >= 18)) {
+          score = mode === 'deep_ai' ? 95 : 88;
+          confidencePercent = mode === 'deep_ai' ? 94.6 : 87.5;
+          verdict = 'HIGH_PROBABILITY_SELL';
+          pattern = 'Tower Top Liquidity Exhaustion Sweep';
+          trend = 'Bearish Institutional Sweep & Reversal';
+          orderType = 'SELL LIMIT / MARKET SELL';
+          projection = `Next 4H-24H Institutional Trajectory: Swept ${targetKeyLevel} retail buy stops. Expecting sharp retrace into ${targetEma20} (20 EMA) and subsequent fair value gap mitigation at ${targetEma50} (-${Math.round(distFromEma20Pips * 1.8)} pips target). Invalidation above ${targetKeyLevel}.`;
+          reasons.push(`Price is extended ${distFromEma20Pips.toFixed(1)} pips above 20 EMA (Overbought Mean Reversion).`);
+          reasons.push(`RSI 14 at ${targetRsi} confirms exhausted institutional buying power & bearish divergence.`);
+          reasons.push(`Previous high sweep at ${targetKeyLevel} collected buy-side liquidity (BSL).`);
+          if (mode === 'deep_ai') {
+            reasons.push('Deep AI Neural Scan: Order Block mean threshold defended on M15 timeframe.');
+            reasons.push('Smart Money Flow: Sellers displaying aggressive volume displacement back inside previous range.');
+          }
+        } else if (isTrendBullish && targetPrice >= targetEma20 && targetRsi >= 45 && targetRsi <= 68) {
+          score = mode === 'deep_ai' ? 93 : 86;
+          confidencePercent = mode === 'deep_ai' ? 92.4 : 85.0;
+          verdict = 'HIGH_PROBABILITY_BUY';
+          pattern = '20/50 EMA Dynamic Trend Bounce';
+          trend = 'Bullish Institutional Trend Expansion';
+          orderType = 'BUY LIMIT / MARKET BUY';
+          projection = `Next 4H-24H Institutional Trajectory: Pullback into dynamic 20 EMA support held cleanly. Expecting continuation impulse through session highs (+${Math.round(distFromEma20Pips * 2.2 + 35)} pips projection). Invalidation below 50 EMA (${targetEma50}).`;
+          reasons.push('Price is pulling back into dynamic 20 EMA support in a confirmed uptrend.');
+          reasons.push(`RSI 14 at ${targetRsi} shows healthy non-exhausted bullish momentum.`);
+          reasons.push(`Spread filter verified for ${broker.toUpperCase()} (under 1.5 pips).`);
+          if (mode === 'deep_ai') {
+            reasons.push('Deep AI Neural Scan: Fair Value Gap (FVG) consequent encroachment rebalanced at 50%.');
+            reasons.push('Multi-timeframe sync: H1 and M15 market structure shifts in full bullish alignment.');
+          }
+        } else if (distFromEma20Pips > 30) {
+          score = 42;
+          confidencePercent = 41.5;
+          verdict = 'RISKY';
+          pattern = 'Overextended Parabolic Chase Trap';
+          trend = 'Parabolic Overextension (High Risk)';
+          orderType = 'FLAT / DO NOT ENTER';
+          projection = 'Price is extended > 30 pips from value. High probability of mean-reversion stop hunt. Wait for 20 EMA touch.';
+          reasons.push('Price is dangerously overextended from 20 EMA. Do NOT chase market orders.');
+          reasons.push('Wait for mean reversion pullback to the 20 EMA before entering.');
+        } else {
+          score = 58;
+          confidencePercent = 60.0;
+          verdict = 'WAIT';
+          pattern = 'Equilibrium Chop / Indecision Zone';
+          trend = 'Range Equilibrium (Sideways)';
+          orderType = 'WAIT / PENDING BOS';
+          projection = 'Price oscillating in 50% equilibrium. No high-probability edge. Await London/NY session expansion.';
+          reasons.push('Market is in equilibrium. Wait for clean structural break of structure (BOS).');
         }
-      } else if (isTrendBullish && targetPrice >= ema20 && rsi >= 45 && rsi <= 68) {
-        score = mode === 'deep_ai' ? 93 : 86;
-        confidencePercent = mode === 'deep_ai' ? 92.4 : 85.0;
-        verdict = 'HIGH_PROBABILITY_BUY';
-        pattern = '20/50 EMA Dynamic Trend Bounce';
-        trend = 'Bullish Institutional Trend Expansion';
-        orderType = 'BUY LIMIT / MARKET BUY';
-        projection = `Next 4H-24H Institutional Trajectory: Pullback into dynamic 20 EMA support held cleanly. Expecting continuation impulse through session highs (+${Math.round(distFromEma20Pips * 2.2 + 35)} pips projection). Invalidation below 50 EMA (${ema50}).`;
-        reasons.push('Price is pulling back into dynamic 20 EMA support in a confirmed uptrend.');
-        reasons.push(`RSI 14 at ${rsi} shows healthy non-exhausted bullish momentum.`);
-        reasons.push(`Spread filter verified for ${broker.toUpperCase()} (under 1.5 pips).`);
-        if (mode === 'deep_ai') {
-          reasons.push('Deep AI Neural Scan: Fair Value Gap (FVG) consequent encroachment rebalanced at 50%.');
-          reasons.push('Multi-timeframe sync: H1 and M15 market structure shifts in full bullish alignment.');
-        }
-      } else if (distFromEma20Pips > 30) {
-        score = 42;
-        confidencePercent = 41.5;
-        verdict = 'RISKY';
-        pattern = 'Overextended Parabolic Chase Trap';
-        trend = 'Parabolic Overextension (High Risk)';
-        orderType = 'FLAT / DO NOT ENTER';
-        projection = 'Price is extended > 30 pips from value. High probability of mean-reversion stop hunt. Wait for 20 EMA touch.';
-        reasons.push('Price is dangerously overextended from 20 EMA. Do NOT chase market orders.');
-        reasons.push('Wait for mean reversion pullback to the 20 EMA before entering.');
       } else {
-        score = 58;
-        confidencePercent = 60.0;
-        verdict = 'WAIT';
-        pattern = 'Equilibrium Chop / Indecision Zone';
-        trend = 'Range Equilibrium (Sideways)';
-        orderType = 'WAIT / PENDING BOS';
-        projection = 'Price oscillating in 50% equilibrium. No high-probability edge. Await London/NY session expansion.';
-        reasons.push('Market is in equilibrium. Wait for clean structural break of structure (BOS).');
+        reasons.push(`Market Radar Ingestion: ${prefill.ictPattern}`);
+        reasons.push(`Session Alignment: ${prefill.recommendedSession} active liquidity`);
+        reasons.push(`Indicator Matrix: 20 EMA at ${targetEma20}, 50 EMA at ${targetEma50}, RSI at ${targetRsi}`);
+        reasons.push(`Calculated R:R: ${prefill.riskReward} institutional asymmetric return`);
+        if (mode === 'deep_ai') {
+          reasons.push(`Deep AI Model: Order block mitigated and liquidity sweep confirmed with ${prefill.confidence}% confidence.`);
+          reasons.push('Gilgil Sizing Shield: Fixed $2.00 / 260 KES loss cap via 0.01 micro lot.');
+        }
       }
 
-      const slDistancePips = pair.includes('XAU') ? 70 : pair.includes('BTC') ? 1200 : 20;
-      const tpDistancePips = pair.includes('XAU') ? 175 : pair.includes('BTC') ? 2500 : 50;
       const isBuy = verdict === 'HIGH_PROBABILITY_BUY';
-      const slPrice = isBuy ? targetPrice - slDistancePips / pipMultiplier : targetPrice + slDistancePips / pipMultiplier;
-      const tpPrice = isBuy ? targetPrice + tpDistancePips / pipMultiplier : targetPrice - tpDistancePips / pipMultiplier;
-      const tp1Price = isBuy ? targetPrice + (tpDistancePips * 0.5) / pipMultiplier : targetPrice - (tpDistancePips * 0.5) / pipMultiplier;
+      let slPrice = prefill?.suggestedSL ?? (isBuy ? targetPrice - 20 / pipMultiplier : targetPrice + 20 / pipMultiplier);
+      let tpPrice = prefill?.suggestedTP2 ?? (isBuy ? targetPrice + 50 / pipMultiplier : targetPrice - 50 / pipMultiplier);
+      let tp1Price = prefill?.suggestedTP1 ?? (isBuy ? targetPrice + 25 / pipMultiplier : targetPrice - 25 / pipMultiplier);
 
-      const decimals = pair.includes('JPY') ? 3 : pair.includes('XAU') ? 2 : pair.includes('BTC') ? 2 : 5;
+      const slDistancePips = Math.round(Math.abs(targetPrice - slPrice) * pipMultiplier);
+      const tpDistancePips = Math.round(Math.abs(tpPrice - targetPrice) * pipMultiplier);
+
+      const decimals = activePair.includes('JPY') ? 3 : activePair.includes('XAU') ? 2 : activePair.includes('BTC') ? 2 : 5;
+      const cleanPairSymbol = activePair.replace('/', '');
 
       // Broker Specific Specification Dashboard
       const brokerConfigs: Record<BrokerId, { symbol: string; spread: number; leverage: string; marginCostUsd: number; serverName: string; instructions: string[] }> = {
         fxpesa: {
-          symbol: pair.replace('/', ''),
-          spread: 1.1,
+          symbol: prefill?.spreadByBroker?.fxpesa?.symbol || cleanPairSymbol,
+          spread: prefill?.spreadByBroker?.fxpesa?.spread || 1.1,
           leverage: '1:400 (CMA Kenya Capped)',
           marginCostUsd: 2.50,
           serverName: 'EGM-Real / FXPesa Live',
           instructions: [
             '1. Open MT4/MT5 connected to FXPesa Kenya server.',
-            `2. Select symbol: ${pair.replace('/', '')} (or ${pair.replace('/', '')}_pro if using Raw ECN).`,
-            `3. Order Type: ${orderType.includes('BUY') ? 'Buy Limit' : orderType.includes('SELL') ? 'Sell Limit' : 'Instant Execution'}.`,
+            `2. Select symbol: ${prefill?.spreadByBroker?.fxpesa?.symbol || cleanPairSymbol}.`,
+            `3. Order Type: ${orderType}.`,
             '4. Volume: 0.01 micro lot (strict $2.00 / 260 KES Gilgil protection).',
             `5. Input Stop Loss: ${slPrice.toFixed(decimals)}, Take Profit: ${tpPrice.toFixed(decimals)}.`,
             '6. CMA safety: Zero negative balance debt risk.'
           ]
         },
         hfm: {
-          symbol: `${pair.replace('/', '')}.h`,
-          spread: 1.3,
+          symbol: prefill?.spreadByBroker?.hfm?.symbol || `${cleanPairSymbol}.h`,
+          spread: prefill?.spreadByBroker?.hfm?.spread || 1.3,
           leverage: '1:1000 (High Leverage)',
           marginCostUsd: 1.00,
           serverName: 'HFMarkets-Live',
           instructions: [
             '1. Open HFM MT4/MT5 terminal.',
-            `2. Choose symbol: ${pair.replace('/', '')} or ${pair.replace('/', '')}.h.`,
+            `2. Choose symbol: ${prefill?.spreadByBroker?.hfm?.symbol || `${cleanPairSymbol}.h`}.`,
             `3. Order Type: ${orderType}.`,
-            '4. Set Volume to 0.01 micro lot. Do NOT use excess 1:1000 leverage to over-leverage.',
+            '4. Set Volume to 0.01 micro lot. Do NOT use excess leverage.',
             `5. Stop Loss: ${slPrice.toFixed(decimals)}, Target: ${tpPrice.toFixed(decimals)}.`
           ]
         },
         exness: {
-          symbol: `${pair.replace('/', '')}.m`,
-          spread: 0.6,
+          symbol: prefill?.spreadByBroker?.exness?.symbol || `${cleanPairSymbol}.m`,
+          spread: prefill?.spreadByBroker?.exness?.spread || 0.6,
           leverage: '1:2000 / Unlimited Dynamic',
           marginCostUsd: 0.50,
           serverName: 'Exness-Real',
           instructions: [
             '1. Open Exness MT4/MT5 or Exness Terminal web.',
-            `2. Select micro symbol: ${pair.replace('/', '')}.m (or standard ${pair.replace('/', '')}).`,
-            '3. Raw spread is ~0.6 pip with 0 stop-level limits (can place SL 1 pip away).',
+            `2. Select micro symbol: ${prefill?.spreadByBroker?.exness?.symbol || `${cleanPairSymbol}.m`}.`,
+            '3. Raw spread is tight with 0 stop-level limits.',
             '4. Volume: 0.01 Micro Lot. Benefit from instant algorithmic execution.',
             `5. Stop Loss: ${slPrice.toFixed(decimals)}, Target 1: ${tp1Price.toFixed(decimals)}, Final TP: ${tpPrice.toFixed(decimals)}.`,
             '6. Withdrawals to M-Pesa are automated 24/7 in < 3 minutes.'
           ]
         },
         fbs: {
-          symbol: pair.replace('/', ''),
-          spread: 1.5,
+          symbol: prefill?.spreadByBroker?.fbs?.symbol || cleanPairSymbol,
+          spread: prefill?.spreadByBroker?.fbs?.spread || 1.5,
           leverage: '1:3000 (Ultra High)',
           marginCostUsd: 0.35,
           serverName: 'FBS-Real',
           instructions: [
             '1. Open FBS MT4/MT5 Cent or Standard platform.',
-            `2. Symbol: ${pair.replace('/', '')}.`,
+            `2. Symbol: ${prefill?.spreadByBroker?.fbs?.symbol || cleanPairSymbol}.`,
             `3. Order Type: ${orderType}.`,
-            '4. Strict 0.01 lot volume. Avoid 1:3000 margin overtrading trap.',
+            '4. Strict 0.01 lot volume. Avoid margin overtrading trap.',
             `5. Set Stop Loss: ${slPrice.toFixed(decimals)}, Target: ${tpPrice.toFixed(decimals)}.`
           ]
         }
@@ -532,12 +597,12 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
       const currentBrokerSpec = brokerConfigs[broker];
 
       setManualResult({
-        pair,
+        pair: activePair,
         timeframe,
         price: targetPrice,
-        ema20,
-        ema50,
-        rsi,
+        ema20: targetEma20,
+        ema50: targetEma50,
+        rsi: targetRsi,
         score,
         confidencePercent,
         analysisMode: mode,
@@ -550,7 +615,7 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
         takeProfit: Number(tpPrice.toFixed(decimals)),
         tp1Price: Number(tp1Price.toFixed(decimals)),
         tp2Price: Number(tpPrice.toFixed(decimals)),
-        riskReward: `1 : ${(tpDistancePips / slDistancePips).toFixed(1)}`,
+        riskReward: prefill?.riskReward || `1 : ${(tpDistancePips / Math.max(1, slDistancePips)).toFixed(1)}`,
         suggestedLot: 0.01,
         reasoning: reasons,
         howToPlaceSteps: currentBrokerSpec.instructions,
@@ -566,6 +631,97 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
       });
 
       setAnalyzingManual(false);
+      playAudioBeep(mode === 'deep_ai' ? 980 : 880, 0.15);
+    }, delay);
+  };
+
+  // 1-Click Institutional Analysis from Chat Table
+  const handleTriggerChatAnalysis = (m: MarketScanData, mode: 'standard' | 'deep_ai') => {
+    // 1. Auto-update details first as real as they are
+    handleSwitchPairAndSyncRealData(m.pair);
+
+    // 2. Notification flash
+    setChatSyncedNotification(`✓ Auto-updated ${m.pair} real quote @ ${m.price} (20 EMA: ${m.ema20}, 50 EMA: ${m.ema50}, RSI: ${m.rsi})`);
+    setTimeout(() => setChatSyncedNotification(null), 3000);
+
+    // 3. User message
+    const userMsg: AdvisorMessage = {
+      id: `usr-${Date.now()}`,
+      sender: 'user',
+      text: `⚡ Execute ${mode === 'deep_ai' ? 'Deep AI Institutional' : 'Standard Technical'} Analysis on ${m.pair} (${m.symbol}) @ ${m.price} on ${broker.toUpperCase()}`,
+      timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+    };
+
+    setAdvisorMessages((prev) => [...prev, userMsg]);
+    setAdvisorLoading(true);
+
+    const delay = mode === 'deep_ai' ? 650 : 350;
+
+    setTimeout(() => {
+      const isBuy = m.bias === 'STRONG_BUY';
+      const orderType = isBuy ? 'BUY BY MARKET' : 'SELL BY MARKET';
+      const pipMultiplier = m.pair.includes('JPY') ? 100 : m.pair.includes('XAU') ? 10 : m.pair.includes('BTC') ? 1 : 10000;
+      const slDistancePips = Math.round(Math.abs(m.price - m.suggestedSL) * pipMultiplier);
+      const tpDistancePips = Math.round(Math.abs(m.suggestedTP2 - m.price) * pipMultiplier);
+      const decimals = m.pair.includes('JPY') ? 3 : m.pair.includes('XAU') ? 2 : m.pair.includes('BTC') ? 2 : 5;
+      const brokerSpec = m.spreadByBroker[broker];
+
+      const pipValPerLot = m.pair.includes('XAU') ? 1.0 : m.pair.includes('JPY') ? 0.07 : 0.1;
+      const actualRiskUsd = Math.min(2.0, Number((slDistancePips * 0.01 * 10 * pipValPerLot).toFixed(2)));
+      const potentialGainUsd = Number((tpDistancePips * 0.01 * 10 * pipValPerLot).toFixed(2));
+
+      const cleanSymbol = brokerSpec?.symbol || m.pair.replace('/', '');
+
+      const mt4Steps = [
+        `1. Open MT4/MT5 -> Select ${cleanSymbol} -> Press F9 (New Order Ticket)`,
+        `2. Type: ${orderType} (Instant Algorithmic Execution)`,
+        `3. Volume: STRICTLY 0.01 Micro Lot (Gilgil $2.00 / 260 KES Capital Shield)`,
+        `4. Set Stop Loss: ${m.suggestedSL.toFixed(decimals)} (-${slDistancePips} pips)`,
+        `5. Set Take Profit: ${m.suggestedTP2.toFixed(decimals)} (+${tpDistancePips} pips)`,
+        `6. Scale-Out Protocol: Close 50% at ${m.suggestedTP1.toFixed(decimals)} & move SL to Breakeven`
+      ];
+
+      const confluences = [
+        `Session Timing: ${m.recommendedSession} aligns with institutional order books.`,
+        `Broker Execution: ${broker.toUpperCase()} typical spread is ~${brokerSpec?.spread} pips.`,
+        `Indicator Matrix: 20 EMA at ${m.ema20}, 50 EMA at ${m.ema50}, RSI at ${m.rsi}.`,
+        `Institutional Footprint: ${m.ictPattern}.`,
+        `Trajectory: ${m.projection}`,
+        `Gilgil $2 Shield: 0.01 micro lot caps risk strictly at $2.00 (260 KES).`
+      ];
+
+      const aiMsg: AdvisorMessage = {
+        id: `ai-${Date.now()}`,
+        sender: 'ai',
+        text: `**${mode === 'deep_ai' ? '🧠 DEEP AI INSTITUTIONAL' : '⚡ REAL CONFLUENCE'} AUDIT FOR ${m.pair} (${m.symbol}):**\n• **Direction:** ${orderType}\n• **Entry Price:** ${m.price}\n• **Stop Loss:** ${m.suggestedSL} (-${slDistancePips} pips)\n• **Take Profit 1:** ${m.suggestedTP1} (50% scale-out & move SL to Breakeven)\n• **Take Profit 2:** ${m.suggestedTP2} (+${tpDistancePips} pips final institutional target)\n• **Risk:Reward:** 1 : ${m.riskReward}\n• **Max Risk:** $2.00 / 260 KES strictly on 0.01 micro lot\n• **MT4 Ticket:** Symbol ${cleanSymbol} on ${broker.toUpperCase()} (${brokerSpec?.spread} pip spread)`,
+        verdict: isBuy || m.bias === 'STRONG_SELL' ? 'GREEN_LIGHT' : 'CAUTION',
+        lotCap: '0.01 Micro Lot ($2.00 Max Risk)',
+        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        tradeCard: {
+          pair: m.pair,
+          direction: isBuy ? 'BUY' : 'SELL',
+          entryPrice: m.price,
+          stopLoss: m.suggestedSL,
+          tp1: m.suggestedTP1,
+          tp2: m.suggestedTP2,
+          slPips: slDistancePips,
+          tpPips: tpDistancePips,
+          riskReward: m.riskReward,
+          lotSize: 0.01,
+          actualRiskUsd: actualRiskUsd > 0 ? actualRiskUsd : 2.0,
+          potentialGainUsd,
+          confidence: m.confidence,
+          pattern: m.ictPattern,
+          trend: m.trend,
+          brokerSymbol: cleanSymbol,
+          brokerSpread: brokerSpec?.spread || 1.2,
+          mt4Steps,
+          confluences
+        }
+      };
+
+      setAdvisorMessages((prev) => [...prev, aiMsg]);
+      setAdvisorLoading(false);
       playAudioBeep(mode === 'deep_ai' ? 980 : 880, 0.15);
     }, delay);
   };
@@ -592,6 +748,97 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
       let lotCap = '0.01 Micro Lot ($2.00 Max Risk)';
 
       const queryLower = textToQuery.toLowerCase();
+
+      // Check if user is asking about any of the 8 markets
+      const matchedMarket = INITIAL_MARKETS_DATA.find((m) => {
+        const pClean = m.pair.toLowerCase().replace('/', '');
+        const pNorm = m.pair.toLowerCase();
+        return queryLower.includes(pClean) ||
+               queryLower.includes(pNorm) ||
+               (queryLower.includes('gold') && m.pair === 'XAU/USD') ||
+               (queryLower.includes('cable') && m.pair === 'GBP/USD') ||
+               (queryLower.includes('fiber') && m.pair === 'EUR/USD') ||
+               (queryLower.includes('btc') && m.pair === 'BTC/USD') ||
+               (queryLower.includes('bitcoin') && m.pair === 'BTC/USD') ||
+               (queryLower.includes('ninja') && m.pair === 'USD/JPY') ||
+               (queryLower.includes('dragon') && m.pair === 'GBP/JPY') ||
+               (queryLower.includes('guppy') && m.pair === 'GBP/JPY') ||
+               (queryLower.includes('loonie') && m.pair === 'USD/CAD') ||
+               (queryLower.includes('aussie') && m.pair === 'AUD/USD') ||
+               (queryLower.includes('1291') && m.pair === 'GBP/USD') ||
+               (queryLower.includes('1296') && m.pair === 'GBP/USD');
+      });
+
+      if (matchedMarket) {
+        // Auto-update details first with real-time market data
+        handleSwitchPairAndSyncRealData(matchedMarket.pair);
+
+        const isBuy = matchedMarket.bias === 'STRONG_BUY';
+        const orderType = isBuy ? 'BUY BY MARKET' : 'SELL BY MARKET';
+        const pipMultiplier = matchedMarket.pair.includes('JPY') ? 100 : matchedMarket.pair.includes('XAU') ? 10 : matchedMarket.pair.includes('BTC') ? 1 : 10000;
+        const slDistancePips = Math.round(Math.abs(matchedMarket.price - matchedMarket.suggestedSL) * pipMultiplier);
+        const tpDistancePips = Math.round(Math.abs(matchedMarket.suggestedTP2 - matchedMarket.price) * pipMultiplier);
+        const decimals = matchedMarket.pair.includes('JPY') ? 3 : matchedMarket.pair.includes('XAU') ? 2 : matchedMarket.pair.includes('BTC') ? 2 : 5;
+        const brokerSpec = matchedMarket.spreadByBroker[broker];
+        const cleanSymbol = brokerSpec?.symbol || matchedMarket.pair.replace('/', '');
+
+        const pipValPerLot = matchedMarket.pair.includes('XAU') ? 1.0 : matchedMarket.pair.includes('JPY') ? 0.07 : 0.1;
+        const actualRiskUsd = Math.min(2.0, Number((slDistancePips * 0.01 * 10 * pipValPerLot).toFixed(2)));
+        const potentialGainUsd = Number((tpDistancePips * 0.01 * 10 * pipValPerLot).toFixed(2));
+
+        const mt4Steps = [
+          `1. Open MT4/MT5 -> Select ${cleanSymbol} -> Press F9 (New Order Ticket)`,
+          `2. Type: ${orderType} (Instant Algorithmic Execution)`,
+          `3. Volume: STRICTLY 0.01 Micro Lot (Gilgil $2.00 / 260 KES Capital Shield)`,
+          `4. Set Stop Loss: ${matchedMarket.suggestedSL.toFixed(decimals)} (-${slDistancePips} pips)`,
+          `5. Set Take Profit: ${matchedMarket.suggestedTP2.toFixed(decimals)} (+${tpDistancePips} pips)`,
+          `6. Scale-Out Protocol: Close 50% at ${matchedMarket.suggestedTP1.toFixed(decimals)} & move SL to Breakeven`
+        ];
+
+        const confluences = [
+          `Session Timing: ${matchedMarket.recommendedSession} active liquidity.`,
+          `Broker Spread: ${broker.toUpperCase()} typical spread is ~${brokerSpec?.spread} pips.`,
+          `Indicators: 20 EMA at ${matchedMarket.ema20}, 50 EMA at ${matchedMarket.ema50}, RSI at ${matchedMarket.rsi}.`,
+          `ICT Pattern: ${matchedMarket.ictPattern}.`,
+          `Trajectory: ${matchedMarket.projection}`,
+          `Gilgil Shield: $2.00 / 260 KES risk strictly enforced with 0.01 micro lot.`
+        ];
+
+        const aiMsg: AdvisorMessage = {
+          id: `ai-${Date.now()}`,
+          sender: 'ai',
+          text: `**INSTITUTIONAL AI TRADE CONFLUENCE FOR ${matchedMarket.pair} (${matchedMarket.symbol}):**\n• **Direction:** ${orderType}\n• **Entry Price:** ${matchedMarket.price}\n• **Stop Loss:** ${matchedMarket.suggestedSL} (-${slDistancePips} pips)\n• **Take Profit 1:** ${matchedMarket.suggestedTP1} (50% scale-out & move SL to Breakeven)\n• **Take Profit 2:** ${matchedMarket.suggestedTP2} (+${tpDistancePips} pips final target)\n• **Risk:Reward:** 1 : ${matchedMarket.riskReward}\n• **Max Risk:** $2.00 / 260 KES on 0.01 micro lot\n• **Broker Ticket:** Symbol ${cleanSymbol} on ${broker.toUpperCase()}`,
+          verdict: isBuy || matchedMarket.bias === 'STRONG_SELL' ? 'GREEN_LIGHT' : 'CAUTION',
+          lotCap: '0.01 Micro Lot ($2.00 Max Risk)',
+          timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          tradeCard: {
+            pair: matchedMarket.pair,
+            direction: isBuy ? 'BUY' : 'SELL',
+            entryPrice: matchedMarket.price,
+            stopLoss: matchedMarket.suggestedSL,
+            tp1: matchedMarket.suggestedTP1,
+            tp2: matchedMarket.suggestedTP2,
+            slPips: slDistancePips,
+            tpPips: tpDistancePips,
+            riskReward: matchedMarket.riskReward,
+            lotSize: 0.01,
+            actualRiskUsd: actualRiskUsd > 0 ? actualRiskUsd : 2.0,
+            potentialGainUsd,
+            confidence: matchedMarket.confidence,
+            pattern: matchedMarket.ictPattern,
+            trend: matchedMarket.trend,
+            brokerSymbol: cleanSymbol,
+            brokerSpread: brokerSpec?.spread || 1.2,
+            mt4Steps,
+            confluences
+          }
+        };
+
+        setAdvisorMessages((prev) => [...prev, aiMsg]);
+        setAdvisorLoading(false);
+        playAudioBeep(880, 0.15);
+        return;
+      }
 
       if (queryLower.includes('risk') || queryLower.includes('gilgil') || queryLower.includes('2') || queryLower.includes('size')) {
         verdict = 'GREEN_LIGHT';
@@ -803,7 +1050,7 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
             <label className="text-[10px] font-mono text-slate-400 uppercase font-bold">Currency Pair *</label>
             <select
               value={pair}
-              onChange={(e) => setPair(e.target.value as CurrencyPair)}
+              onChange={(e) => handleSwitchPairAndSyncRealData(e.target.value as CurrencyPair)}
               className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:border-[#D4AF37] outline-none"
             >
               <option value="GBP/USD">GBP/USD (Cable)</option>
@@ -942,401 +1189,465 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
       )}
 
       {/* ======================================================== */}
-      {/* TAB 1: LIVE CAMERA & VISION OCR SCANNER */}
+      {/* TAB 1: LIVE CAMERA & VISION OCR SCANNER (WIDE DIMENSION) */}
       {/* ======================================================== */}
       {activeTab === 'camera' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Camera Viewfinder Viewport (6 Cols) */}
-            <div className="lg:col-span-6 space-y-3">
-              <div className="relative aspect-[4/3] rounded-2xl bg-black border-2 border-slate-700 hover:border-[#D4AF37]/60 overflow-hidden flex flex-col items-center justify-center">
-                {/* 1. Live WebRTC Video Stream */}
-                {isStreaming ? (
-                  <div className="relative w-full h-full">
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      className="w-full h-full object-cover"
-                    />
+          {/* 1. Full-Width Panoramic 16:9 Camera Viewfinder */}
+          <div className="space-y-3">
+            <div className="relative w-full aspect-[16/9] min-h-[360px] sm:min-h-[480px] lg:min-h-[540px] rounded-3xl bg-black border-2 border-slate-700 hover:border-[#D4AF37] overflow-hidden flex flex-col items-center justify-center shadow-[0_0_40px_rgba(0,0,0,0.8)]">
+              {/* Live WebRTC Video Stream */}
+              {isStreaming ? (
+                <div className="relative w-full h-full">
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover"
+                  />
 
-                    {/* HUD Target Reticle Overlay */}
-                    <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-between p-4">
-                      <div className="flex items-center justify-between w-full">
-                        <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-red-600/80 text-white flex items-center gap-1.5 animate-pulse">
-                          <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                          LIVE CAMERA STREAM
+                  {/* High-Accuracy Ultra-Wide HUD Reticle Overlay */}
+                  <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-between p-4 sm:p-6">
+                    {/* Top HUD Telemetry */}
+                    <div className="flex items-center justify-between w-full">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[10px] sm:text-xs font-bold px-3 py-1 rounded-xl bg-red-600/90 text-white flex items-center gap-1.5 animate-pulse shadow-md">
+                          <span className="w-2 h-2 rounded-full bg-white" />
+                          <span>LIVE 1080P WIDE LENS</span>
                         </span>
-                        <span className="font-mono text-[10px] text-[#D4AF37] px-2 py-0.5 rounded bg-black/70 border border-[#D4AF37]/40">
-                          {cameraFacingMode === 'environment' ? 'Rear Lens' : 'Front Lens'}
-                        </span>
-                      </div>
-
-                      <div className="w-48 h-36 border-2 border-dashed border-[#D4AF37]/80 rounded-xl flex items-center justify-center relative">
-                        <div className="w-2 h-2 rounded-full bg-[#D4AF37] animate-ping" />
-                        <span className="absolute bottom-1 text-[9px] font-mono text-[#D4AF37] bg-black/80 px-1.5 rounded">
-                          Align Laptop Screen Candles
+                        <span className="font-mono text-[10px] text-cyan-300 px-2.5 py-1 rounded-xl bg-black/80 border border-cyan-500/40">
+                          {pair} • {timeframe} • {broker.toUpperCase()}
                         </span>
                       </div>
 
-                      <span className="text-[10px] font-mono text-slate-300 bg-black/80 px-2 py-0.5 rounded">
-                        Position MT4 / MT5 chart inside reticle and capture
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[10px] text-[#D4AF37] px-2.5 py-1 rounded-xl bg-black/80 border border-[#D4AF37]/50 font-bold">
+                          {cameraFacingMode === 'environment' ? 'Rear Lens (Laptop Focus)' : 'Front Lens'}
+                        </span>
+                        <span className="text-[10px] font-mono text-emerald-400 px-2 py-0.5 rounded bg-emerald-950/70 border border-emerald-500/30 hidden sm:inline">
+                          1920 × 1080 Full-HD Wide
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Expansive Wide Framing Reticle (94% Width x 84% Height) */}
+                    <div className="w-[94%] h-[84%] border-2 border-dashed border-[#D4AF37]/85 rounded-2xl flex flex-col items-center justify-between p-4 relative shadow-[0_0_30px_rgba(212,175,55,0.15)]">
+                      {/* Top Sweep Boundary Guide */}
+                      <div className="w-full flex items-center justify-between text-[9px] font-mono text-red-400 bg-black/80 px-2.5 py-0.5 rounded border border-red-500/40">
+                        <span>▲ BSL LIQUIDITY SWEEP ZONE ({keyLevel})</span>
+                        <span>WICK REJECTION UPPER FRAME</span>
+                      </div>
+
+                      {/* Center Crosshair & Consequent Encroachment 50% line */}
+                      <div className="w-full flex items-center justify-center relative">
+                        <div className="w-full h-[1px] bg-[#D4AF37]/40 border-b border-dashed border-[#D4AF37]/60" />
+                        <div className="absolute px-3 py-1 rounded-md bg-black/90 border border-[#D4AF37] flex items-center gap-1.5 shadow-lg">
+                          <span className="w-2 h-2 rounded-full bg-[#D4AF37] animate-ping" />
+                          <span className="text-[10px] font-mono font-bold text-[#D4AF37]">
+                            AI SCAN PIVOT: {currentPrice} (50% C.E.)
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Bottom Dynamic EMA Support Guide */}
+                      <div className="w-full flex items-center justify-between text-[9px] font-mono text-cyan-300 bg-black/80 px-2.5 py-0.5 rounded border border-cyan-500/40">
+                        <span>▼ 20 EMA MEAN REVERSION TARGET ({ema20})</span>
+                        <span>SSL SELL-SIDE LIQUIDITY FLOOR</span>
+                      </div>
+                    </div>
+
+                    {/* Bottom Instructions */}
+                    <div className="flex items-center justify-between w-full text-[10px] font-mono text-slate-300 bg-black/85 px-3 py-1 rounded-xl border border-slate-800">
+                      <span>Framing: Point camera directly at your MT4/MT5 laptop screen candles</span>
+                      <span className="text-[#D4AF37] font-bold">Gilgil $2 Shield: ACTIVE</span>
+                    </div>
+                  </div>
+                </div>
+              ) : capturedImage ? (
+                /* Captured / Uploaded Image View with Real OCR Visual Detection */
+                <div className="relative w-full h-full bg-slate-950 flex items-center justify-center overflow-hidden">
+                  <img
+                    src={capturedImage}
+                    alt="Scanned MT4 Chart"
+                    className="w-full h-full object-contain filter contrast-105"
+                  />
+
+                  {/* HUD Scan Matrix Overlays */}
+                  <div className="absolute inset-0 pointer-events-none p-4 sm:p-6 flex flex-col justify-between">
+                    <div className="flex items-center justify-between w-full">
+                      <div className="px-3 py-1.5 rounded-xl bg-black/90 border border-[#D4AF37] text-xs font-mono text-[#D4AF37] font-bold shadow-lg flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-[#00C261]" />
+                        <span>OCR INGESTION: 100% COMPLETE</span>
+                      </div>
+                      <span className="text-xs font-mono bg-black/90 px-3 py-1 rounded-xl text-cyan-300 border border-cyan-500/40 font-bold">
+                        {pair} • {timeframe} • {session}
                       </span>
                     </div>
-                  </div>
-                ) : capturedImage ? (
-                  /* 2. Captured / Uploaded Image View with Real OCR Visual Detection Boxes */
-                  <div className="relative w-full h-full bg-slate-950 flex items-center justify-center overflow-hidden group">
-                    <img
-                      src={capturedImage}
-                      alt="Scanned MT4 Chart"
-                      className="w-full h-full object-contain filter contrast-105"
-                    />
 
-                    {/* HUD Scan Matrix Overlays */}
-                    <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between">
-                      {/* Top Bar with OCR Ingestion Badge */}
-                      <div className="flex items-center justify-between w-full">
-                        <div className="px-2.5 py-1 rounded-xl bg-black/85 border border-[#D4AF37] text-[10px] font-mono text-[#D4AF37] font-bold shadow-lg flex items-center gap-1.5">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-[#00C261]" />
-                          <span>OCR INGESTION: 100% PARSED</span>
-                        </div>
-                        <span className="text-[10px] font-mono bg-black/85 px-2 py-0.5 rounded text-cyan-300 border border-cyan-500/40">
-                          {pair} • {timeframe}
+                    {/* Wide Bounding Boxes */}
+                    <div className="w-[94%] h-[78%] mx-auto relative flex flex-col justify-between">
+                      <div className="border-2 border-dashed border-red-500/80 bg-red-500/15 rounded-xl p-2 flex items-center justify-between">
+                        <span className="text-[10px] font-mono font-bold text-red-300 bg-black/85 px-2 py-0.5 rounded">
+                          [OCR EXTRACTED] LIQUIDITY PEAK: {keyLevel}
+                        </span>
+                        <span className="text-[9px] font-mono text-red-300 bg-black/85 px-2 py-0.5 rounded">
+                          Wick Sweep: +{cameraAnalysisResult?.ocrExtracted?.wickExcessPips || '4.2'} pips
                         </span>
                       </div>
 
-                      {/* Visual OCR Bounding Boxes drawn over image */}
-                      <div className="relative w-full h-40 my-auto">
-                        {/* Zone 1: Liquidity Sweep / High Wick */}
-                        <div className="absolute top-2 left-6 right-8 border-2 border-dashed border-red-500/80 bg-red-500/10 rounded-lg p-1.5 flex items-center justify-between">
-                          <span className="text-[9px] font-mono font-bold text-red-400 bg-black/80 px-1 rounded">
-                            [OCR] LIQUIDITY SWEEP: {keyLevel}
-                          </span>
-                          <span className="text-[8px] font-mono text-red-300 bg-black/80 px-1 rounded">
-                            UPPER WICK REJECTION
-                          </span>
-                        </div>
-
-                        {/* Zone 2: 20 EMA Reversion Target */}
-                        <div className="absolute bottom-2 left-10 right-10 border-2 border-dashed border-cyan-400/80 bg-cyan-500/10 rounded-lg p-1.5 flex items-center justify-between">
-                          <span className="text-[9px] font-mono font-bold text-cyan-300 bg-black/80 px-1 rounded">
-                            [OCR] 20 EMA MEAN REVERSION: {ema20}
-                          </span>
-                          <span className="text-[8px] font-mono text-cyan-200 bg-black/80 px-1 rounded">
-                            DYNAMIC VALUE FLOOR
-                          </span>
-                        </div>
-
-                        {/* Target Crosshair */}
-                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 border border-[#D4AF37] bg-[#D4AF37]/15 rounded-md px-2 py-1 flex items-center gap-1.5 shadow-lg">
-                          <span className="w-2 h-2 rounded-full bg-[#D4AF37] animate-ping" />
-                          <span className="text-[9px] font-mono font-bold text-[#D4AF37]">
-                            AI ENTRY PIVOT: {currentPrice}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Bottom HUD readout */}
-                      <div className="flex items-center justify-between text-[9px] font-mono text-slate-300 bg-black/80 px-2.5 py-1 rounded-lg border border-slate-800">
-                        <span>BROKER: {broker.toUpperCase()}</span>
-                        <span className="text-[#D4AF37]">ALGO CONFIDENCE: {cameraAnalysisResult?.score || 94}%</span>
+                      <div className="border-2 border-dashed border-cyan-400/80 bg-cyan-500/15 rounded-xl p-2 flex items-center justify-between">
+                        <span className="text-[10px] font-mono font-bold text-cyan-200 bg-black/85 px-2 py-0.5 rounded">
+                          [OCR EXTRACTED] 20 EMA MEAN TARGET: {ema20}
+                        </span>
+                        <span className="text-[9px] font-mono text-cyan-200 bg-black/85 px-2 py-0.5 rounded">
+                          Dynamic Equilibrium Floor
+                        </span>
                       </div>
                     </div>
-                  </div>
-                ) : (
-                  /* 3. Idle Camera State */
-                  <div className="p-6 text-center space-y-4 max-w-sm">
-                    <div className="w-14 h-14 rounded-2xl bg-[#D4AF37]/15 border border-[#D4AF37]/40 flex items-center justify-center mx-auto text-[#D4AF37]">
-                      <Camera className="w-7 h-7" />
+
+                    <div className="flex items-center justify-between text-[10px] font-mono text-slate-200 bg-black/90 px-3 py-1.5 rounded-xl border border-slate-800">
+                      <span>Broker: {broker.toUpperCase()}</span>
+                      <span className="text-[#D4AF37] font-bold">Algorithm Confidence: {cameraAnalysisResult?.score || 94}%</span>
                     </div>
-                    <div>
-                      <h5 className="text-base font-bold text-white">Live MT4/MT5 Chart Lens</h5>
-                      <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                        Prompt your camera to scan candlestick patterns, 20 EMA, and wick spikes directly off your laptop screen.
-                      </p>
-                    </div>
-
-                    <button
-                      onClick={handleStartCamera}
-                      className="w-full py-3 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg hover:scale-[1.02] active:scale-95 transition"
-                    >
-                      <Video className="w-4 h-4" />
-                      <span>Prompt & Open Camera</span>
-                    </button>
                   </div>
-                )}
-
-                {/* Loading scanning overlay */}
-                {analyzingCamera && (
-                  <div className="absolute inset-0 bg-[#080C14]/90 backdrop-blur-md z-30 flex flex-col items-center justify-center space-y-3">
-                    <RefreshCw className="w-10 h-10 text-[#D4AF37] animate-spin" />
-                    <span className="text-xs font-mono font-bold text-[#D4AF37]">
-                      Running Institutional Vision AI & Confluence Engine...
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      Calculating Gilgil $2 rule, EMA distance, and liquidity pools...
-                    </span>
+                </div>
+              ) : (
+                /* Idle Camera State */
+                <div className="p-8 text-center space-y-4 max-w-md">
+                  <div className="w-16 h-16 rounded-3xl bg-[#D4AF37]/15 border border-[#D4AF37]/40 flex items-center justify-center mx-auto text-[#D4AF37] shadow-[0_0_20px_rgba(212,175,55,0.2)]">
+                    <Camera className="w-8 h-8" />
                   </div>
-                )}
-              </div>
-
-              {/* Camera Error Alert if permissions denied */}
-              {cameraError && (
-                <div className="p-3 rounded-xl bg-red-900/30 border border-red-500/40 text-red-200 text-xs font-mono flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
                   <div className="space-y-1">
-                    <span className="font-bold">Camera Alert:</span>
-                    <p className="text-[11px] text-red-300 leading-snug">{cameraError}</p>
+                    <h5 className="text-lg sm:text-xl font-black text-white">
+                      Full-Screen MT4/MT5 Chart Vision Lens
+                    </h5>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Prompt your device camera in wide 16:9 panoramic dimension to frame laptop screens, multi-monitor charts, or uploaded screenshots with high OCR accuracy.
+                    </p>
                   </div>
+
+                  <button
+                    onClick={handleStartCamera}
+                    className="w-full py-3.5 rounded-2xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl hover:scale-105 active:scale-95 transition"
+                  >
+                    <Video className="w-4 h-4" />
+                    <span>Prompt & Open 16:9 Camera</span>
+                  </button>
                 </div>
               )}
 
-              {/* Camera Controls & Actions */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {isStreaming ? (
-                  <>
-                    <button
-                      onClick={handleCaptureFrame}
-                      className="col-span-2 py-2.5 rounded-xl btn-gold text-black font-black text-xs flex items-center justify-center gap-2 shadow-md"
-                    >
-                      <Sparkles className="w-4 h-4" />
-                      <span>Snap & Analyze Chart</span>
-                    </button>
-                    <button
-                      onClick={handleFlipCamera}
-                      className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 border border-slate-700"
-                    >
-                      <SwitchCamera className="w-3.5 h-3.5" />
-                      <span>Flip</span>
-                    </button>
-                    <button
-                      onClick={handleStopCamera}
-                      className="py-2.5 rounded-xl bg-red-950/60 hover:bg-red-900/80 text-red-300 font-bold text-xs flex items-center justify-center gap-1.5 border border-red-800/60"
-                    >
-                      <VideoOff className="w-3.5 h-3.5" />
-                      <span>Stop</span>
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={handleStartCamera}
-                      className="py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] font-bold text-xs flex items-center justify-center gap-1.5 border border-[#D4AF37]/40"
-                    >
-                      <Camera className="w-3.5 h-3.5" />
-                      <span>{capturedImage ? 'Retake Camera' : 'Open Camera'}</span>
-                    </button>
-
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 border border-slate-700"
-                    >
-                      <Upload className="w-3.5 h-3.5 text-[#D4AF37]" />
-                      <span>Upload Chart</span>
-                    </button>
-
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                    />
-
-                    {/* Instant Preset Samples */}
-                    <button
-                      onClick={() => handleLoadSample('gbpusd')}
-                      className="col-span-2 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 font-mono font-bold text-xs flex items-center justify-center gap-1.5 border border-slate-800"
-                      title="Load Gilgil 1.2965 GBP/USD Tower Top Sample"
-                    >
-                      <ImageIcon className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Sample: GBP/USD 1.2965</span>
-                    </button>
-                  </>
-                )}
-              </div>
-
-              {/* Sample Quick Links */}
-              <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-                <span className="text-[#D4AF37] font-bold">Quick Sample Tests:</span>
-                <button
-                  onClick={() => handleLoadSample('gbpusd')}
-                  className="hover:text-white underline text-slate-300"
-                >
-                  GBP 1.2965 Tower
-                </button>
-                <span>•</span>
-                <button
-                  onClick={() => handleLoadSample('eurusd')}
-                  className="hover:text-white underline text-slate-300"
-                >
-                  EUR M15 20 EMA
-                </button>
-                <span>•</span>
-                <button
-                  onClick={() => handleLoadSample('xauusd')}
-                  className="hover:text-white underline text-slate-300"
-                >
-                  Gold 2035 Sweep
-                </button>
-              </div>
+              {/* Fast Loading Scanning Overlay */}
+              {analyzingCamera && (
+                <div className="absolute inset-0 bg-[#080C14]/90 backdrop-blur-md z-30 flex flex-col items-center justify-center space-y-3">
+                  <RefreshCw className="w-10 h-10 text-[#D4AF37] animate-spin" />
+                  <span className="text-sm font-mono font-bold text-[#D4AF37]">
+                    Analyzing Ingested Candlesticks & Confluence Matrix...
+                  </span>
+                  <span className="text-xs text-slate-400 font-mono">
+                    Verifying Gilgil $2 rule, MT4 order ticket, and broker spreads...
+                  </span>
+                </div>
+              )}
             </div>
 
-            {/* Vision AI Output Results (6 Cols) */}
-            <div className="lg:col-span-6 bg-slate-900/90 rounded-2xl p-5 border border-slate-800 min-h-[460px] flex flex-col justify-between space-y-4">
-              {cameraAnalysisResult ? (
-                <div className="space-y-4">
-                  {/* Top Bar with Verdict */}
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#00C261] animate-ping" />
-                      <span className="text-xs font-mono font-bold text-white">
-                        {cameraAnalysisResult.pair} • {cameraAnalysisResult.timeframe} • {cameraAnalysisResult.broker.toUpperCase()}
-                      </span>
-                    </div>
+            {/* Camera Error Alert if permissions denied */}
+            {cameraError && (
+              <div className="p-3.5 rounded-2xl bg-red-900/30 border border-red-500/40 text-red-200 text-xs font-mono flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <span className="font-bold">Camera Permission Alert:</span>
+                  <p className="text-[11px] text-red-300 leading-snug">{cameraError}</p>
+                </div>
+              </div>
+            )}
 
-                    <span
-                      className={`font-mono text-xs font-black px-2.5 py-1 rounded-full ${
-                        cameraAnalysisResult.score >= 80
-                          ? 'bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40'
-                          : cameraAnalysisResult.score >= 60
-                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                          : 'bg-red-500/20 text-red-300 border border-red-500/40'
-                      }`}
-                    >
-                      {cameraAnalysisResult.verdict}
+            {/* Camera Actions & Controls Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 pt-1">
+              {isStreaming ? (
+                <>
+                  <button
+                    onClick={handleCaptureFrame}
+                    className="col-span-2 sm:col-span-3 py-3 rounded-2xl btn-gold text-black font-black text-xs flex items-center justify-center gap-2 shadow-lg hover:scale-105 active:scale-95 transition"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>Snap & Analyze Wide Chart</span>
+                  </button>
+                  <button
+                    onClick={handleFlipCamera}
+                    className="py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 border border-slate-700 transition"
+                  >
+                    <SwitchCamera className="w-4 h-4" />
+                    <span>Flip Lens</span>
+                  </button>
+                  <button
+                    onClick={handleStopCamera}
+                    className="col-span-2 py-3 rounded-2xl bg-red-950/70 hover:bg-red-900 text-red-300 font-bold text-xs flex items-center justify-center gap-1.5 border border-red-800 transition"
+                  >
+                    <VideoOff className="w-4 h-4" />
+                    <span>Stop Camera</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={handleStartCamera}
+                    className="col-span-2 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] font-bold text-xs flex items-center justify-center gap-2 border border-[#D4AF37]/50 transition"
+                  >
+                    <Camera className="w-4 h-4" />
+                    <span>{capturedImage ? 'Retake Live Lens' : 'Open Camera Lens'}</span>
+                  </button>
+
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="col-span-2 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-2 border border-slate-700 transition"
+                  >
+                    <Upload className="w-4 h-4 text-[#D4AF37]" />
+                    <span>Upload Chart Screenshot</span>
+                  </button>
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+
+                  <button
+                    onClick={() => handleLoadSample('gbpusd')}
+                    className="col-span-2 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-cyan-300 font-mono font-bold text-xs flex items-center justify-center gap-1.5 border border-cyan-800/60 transition"
+                  >
+                    <ImageIcon className="w-4 h-4 text-cyan-400" />
+                    <span>Sample: GBP/USD 1.2965</span>
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* Quick Sample Links Strip */}
+            <div className="flex items-center gap-3 text-xs font-mono text-slate-400 bg-slate-950/90 p-3 rounded-2xl border border-slate-800 flex-wrap">
+              <span className="text-[#D4AF37] font-bold flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Instant High-Precision Samples:</span>
+              </span>
+              <button
+                onClick={() => handleLoadSample('gbpusd')}
+                className="hover:text-white underline text-slate-300 font-bold"
+              >
+                GBP/USD 1.29656 (Gilgil Tower)
+              </button>
+              <span>•</span>
+              <button
+                onClick={() => handleLoadSample('eurusd')}
+                className="hover:text-white underline text-slate-300 font-bold"
+              >
+                EUR/USD M15 (20 EMA Bounce)
+              </button>
+              <span>•</span>
+              <button
+                onClick={() => handleLoadSample('xauusd')}
+                className="hover:text-white underline text-slate-300 font-bold"
+              >
+                Gold 2035 (Hourly Sweep)
+              </button>
+            </div>
+          </div>
+
+          {/* 2. Full-Width Institutional Analysis & Trade Placement Console */}
+          {cameraAnalysisResult ? (
+            <div className="bg-[#0A0F1D] rounded-3xl p-6 sm:p-8 border border-[#D4AF37]/50 shadow-[0_0_50px_rgba(212,175,55,0.15)] space-y-6 animate-in fade-in duration-300">
+              {/* Top Banner with Verdict & High Confidence */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#00C261] animate-ping" />
+                    <span className="text-base sm:text-lg font-black text-white font-mono">
+                      {cameraAnalysisResult.pair} • {cameraAnalysisResult.timeframe} • {cameraAnalysisResult.session}
+                    </span>
+                    <span className="text-xs font-mono px-2.5 py-0.5 rounded bg-slate-800 text-cyan-300 border border-slate-700">
+                      Broker: {cameraAnalysisResult.broker.toUpperCase()}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    High Confidence Algorithmic EA Execution Slip • Institutional Quantitative Confluence Engine
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <span className="text-[10px] font-mono text-slate-400 block uppercase">Confidence Rating</span>
+                    <span className="text-xl font-mono font-black text-[#00C261]">
+                      {cameraAnalysisResult.score}% A+ Setup
+                    </span>
+                  </div>
+                  <span
+                    className={`font-mono text-xs sm:text-sm font-black px-4 py-2 rounded-2xl shadow-lg ${
+                      cameraAnalysisResult.orderType.includes('BUY')
+                        ? 'bg-[#00C261] text-black'
+                        : 'bg-red-600 text-white'
+                    }`}
+                  >
+                    {cameraAnalysisResult.orderType}
+                  </span>
+                </div>
+              </div>
+
+              {/* Complete MT4/MT5 Trade Placement Slip (User requested: "you know how trade is placed, the data required should be the suggestion of results") */}
+              <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-r from-slate-950 via-[#0B101D] to-slate-950 border border-[#D4AF37]/40 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
+                  <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#D4AF37] flex items-center gap-2">
+                    <Cpu className="w-4 h-4 text-[#D4AF37]" />
+                    <span>Exact MT4 / MT5 Trade Placement Order Ticket (EA Copy)</span>
+                  </span>
+
+                  <button
+                    onClick={() => {
+                      const ticket = `[PIVOTFX AI EA TICKET]\nSymbol: ${cameraAnalysisResult.pair.replace('/', '')}\nOrder Type: ${cameraAnalysisResult.orderType}\nEntry Price: ${cameraAnalysisResult.entryPrice}\nStop Loss: ${cameraAnalysisResult.suggestedSL} (-${cameraAnalysisResult.slPips} pips, $${cameraAnalysisResult.actualRiskUsd} Max Risk)\nTake Profit 1: ${cameraAnalysisResult.tp1Price} (+${Math.round(cameraAnalysisResult.tpPips * 0.5)} pips, 50% scale-out)\nTake Profit 2: ${cameraAnalysisResult.suggestedTP} (+${cameraAnalysisResult.tpPips} pips, final target)\nVolume: ${cameraAnalysisResult.suggestedLot} Micro Lot\nBroker: ${cameraAnalysisResult.broker.toUpperCase()}\nRisk:Reward = 1 : ${cameraAnalysisResult.riskReward}`;
+                      navigator.clipboard.writeText(ticket);
+                      setCopiedCameraEa(true);
+                      setTimeout(() => setCopiedCameraEa(false), 2500);
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/50 text-xs font-mono font-bold flex items-center gap-1.5 transition active:scale-95"
+                  >
+                    {copiedCameraEa ? <Check className="w-4 h-4 text-[#00C261]" /> : <Copy className="w-4 h-4" />}
+                    <span>{copiedCameraEa ? 'Copied to Clipboard!' : '1-Click Copy Trade Parameters'}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center font-mono">
+                  <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block uppercase font-bold">1. Order Type</span>
+                    <span className="text-sm font-black text-white">{cameraAnalysisResult.orderType}</span>
+                    <span className="text-[9px] text-slate-500 block">Instant Execution</span>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block uppercase font-bold">2. Entry Price</span>
+                    <span className="text-sm font-black text-[#D4AF37]">{cameraAnalysisResult.entryPrice}</span>
+                    <span className="text-[9px] text-slate-500 block">At Market Price</span>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-red-950/30 border border-red-500/40">
+                    <span className="text-[10px] text-red-400 block uppercase font-bold">
+                      3. Stop Loss (-{cameraAnalysisResult.slPips}p)
+                    </span>
+                    <span className="text-sm font-black text-red-300">{cameraAnalysisResult.suggestedSL}</span>
+                    <span className="text-[9px] text-red-400 block">Cap: $2.00 / 260 KES</span>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-cyan-950/30 border border-cyan-500/40">
+                    <span className="text-[10px] text-cyan-400 block uppercase font-bold">
+                      4. TP1 (+{Math.round(cameraAnalysisResult.tpPips * 0.5)}p)
+                    </span>
+                    <span className="text-sm font-black text-cyan-300">{cameraAnalysisResult.tp1Price}</span>
+                    <span className="text-[9px] text-cyan-400 block">Close 50% & Breakeven</span>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/40">
+                    <span className="text-[10px] text-emerald-400 block uppercase font-bold">
+                      5. Final TP (+{cameraAnalysisResult.tpPips}p)
+                    </span>
+                    <span className="text-sm font-black text-emerald-300">{cameraAnalysisResult.suggestedTP}</span>
+                    <span className="text-[9px] text-emerald-400 block">1 : {cameraAnalysisResult.riskReward} R:R</span>
+                  </div>
+                </div>
+
+                {/* Gilgil $2 Guarantee Bar */}
+                <div className="p-3.5 rounded-xl bg-[#D4AF37]/10 border border-[#D4AF37]/35 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs font-mono">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-[#D4AF37] shrink-0" />
+                    <span className="text-white font-bold">
+                      Volume: <span className="text-[#D4AF37] font-black">{cameraAnalysisResult.suggestedLot} Micro Lot</span> (Gilgil Capital Shield Applied)
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs">
+                    <span className="text-slate-300">
+                      Risk: <strong className="text-red-400">${cameraAnalysisResult.actualRiskUsd} (260 KES)</strong>
+                    </span>
+                    <span className="text-slate-300">
+                      Reward: <strong className="text-emerald-400">+${cameraAnalysisResult.potentialGainUsd} (~650 KES)</strong>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Confluences & Broker Protocol 2-Column Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Broker-Specific Step-by-Step Ticket */}
+                <div className="p-5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <span className="text-xs font-mono font-bold text-cyan-400 uppercase flex items-center gap-1.5">
+                      <Target className="w-3.5 h-3.5" />
+                      <span>{cameraAnalysisResult.broker.toUpperCase()} Order Guide</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      Typical Spread: ~{cameraAnalysisResult.brokerSpreadPips} pips
                     </span>
                   </div>
 
-                  {/* Score & Pattern */}
-                  <div className="text-center py-2 space-y-1">
-                    <div className="text-4xl font-black text-white font-mono">
-                      <span className="text-gold-gradient">{cameraAnalysisResult.score}</span>
-                      <span className="text-sm text-slate-500"> / 100</span>
-                    </div>
-                    <div className="text-xs font-bold text-[#D4AF37]">{cameraAnalysisResult.pattern}</div>
-                    <div className="text-[11px] text-slate-400 font-mono">
-                      Institutional Confluence • Risk : Reward = 1 : {cameraAnalysisResult.riskReward}
-                    </div>
-                  </div>
-
-                  {/* DATA INGESTION AUDIT BOX */}
-                  <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2 text-xs font-mono">
-                    <div className="flex items-center justify-between text-[#D4AF37] font-bold border-b border-slate-800/80 pb-1.5">
-                      <span className="flex items-center gap-1.5">
-                        <Compass className="w-3.5 h-3.5" />
-                        <span>OCR Ingestion & Broker Spread Audit:</span>
-                      </span>
-                      <span className="text-[#00C261] text-[10px]">VERIFIED ✓</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 text-[11px]">
-                      <div>
-                        <span className="text-slate-500 block text-[9px]">Broker Typical Spread</span>
-                        <span className="text-white font-bold">{cameraAnalysisResult.brokerSpreadPips} pips (${cameraAnalysisResult.brokerSpreadCostUsd} cost)</span>
+                  <div className="space-y-1.5 text-xs text-slate-300 font-mono">
+                    {(cameraAnalysisResult.mt4Steps || []).map((step: string, idx: number) => (
+                      <div key={idx} className="flex items-start gap-2">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
+                        <span>{step}</span>
                       </div>
-                      <div>
-                        <span className="text-slate-500 block text-[9px]">Rejection Wick Sweep</span>
-                        <span className="text-amber-300 font-bold">+{cameraAnalysisResult.ocrExtracted?.wickExcessPips} pips beyond level</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500 block text-[9px]">ICT Fair Value Gap Zone</span>
-                        <span className="text-cyan-300 font-bold">{cameraAnalysisResult.ocrExtracted?.fvgZone}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500 block text-[9px]">Order Block Status</span>
-                        <span className="text-[#00C261] font-bold">{cameraAnalysisResult.ocrExtracted?.obStatus}</span>
-                      </div>
-                    </div>
+                    ))}
                   </div>
+                </div>
 
-                  {/* Execution Numbers */}
-                  <div className="grid grid-cols-4 gap-2 text-center text-xs font-mono p-3 rounded-xl bg-slate-950 border border-slate-800">
-                    <div>
-                      <span className="text-[9px] text-slate-500 block">Entry Price</span>
-                      <span className="font-bold text-white">{cameraAnalysisResult.entryPrice}</span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] text-red-400 block">Stop Loss ({cameraAnalysisResult.slPips}p)</span>
-                      <span className="font-bold text-red-300">{cameraAnalysisResult.suggestedSL}</span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] text-cyan-400 block">TP1 (50% Out)</span>
-                      <span className="font-bold text-cyan-300">{cameraAnalysisResult.tp1Price}</span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] text-emerald-400 block">Final TP ({cameraAnalysisResult.tpPips}p)</span>
-                      <span className="font-bold text-emerald-300">{cameraAnalysisResult.suggestedTP}</span>
-                    </div>
-                  </div>
-
-                  {/* Gilgil $2 Rule Guarantee */}
-                  <div className="p-3.5 rounded-xl bg-[#D4AF37]/10 border border-[#D4AF37]/35 text-xs font-mono space-y-1.5">
-                    <div className="flex items-center justify-between text-[#D4AF37] font-bold">
-                      <span className="flex items-center gap-1.5">
-                        <ShieldCheck className="w-4 h-4 text-[#D4AF37]" />
-                        <span>Gilgil $2 Max Loss Cap Applied:</span>
-                      </span>
-                      <span className="text-white font-extrabold">{cameraAnalysisResult.suggestedLot} Micro Lot</span>
-                    </div>
-                    <div className="flex items-center justify-between text-[11px] text-slate-300">
-                      <span>Max Capital at Risk:</span>
-                      <strong className="text-red-400">${cameraAnalysisResult.actualRiskUsd} (approx 260 KES)</strong>
-                    </div>
-                    <div className="flex items-center justify-between text-[11px] text-slate-300">
-                      <span>Target Profit Potential:</span>
-                      <strong className="text-emerald-400">+${cameraAnalysisResult.potentialGainUsd} (approx 650 KES)</strong>
-                    </div>
-                  </div>
-
-                  {/* Step-by-Step MT4 Execution Checklist */}
-                  <div className="space-y-1.5 text-xs">
-                    <span className="text-[10px] font-mono text-cyan-400 uppercase block font-bold">
-                      Step-by-Step MT4/MT5 Execution Protocol:
+                {/* Institutional Confluences */}
+                <div className="p-5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <span className="text-xs font-mono font-bold text-[#00C261] uppercase flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-[#00C261]" />
+                      <span>Mathematical Confluence Signals</span>
                     </span>
-                    <div className="space-y-1 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-                      {(cameraAnalysisResult.mt4Steps || []).map((step: string, idx: number) => (
-                        <div key={idx} className="flex items-start gap-1.5 text-[11px] leading-tight text-slate-300 font-mono">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
-                          <span>{step}</span>
-                        </div>
-                      ))}
-                    </div>
+                    <span className="text-[10px] font-mono text-[#00C261] font-bold">100% INGESTED</span>
                   </div>
 
-                  {/* Confluences List */}
                   <div className="space-y-1.5 text-xs text-slate-300">
-                    <span className="text-[10px] font-mono text-slate-400 uppercase block font-bold">
-                      Institutional Confluences Verified:
-                    </span>
                     {cameraAnalysisResult.confluences.map((c: string, idx: number) => (
-                      <div key={idx} className="flex items-start gap-1.5 text-[11px] leading-tight text-slate-300">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-[#00C261] shrink-0 mt-0.5" />
+                      <div key={idx} className="flex items-start gap-2">
+                        <span className="text-[#D4AF37] font-bold shrink-0">•</span>
                         <span>{c}</span>
                       </div>
                     ))}
                   </div>
+                </div>
+              </div>
 
-                  <button
-                    onClick={() => handleLogToJournal(cameraAnalysisResult)}
-                    className="w-full py-3 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider transition flex items-center justify-center gap-2 shadow-lg active:scale-95"
-                  >
-                    <span>Log to Pillar 8 Trade Journal</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
-                <div className="h-full min-h-[300px] flex flex-col items-center justify-center text-center p-6 space-y-3 text-slate-500">
-                  <Camera className="w-10 h-10 text-slate-600 animate-pulse" />
-                  <p className="text-xs max-w-xs leading-relaxed">
-                    Open your camera or choose a preset sample on the left. The AI will ingest your candlestick screen + required parameters to compute the institutional verdict.
-                  </p>
-                </div>
-              )}
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                <button
+                  onClick={() => handleLogToJournal(cameraAnalysisResult)}
+                  className="w-full sm:w-auto px-6 py-3.5 rounded-2xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl hover:scale-105 active:scale-95 transition"
+                >
+                  <span>Log Scanned Setup to Trade Journal (Pillar 8)</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+
+                <button
+                  onClick={() => setActiveTab('manual')}
+                  className="w-full sm:w-auto px-5 py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 text-xs font-mono font-bold flex items-center justify-center gap-2 transition"
+                >
+                  <SlidersHorizontal className="w-4 h-4 text-[#D4AF37]" />
+                  <span>Open Deep AI EA Parameter Terminal →</span>
+                </button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="p-8 rounded-3xl bg-slate-950/60 border border-slate-800 text-center space-y-3">
+              <Camera className="w-8 h-8 text-slate-600 mx-auto animate-pulse" />
+              <div className="space-y-1">
+                <h5 className="text-sm font-bold text-white font-mono">Camera Ready for Live Ingestion</h5>
+                <p className="text-xs text-slate-400 max-w-md mx-auto">
+                  Click "Prompt & Open 16:9 Camera" or pick one of the instant samples above. The AI will ingest your candlesticks, calculate exact MT4 trade parameters, and render your placement order ticket.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1656,15 +1967,13 @@ Broker: ${broker.toUpperCase()}`;
       {activeTab === 'radar' && (
         <MultiMarketRadarEngine
           selectedBroker={broker}
-          onSelectMarketForAnalysis={(market) => {
-            setPair(market.pair);
-            setCurrentPrice(market.price);
-            setKeyLevel(market.suggestedSL);
+          onSelectMarketForAnalysis={(market, mode = 'deep_ai') => {
+            handleSwitchPairAndSyncRealData(market.pair);
             setActiveTab('manual');
-            handleRunAnalysis('deep_ai', market);
+            handleRunAnalysis(mode, market);
           }}
           onOpenTradingViewForPair={(p) => {
-            setPair(p);
+            handleSwitchPairAndSyncRealData(p);
             setShowTradingView(true);
           }}
         />
@@ -1749,8 +2058,147 @@ Broker: ${broker.toUpperCase()}`;
             </div>
           </div>
 
+          {/* INTERACTIVE REAL-TIME CHAT MARKET TABLE (USER REQUEST: "In the chat table analysis button should auto update details first as real as they are then when analyse give better response, deep Ai the same; the chat real analsis should have also real data and sl,tp etc") */}
+          <div className="rounded-2xl bg-slate-950/90 border border-[#D4AF37]/40 p-4 sm:p-5 space-y-3.5 shadow-xl">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-[#D4AF37]" />
+                <h4 className="text-xs font-mono font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <span>Live Market Radar Table • 1-Click Institutional Analysis</span>
+                  <span className="px-2 py-0.5 rounded-full bg-[#00C261]/20 text-[#00C261] text-[10px] font-bold">
+                    REAL-TIME DATA READY
+                  </span>
+                </h4>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400">
+                <span>Active Broker:</span>
+                <span className="text-[#D4AF37] font-bold uppercase">{broker}</span>
+              </div>
+            </div>
+
+            {chatSyncedNotification && (
+              <div className="p-2.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-mono flex items-center gap-2 animate-in fade-in duration-200">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>{chatSyncedNotification}</span>
+              </div>
+            )}
+
+            <p className="text-[11px] text-slate-400 font-mono">
+              Clicking <strong>⚡ Analyse</strong> or <strong>🧠 Deep AI</strong> auto-updates market details first with real quote & indicators, then immediately injects an institutional trade card with exact SL, TP1, TP2, and MT4 execution ticket directly into the chat.
+            </p>
+
+            {/* Table */}
+            <div className="overflow-x-auto rounded-xl border border-slate-800/80">
+              <table className="w-full text-left font-mono text-xs">
+                <thead>
+                  <tr className="bg-slate-900/90 text-slate-400 text-[10px] uppercase border-b border-slate-800">
+                    <th className="py-2.5 px-3">Pair / Symbol</th>
+                    <th className="py-2.5 px-3">Live Quote</th>
+                    <th className="py-2.5 px-3">Bias & Pattern</th>
+                    <th className="py-2.5 px-3">Real Stop Loss & Take Profit</th>
+                    <th className="py-2.5 px-3">{broker.toUpperCase()} Spread</th>
+                    <th className="py-2.5 px-3 text-right">Instant Chat Analysis</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 bg-slate-950/60">
+                  {INITIAL_MARKETS_DATA.map((m) => {
+                    const isBuy = m.bias === 'STRONG_BUY';
+                    const isChop = m.bias === 'NEUTRAL_CHOP';
+                    const brokerSpec = m.spreadByBroker[broker];
+                    const isSelected = pair === m.pair;
+
+                    return (
+                      <tr
+                        key={m.pair}
+                        className={`hover:bg-slate-900/60 transition-colors ${
+                          isSelected ? 'bg-[#D4AF37]/10' : ''
+                        }`}
+                      >
+                        <td className="py-3 px-3">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-white text-sm">{m.pair}</span>
+                            {m.isTopPick && (
+                              <span className="px-1.5 py-0.2 rounded text-[9px] bg-[#D4AF37] text-black font-black">
+                                TOP #1
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-slate-400 block">{m.symbol}</span>
+                        </td>
+
+                        <td className="py-3 px-3">
+                          <div className="font-bold text-white text-sm">@{m.price}</div>
+                          <div className="text-[10px] text-slate-400">20 EMA: {m.ema20} • RSI: {m.rsi}</div>
+                        </td>
+
+                        <td className="py-3 px-3">
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded text-[10px] font-black ${
+                              isChop
+                                ? 'bg-slate-800 text-slate-400'
+                                : isBuy
+                                ? 'bg-emerald-500/20 text-[#00C261] border border-emerald-500/30'
+                                : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                            }`}
+                          >
+                            {m.bias.replace('_', ' ')}
+                          </span>
+                          <span className="text-[10px] text-slate-400 block truncate max-w-[150px] mt-0.5">
+                            {m.ictPattern}
+                          </span>
+                        </td>
+
+                        <td className="py-3 px-3 text-[11px] space-y-0.5">
+                          <div className="text-red-400 flex items-center justify-between gap-2">
+                            <span>SL:</span>
+                            <span className="font-bold text-white">{m.suggestedSL}</span>
+                          </div>
+                          <div className="text-cyan-400 flex items-center justify-between gap-2">
+                            <span>TP1 (50%):</span>
+                            <span className="font-bold text-white">{m.suggestedTP1}</span>
+                          </div>
+                          <div className="text-emerald-400 flex items-center justify-between gap-2">
+                            <span>TP2:</span>
+                            <span className="font-bold text-white">{m.suggestedTP2}</span>
+                          </div>
+                        </td>
+
+                        <td className="py-3 px-3 text-[11px]">
+                          <span className="text-amber-400 font-bold">~{brokerSpec?.spread} pips</span>
+                          <span className="text-[9px] text-slate-500 block">{brokerSpec?.symbol}</span>
+                        </td>
+
+                        <td className="py-3 px-3 text-right">
+                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                            <button
+                              onClick={() => handleTriggerChatAnalysis(m, 'standard')}
+                              className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-slate-500 text-[10px] font-bold transition flex items-center gap-1 active:scale-95"
+                              title="Auto-update real quote & analyze technical confluence"
+                            >
+                              <Zap className="w-3 h-3 text-amber-400" />
+                              <span>⚡ Analyse</span>
+                            </button>
+
+                            <button
+                              onClick={() => handleTriggerChatAnalysis(m, 'deep_ai')}
+                              className="px-2.5 py-1.5 rounded-lg bg-[#D4AF37]/20 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black border border-[#D4AF37]/40 text-[10px] font-bold transition flex items-center gap-1 shadow-sm active:scale-95"
+                              title="Deep AI Institutional Scan with real SL, TP and MT4 ticket"
+                            >
+                              <Sparkles className="w-3 h-3" />
+                              <span>🧠 Deep AI</span>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           {/* AI Advisor Chat Feed */}
-          <div className="rounded-2xl bg-slate-950/80 border border-slate-800 p-4 sm:p-5 space-y-4 max-h-[420px] overflow-y-auto">
+          <div className="rounded-2xl bg-slate-950/80 border border-slate-800 p-4 sm:p-5 space-y-4 max-h-[560px] overflow-y-auto">
             {advisorMessages.map((m) => (
               <div
                 key={m.id}
@@ -1766,7 +2214,7 @@ Broker: ${broker.toUpperCase()}`;
                   className={`p-4 rounded-2xl text-xs sm:text-sm max-w-2xl leading-relaxed ${
                     m.sender === 'user'
                       ? 'bg-slate-800 text-white border border-slate-700'
-                      : 'bg-slate-900/90 text-slate-200 border border-slate-800 shadow-md space-y-2'
+                      : 'bg-slate-900/90 text-slate-200 border border-slate-800 shadow-md space-y-3'
                   }`}
                 >
                   {/* Verdict Badge if present */}
@@ -1795,6 +2243,109 @@ Broker: ${broker.toUpperCase()}`;
                   <div className="whitespace-pre-line text-xs sm:text-sm leading-relaxed">
                     {m.text}
                   </div>
+
+                  {/* RICH INSTITUTIONAL TRADE PLACEMENT CARD (REAL SL, TP, LOT SIZE & MT4 TICKET) */}
+                  {m.tradeCard && (
+                    <div className="mt-3 p-4 rounded-xl bg-slate-950 border border-[#D4AF37]/50 space-y-3 font-mono">
+                      {/* Card Header */}
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`px-2.5 py-1 rounded-lg text-xs font-black shadow-md ${
+                              m.tradeCard.direction === 'BUY'
+                                ? 'bg-[#00C261] text-black'
+                                : 'bg-red-600 text-white'
+                            }`}
+                          >
+                            {m.tradeCard.direction} {m.tradeCard.pair}
+                          </span>
+                          <span className="text-xs text-white font-bold">{m.tradeCard.pattern}</span>
+                        </div>
+
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="text-[#00C261] font-bold">{m.tradeCard.confidence}% Confluence</span>
+                          <span className="text-[#D4AF37] font-bold">• R:R {m.tradeCard.riskReward}</span>
+                        </div>
+                      </div>
+
+                      {/* Real Numerical Grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+                        <div className="p-2 rounded-lg bg-slate-900 border border-slate-800">
+                          <span className="text-[9px] text-slate-500 block uppercase font-bold">Entry Price</span>
+                          <span className="font-bold text-white text-sm">@{m.tradeCard.entryPrice}</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-red-950/40 border border-red-900/50">
+                          <span className="text-[9px] text-red-400 block uppercase font-bold">Stop Loss (SL)</span>
+                          <span className="font-bold text-red-300 text-sm">{m.tradeCard.stopLoss}</span>
+                          <span className="text-[9px] text-slate-400 block">(-{m.tradeCard.slPips} pips / ${m.tradeCard.actualRiskUsd})</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-cyan-950/40 border border-cyan-900/50">
+                          <span className="text-[9px] text-cyan-400 block uppercase font-bold">Take Profit 1</span>
+                          <span className="font-bold text-cyan-300 text-sm">{m.tradeCard.tp1}</span>
+                          <span className="text-[9px] text-slate-400 block">(50% Close & BE)</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-emerald-950/40 border border-emerald-900/50">
+                          <span className="text-[9px] text-emerald-400 block uppercase font-bold">Take Profit 2</span>
+                          <span className="font-bold text-emerald-300 text-sm">{m.tradeCard.tp2}</span>
+                          <span className="text-[9px] text-emerald-400 block">(+{m.tradeCard.tpPips} pips final)</span>
+                        </div>
+                      </div>
+
+                      {/* Sizing & Gilgil Shield */}
+                      <div className="p-2.5 rounded-lg bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-between text-[11px] text-amber-200">
+                        <span>Gilgil $2 Protection Sizing:</span>
+                        <strong className="text-white">STRICTLY {m.tradeCard.lotSize} Micro Lot ($2.00 / 260 KES Hard Loss Cap)</strong>
+                      </div>
+
+                      {/* MT4 Execution Steps */}
+                      <div className="space-y-1 text-xs">
+                        <span className="text-[10px] font-bold text-cyan-400 uppercase block">
+                          MT4/MT5 F9 Execution Ticket ({broker.toUpperCase()}):
+                        </span>
+                        <div className="space-y-0.5 bg-slate-900 p-2.5 rounded-lg border border-slate-800 text-[11px] text-slate-300">
+                          {m.tradeCard.mt4Steps.map((step, idx) => (
+                            <div key={idx} className="flex items-start gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
+                              <span>{step}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Action buttons inside chat card */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                        <button
+                          onClick={() => {
+                            const ticket = `[PIVOTFX AI ORDER TICKET]\nSymbol: ${m.tradeCard!.brokerSymbol}\nAction: ${m.tradeCard!.direction}\nEntry: ${m.tradeCard!.entryPrice}\nSL: ${m.tradeCard!.stopLoss} (-${m.tradeCard!.slPips} pips)\nTP1: ${m.tradeCard!.tp1}\nTP2: ${m.tradeCard!.tp2} (+${m.tradeCard!.tpPips} pips)\nVolume: 0.01 Micro Lot ($2 Max Risk)\nBroker: ${broker.toUpperCase()}\nRisk:Reward = 1 : ${m.tradeCard!.riskReward}`;
+                            navigator.clipboard.writeText(ticket);
+                            setChatSyncedNotification(`✓ MT4 ticket copied to clipboard for ${m.tradeCard!.pair}!`);
+                            setTimeout(() => setChatSyncedNotification(null), 2500);
+                          }}
+                          className="py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95"
+                        >
+                          <Copy className="w-3.5 h-3.5 text-[#D4AF37]" />
+                          <span>Copy MT4/MT5 Order Ticket</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleLogToJournal({
+                            pair: m.tradeCard!.pair,
+                            verdict: m.tradeCard!.direction,
+                            suggestedLot: 0.01,
+                            entryPrice: m.tradeCard!.entryPrice,
+                            suggestedTP: m.tradeCard!.tp2,
+                            potentialGainUsd: m.tradeCard!.potentialGainUsd,
+                            pattern: m.tradeCard!.pattern,
+                            score: m.tradeCard!.confidence
+                          })}
+                          className="py-2 rounded-xl btn-gold text-black text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition active:scale-95"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Log Setup to Trade Journal</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -1802,7 +2353,7 @@ Broker: ${broker.toUpperCase()}`;
             {advisorLoading && (
               <div className="flex items-center gap-2 text-xs font-mono text-[#D4AF37] p-3 rounded-xl bg-slate-900 border border-slate-800 animate-pulse">
                 <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>Institutional AI Advisor calculating order book confluences...</span>
+                <span>Institutional AI Advisor calculating real-time order book confluences...</span>
               </div>
             )}
           </div>

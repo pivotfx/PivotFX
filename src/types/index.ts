@@ -50,7 +50,7 @@ export interface PillarLesson {
   id: string;
   number: string;
   title: string;
-  levelTag: 'Beginner' | 'Intermediate' | 'Advanced' | 'Pro / Institutional';
+  levelTag: 'Beginner' | 'Intermediate' | 'Advanced' | 'Pro / Institutional' | 'Advanced ICT' | 'Beginner & Intermediate' | 'Core Execution';
   duration: string;
   summary: string;
   concept: string;

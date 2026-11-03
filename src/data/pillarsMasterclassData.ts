@@ -441,6 +441,336 @@ Rollover / Dead   │ 23:00 - 01:00 EAT  │ Wide spreads! AVOID TRADING!`
           'Mark the Asian High and Asian Low before 10:30 AM EAT every day.',
           'Close all day trading positions before 10:30 PM EAT to avoid overnight rollover swap fees and spread widening.'
         ]
+      },
+      {
+        id: 'fx-11',
+        number: '11',
+        title: 'ICT Masterclass: Liquidity Pools, BSL & SSL Sweeps',
+        levelTag: 'Advanced ICT',
+        duration: '25 mins',
+        summary: 'Deconstruct smart money liquidity mechanics: Buy-Side Liquidity (BSL) and Sell-Side Liquidity (SSL) above equal highs and below equal lows.',
+        concept: 'Institutional smart money cannot buy or sell without counterpart retail orders. When retail traders place short positions, their Stop Loss is a Buy Stop. The cluster of Buy Stops resting above obvious swing highs, equal highs (EQH), and double tops is called Buy-Side Liquidity (BSL). When retail traders buy, their Stop Loss is a Sell Stop resting below swing lows and equal lows (EQL), known as Sell-Side Liquidity (SSL). Banks engineer fake breakouts into these pools to trigger retail stop losses, providing the massive volume required for smart money to enter their actual intended direction.',
+        bulletPoints: [
+          'Buy-Side Liquidity (BSL): Resting buy stop orders above old swing highs, session highs, and weekly highs.',
+          'Sell-Side Liquidity (SSL): Resting sell stop orders below old swing lows, session lows, and Asian range lows.',
+          'Liquidity Run / Sweep (Turtle Soup): Price pierces a key high or low with a fast wick, absorbs liquidity, and violently closes back inside the range.',
+          'The Rule of Equals: Equal Highs (EQH) or Equal Lows (EQL) are guaranteed retail stop magnets that institutions will sweep before reversing.'
+        ],
+        illustration: {
+          type: 'chart',
+          title: 'Buy-Side Liquidity (BSL) Sweep & Reverse Anatomy',
+          caption: 'How smart money engineers false breakouts into retail stop orders',
+          content: `       [ BUY-SIDE LIQUIDITY POOL (BSL) ]
+       ───────────────────────────────── (Equal Highs / Stop Losses)
+                      ▲ (Wick Sweep / Judas Run)
+                     / \\
+             (High) /   \\  Institutional Displacement
+              /\\   /     ▼ (Market Structure Shift)
+             /  \\ /
+            /    ▼
+       (Consolidation)`
+        },
+        realWorldExample: {
+          pair: 'EUR/USD',
+          context: 'Asian session formed obvious Equal Highs at 1.0880.',
+          setup: 'At 11:15 AM EAT (London Open), smart money spiked price to 1.0888 (+8 pips) sweeping BSL, then formed a 5-minute bearish displacement candle closing at 1.0865.',
+          outcome: 'Retail breakout buyers were trapped; price plunged 70 pips to 1.0810.',
+          keyTakeaway: 'Never buy breakouts of equal highs. Wait for the wick sweep and enter the reversal when market structure shifts.'
+        },
+        actionableChecklist: [
+          'Scan the 15-minute chart each morning and mark Equal Highs with a red horizontal ray labeled "BSL".',
+          'Mark Equal Lows with a green horizontal ray labeled "SSL".',
+          'Wait for price to breach the pool and watch for an immediate rejection candle closing back inside the range.'
+        ]
+      },
+      {
+        id: 'fx-12',
+        number: '12',
+        title: 'ICT Masterclass: Fair Value Gaps (FVG) & Consequent Encroachment',
+        levelTag: 'Advanced ICT',
+        duration: '24 mins',
+        summary: 'Identify institutional price imbalances across 3-candle formations and execute sniper entries at the 50% Consequent Encroachment (C.E.).',
+        concept: 'A Fair Value Gap (FVG) or Inefficient Price Action occurs when institutional algorithms deliver aggressive one-sided orders, leaving a price void across a 3-candlestick sequence. In a bullish FVG, Candle 1 high and Candle 3 low do not overlap, leaving Candle 2 body completely uncontested by sellers. Because the interbank price delivery algorithm (IPDA) seeks continuous equilibrium, price will gravitate back into this imbalance to rebalance liquidity before continuing its dominant trend.',
+        bulletPoints: [
+          '3-Candlestick Rule: Candle 1 is the preparation, Candle 2 is the large expansion body, Candle 3 is the confirmation.',
+          'Consequent Encroachment (C.E.): The exact 50% midpoint of the FVG box. Institutional algorithms frequently reverse at the C.E.',
+          'BISI vs SIBI: BISI (Buyside Imbalance Sellside Inefficiency) is a bullish gap; SIBI (Sellside Imbalance Buyside Inefficiency) is a bearish gap.',
+          'Validation Rule: An FVG is only high probability when it is created alongside a clean Market Structure Shift (MSS).'
+        ],
+        illustration: {
+          type: 'chart',
+          title: '3-Candle Fair Value Gap (FVG) Anatomy',
+          caption: 'Visualizing Candle 1 Wick, Candle 2 Expansion, and Candle 3 Wick Gap',
+          content: `  Candle 1        Candle 2 (Displacement)     Candle 3
+    ┌─┐                     ┌─┐                 ┌─┐
+    │ │ (Wick High)         │ │                 │ │
+    └┬┘                     │ │                 └┬┘ (Wick Low)
+     │                      │ │                  │
+     ▼ ───────────┐         │ │                  │
+      Fair Value  │         │ │ ◄── 50% C.E. ─── ┼ ── Sniper Entry Point
+      Gap (FVG)   │         │ │                  │
+     ▲ ───────────┘         │ │                  │
+     │                      └┬┘                  │
+    ┌┴┐                      │                  ┌┴┐
+    │ │                      ▼                  │ │`
+        },
+        realWorldExample: {
+          pair: 'GBP/USD',
+          context: 'At 15:30 EAT (New York Open), high-impact US news pushed GBP/USD upward with a 35-pip M15 green candle.',
+          setup: 'Candle 1 closed at 1.2820, Candle 3 opened at 1.2845, leaving a 25-pip FVG between 1.2820 and 1.2845. The 50% C.E. sat at 1.28325.',
+          outcome: 'Price retraced directly to 1.28325, wicked precisely, and exploded 80 pips up to 1.2915.',
+          keyTakeaway: 'Do not chase green momentum candles. Draw the FVG box and place a limit order at the 50% Consequent Encroachment.'
+        },
+        actionableChecklist: [
+          'Locate any candle whose body is at least 3x the average ATR.',
+          'Draw a rectangle from the high wick of Candle 1 to the low wick of Candle 3.',
+          'Divide the rectangle in half to mark the 50% Consequent Encroachment (C.E.).'
+        ]
+      },
+      {
+        id: 'fx-13',
+        number: '13',
+        title: 'ICT Masterclass: Institutional Order Blocks (OB) & Mean Threshold',
+        levelTag: 'Advanced ICT',
+        duration: '26 mins',
+        summary: 'Detect bank footprint candles: the last opposing candle prior to aggressive displacement, and defend the 50% Mean Threshold.',
+        concept: 'An Order Block (OB) is not a simple retail support/resistance zone. A Bullish Order Block is the lowest down-close (bearish) candle that precedes a decisive upward displacement that breaks previous market structure. A Bearish Order Block is the highest up-close (bullish) candle that precedes a violent downward displacement. The 50% level of the Order Block body is known as the Mean Threshold (MT). If price closes beyond the Mean Threshold on a candle close basis, the setup is invalidated.',
+        bulletPoints: [
+          'Bullish OB: The final down candle before a violent surge that creates a BOS (Break of Structure).',
+          'Bearish OB: The final up candle before an aggressive drop that violates previous swing lows.',
+          'Mean Threshold (MT): The exact 50% midpoint of the Order Block candle body (excluding wicks).',
+          'Invalidation: High-probability OBs hold price on the open or wick test of the Mean Threshold. A body close past 50% cancels the order.'
+        ],
+        illustration: {
+          type: 'chart',
+          title: 'Bullish Order Block & Mean Threshold (MT)',
+          caption: 'Order Block structure and 50% institutional defense zone',
+          content: `   Bearish Candle (Order Block)       Explosive Bullish Displacement
+       ┌───┐                                      ┌───┐
+   Open│   │                                      │   │
+       ├───┤ ◄─── 50% Mean Threshold (MT)         │   │
+  Close│   │                                      │   │
+       └───┘                                      │   │
+         │                                        │   │
+         ▼ ── (Mitigation Entry Zone)             └───┘`
+        },
+        realWorldExample: {
+          pair: 'XAU/USD (Gold)',
+          context: 'Gold printed an H1 bearish candle into 2028.00 before surging 250 pips up to 2053.00.',
+          setup: 'The H1 candle between 2028.00 and 2032.00 was marked as a Bullish Order Block. The 50% Mean Threshold was 2030.00.',
+          outcome: 'Two sessions later, Gold pulled back to 2030.50, absorbed liquidity, and rallied another 180 pips.',
+          keyTakeaway: 'Always place Stop Loss 3 to 5 pips below the Order Block low. If price breaches the Mean Threshold with a candle close, exit.'
+        },
+        actionableChecklist: [
+          'Identify the displacement candle that broke structure.',
+          'Trace back to the last opposite-colored candle before that surge.',
+          'Measure the candle body from Open to Close and mark the 50% Mean Threshold.'
+        ]
+      },
+      {
+        id: 'fx-14',
+        number: '14',
+        title: 'ICT Masterclass: Market Structure Shifts (MSS) & Displacement',
+        levelTag: 'Advanced ICT',
+        duration: '22 mins',
+        summary: 'Differentiate between fake retail wicks and true institutional displacement with Market Structure Shifts (MSS).',
+        concept: 'A true trend reversal is confirmed not by a single wick poking past a level, but by a Market Structure Shift (MSS) accompanied by Displacement. Displacement is recognized by large-bodied institutional candles with small wicks, expanding with velocity and leaving behind Fair Value Gaps. When a Market Structure Shift occurs with displacement, smart money has committed capital to reprice the asset.',
+        bulletPoints: [
+          'Wick vs Body Rule: A wick piercing a swing point is a liquidity sweep. A full candle body CLOSE beyond the swing point is an MSS.',
+          'Displacement Signature: Large, decisive candles indicating institutional participation, not retail churn.',
+          'MSS vs BOS: A BOS (Break of Structure) continues the existing trend; an MSS shifts the trend from bullish to bearish or vice versa.',
+          'Optimal Trade Entry (OTE): After an MSS, apply Fibonacci from swing low to high; look for entry between 61.8% and 78.6% retracement.'
+        ],
+        illustration: {
+          type: 'chart',
+          title: 'Liquidity Sweep vs True Market Structure Shift (MSS)',
+          caption: 'Comparing wick sweeps to true body close displacement',
+          content: `    WICK SWEEP (Fakeout / Turtle Soup):     TRUE MSS (Displacement & Shift):
+               ▲ (Wick only)                                 ▲ (Displacement)
+              / \\                                           / │
+       ──────/───\\──────── (Swing High)              ──────/──┼──────── (Swing High)
+            /     \\                                       /   │
+                                                         /    ▼ Full Body Close Beyond!`
+        },
+        realWorldExample: {
+          pair: 'USD/JPY',
+          context: 'USD/JPY climbed into 155.50 resistance in a clean uptrend.',
+          setup: 'At 155.50, price swept the high with a wick, followed immediately by three consecutive bearish candles closing below the previous M15 swing low at 155.15 (MSS).',
+          outcome: 'Displaced sellers drove USD/JPY down 120 pips to 154.30.',
+          keyTakeaway: 'Do not anticipate reversals before the MSS occurs. Wait for the candle body close across the prior swing point.'
+        },
+        actionableChecklist: [
+          'Never enter on a wick breakout—wait for the candle to close.',
+          'Ensure the candle that breaks structure has a wide body and leaves an FVG.',
+          'Mark the shift on your chart as "MSS" and wait for the pullback into the FVG.'
+        ]
+      },
+      {
+        id: 'fx-15',
+        number: '15',
+        title: 'ICT Masterclass: London Judas Swing & New York AM Silver Bullet',
+        levelTag: 'Advanced ICT',
+        duration: '28 mins',
+        summary: 'Master the 2 most profitable institutional session algorithms: The 11:00 AM EAT London Judas Swing and 17:00 EAT NY Silver Bullet.',
+        concept: 'The interbank algorithm follows fixed temporal routines based on international banking hours. The London Judas Swing occurs between 10:30 AM and 11:30 AM EAT (East Africa Time). It is an engineered deceptive maneuver that rallies price upward to trick retail breakout buyers, solely to harvest BSL liquidity before dumping into the true bearish trend for London. The New York AM Silver Bullet operates between 17:00 PM and 18:00 PM EAT (10:00 - 11:00 AM NY Time). It is a high-probability algorithm that delivers a minimum 15 to 25 pip expansion into an open FVG or liquidity pool.',
+        bulletPoints: [
+          'Judas Swing Window: 10:30 AM - 11:30 AM EAT (London Open). Sweeps Asian session extremes.',
+          'Silver Bullet Window: 17:00 PM - 18:00 PM EAT (New York AM). Targets intraday liquidity.',
+          'Execution Rule: If Asian session made a range, London will fake out one side (Judas), then run the opposite side.',
+          'Targeting: Target the Asian Low if Judas swept the Asian High, with stop loss resting just beyond the sweep wick peak.'
+        ],
+        illustration: {
+          type: 'diagram',
+          title: 'London Judas Swing Execution Timeline (East Africa Time)',
+          caption: 'How interbank algorithms trigger traps at 11:00 AM EAT',
+          content: `  03:00 - 10:00 EAT             10:30 - 11:15 EAT            11:30 - 16:00 EAT
+  [ Asian Range ]               [ Judas Swing ]               [ Real London Trend ]
+  ┌───────────────┐                  ▲ (Fake Rally)
+  │ Equal Highs   │                 / \\
+  │ Consolidation │ ── Sweeps High ─┘   \\
+  │ Equal Lows    │                      ▼ Displaces Downward Into Target!
+  └───────────────┘`
+        },
+        realWorldExample: {
+          pair: 'GBP/USD',
+          context: 'Asian range was 1.2880 (High) to 1.2850 (Low).',
+          setup: 'At 10:50 AM EAT, price accelerated upward to 1.2892, inducing retail buyers. At 11:10 AM, price closed with an inverted hammer at 1.2882.',
+          outcome: 'Judas trap was confirmed. Traders sold at 1.2880 with SL at 1.2895 (15 pips). Price collapsed 75 pips to 1.2805.',
+          keyTakeaway: 'The first big move at London Open is almost always a lie (Judas Swing). Wait for the sweep and trade the reversal.'
+        },
+        actionableChecklist: [
+          'Mark the Asian High and Low at 10:15 AM EAT.',
+          'Do NOT take breakouts between 10:30 AM and 11:15 AM EAT.',
+          'When one side of the Asian range is swept with a wick, enter the trade in the opposite direction.'
+        ]
+      },
+      {
+        id: 'fx-16',
+        number: '16',
+        title: 'ICT Masterclass: Power of 3 (AMD) Accumulation, Manipulation, Distribution',
+        levelTag: 'Advanced ICT',
+        duration: '24 mins',
+        summary: 'Decode the daily institutional cycle: Asian Accumulation, London Manipulation, and New York Distribution.',
+        concept: 'The Power of 3 (AMD) is ICTs universal framework describing how smart money builds, traps, and liquidates positions on every timeframe from the Daily candle to the 1-minute chart. The cycle consists of: 1) Accumulation (smart money silently gathers orders in a tight range), 2) Manipulation (an aggressive fake push against the true trend to harvest retail stops and induce counter-trend orders), and 3) Distribution (the real high-speed expansion in the genuine direction where institutions cash out their profits).',
+        bulletPoints: [
+          'Phase 1 - Accumulation: Asian session consolidation. Equal highs and equal lows form.',
+          'Phase 2 - Manipulation: London Open false breakout. Spikes above or below accumulation range to trigger stop losses.',
+          'Phase 3 - Distribution: New York session trend run. Delivers the true daily move into institutional targets.',
+          'Daily Open Rule: On a bullish day, price opens, trades DOWN below opening price (Manipulation), then rallies all day to close near the high (Distribution).'
+        ],
+        illustration: {
+          type: 'diagram',
+          title: 'Power of 3 (AMD) Daily Candlestick Blueprint',
+          caption: 'How a single daily candlestick is generated through Asian, London, and NY phases',
+          content: `  Open Price ─────────┐
+                      │  Phase 2: Manipulation (London drops below Open to trap sellers)
+                      ▼
+                     ┌┴┐  ◄── Low of the Day (Smart Money Accumulates Longs)
+                     │ │
+                     │ │  Phase 3: Distribution (New York expands upward all afternoon)
+                     │ │
+                     │ │
+                     └┬┘  ◄── High of the Day (Smart Money Takes Profit)
+  Close Price ────────┘`
+        },
+        realWorldExample: {
+          pair: 'EUR/USD',
+          context: 'EUR/USD Daily Open at 1.0820.',
+          setup: 'At 11:00 AM EAT, price pushed down to 1.0790 (Manipulation below Daily Open). At 11:45 AM, an M15 bullish MSS was printed.',
+          outcome: 'Traders entered longs at 1.0805. New York session distributed price 95 pips higher to close the day at 1.0900.',
+          keyTakeaway: 'If you are bullish for the day, only buy when price is trading BELOW the Daily Open price during London or NY Open.'
+        },
+        actionableChecklist: [
+          'Plot the Daily Opening Price line at 02:00 AM EAT.',
+          'If your higher timeframe bias is Bullish, look to buy only when price is BELOW the Daily Open.',
+          'If your higher timeframe bias is Bearish, look to sell only when price is ABOVE the Daily Open.'
+        ]
+      },
+      {
+        id: 'fx-17',
+        number: '17',
+        title: 'TradingView Navigation, Button Directory & Drawing Shortcuts',
+        levelTag: 'Beginner & Intermediate',
+        duration: '22 mins',
+        summary: 'Master every toolbar, drawing instrument, timeframe switch, and pro keyboard shortcut in the TradingView interface.',
+        concept: 'TradingView is the global industry-standard charting platform. A beginner who does not know how to efficiently manipulate charts will miss fast-moving market setups. Every button on the left drawing toolbar, top interval bar, right social bar, and bottom pine editor serves an exact technical purpose. Mastering keyboard shortcuts such as Alt+T (Trendline), Alt+H (Horizontal Ray), and Alt+F (Fibonacci) turns chart analysis into second nature.',
+        bulletPoints: [
+          'Left Toolbar (Drawings): Trendline (Alt+T), Horizontal Line (Alt+H), Rectangle tool for Order Blocks and FVGs, Long/Short Position risk tool.',
+          'Top Toolbar (Intervals): Switch between M1, M5, M15, H1, H4, D1. Indicator library (/) to add 20 EMA, 50 EMA, and Volume.',
+          'Right Toolbar (Watchlist): Manage currency pairs, set price alerts (Alt+A) at key liquidity levels, and monitor economic events.',
+          'Bottom Bar (Pine Script & Replay): Bar Replay mode (Shift+B) to backtest historical setups candle-by-candle without seeing the future.'
+        ],
+        illustration: {
+          type: 'diagram',
+          title: 'TradingView Interface Command Layout',
+          caption: 'Top, Left, Right and Center interface functional mapping',
+          content: `  [ TOP BAR: Symbol Search | Timeframes (M15, H1, H4) | Candlestick Style | Indicators (/) | Replay ]
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+  [ LEFT TOOLBAR ]    │                                                       │ [ RIGHT BAR ]
+  • Crosshair         │                     MAIN CHART CANVAS                 │ • Watchlist (EUR, GBP)
+  • Trendline (Alt+T) │                                                       │ • Alerts (Alt+A)
+  • Horizontal (Alt+H)│              Candlesticks • 20 EMA • Order Blocks     │ • Economic Calendar
+  • Rectangle (FVG)   │                                                       │ • Order Notifications
+  • Long/Short Tool   │                                                       │
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+  [ BOTTOM BAR: Timezone (EAT +3) | Time Slider | Pine Script Editor | Strategy Tester | Trading Panel ]`
+        },
+        realWorldExample: {
+          pair: 'GBP/USD',
+          context: 'Trader needs to map a 15-minute London Judas sweep in under 30 seconds before price leaves the entry zone.',
+          setup: 'Trader presses Alt+H to drop horizontal ray on Asian high 1.29656, presses Alt+R to box the 1.2950 FVG, and uses Long/Short tool to calculate 20 pip SL and 50 pip TP.',
+          outcome: 'Order execution is flawless and unemotional with exact 0.01 lot sizing mapped out before entry.',
+          keyTakeaway: 'Build your TradingView favorites bar with: Crosshair, Trendline, Horizontal Ray, Rectangle, and Long/Short Position tools.'
+        },
+        actionableChecklist: [
+          'Add a star to favorite: Trendline, Horizontal Ray, Rectangle, and Long/Short Position.',
+          'Set your chart timezone in the bottom right corner to UTC+3 (Nairobi / East Africa Time).',
+          'Practice using the Bar Replay tool (Shift+B) on 10 historical London Open sessions.'
+        ]
+      },
+      {
+        id: 'fx-18',
+        number: '18',
+        title: 'MetaTrader 4 & 5 (MT4/MT5) Order Ticket Placement & Gilgil $2 Execution',
+        levelTag: 'Core Execution',
+        duration: '25 mins',
+        summary: 'Step-by-step master guide on executing orders in MT4/MT5: Market Execution vs Pending Orders, SL/TP inputs, and broker ticket filling.',
+        concept: 'Knowing what to trade is useless if you cannot properly enter the order on MetaTrader 4 or 5 without errors. MetaTrader order windows require 4 mandatory parameters: 1) Symbol, 2) Volume (Lot Size), 3) Stop Loss, and 4) Take Profit. Beginners often make the catastrophic mistake of leaving Volume at the default 1.00 lot or failing to enter a Stop Loss before clicking Buy or Sell. By adhering strictly to the Gilgil $2 Law (0.01 micro lot = $0.10/pip), your capital remains permanently shielded.',
+        bulletPoints: [
+          'F9 Hotkey: Opens the New Order Ticket instantly on any active chart in MT4/MT5.',
+          'Market Execution vs Pending: Market Execution buys/sells instantly at Ask/Bid. Pending Orders (Buy Limit, Sell Limit, Buy Stop, Sell Stop) trigger at specified future prices.',
+          'Volume Field: ALWAYS verify this says 0.01 before clicking! Never leave it at 1.00 lot.',
+          'Scale-Out Protocol: When price reaches Take Profit 1 (+25 pips), double-click the trade in the Terminal (Ctrl+T), change volume to 0.005 (or close partial) and drag SL to Entry Price (Breakeven).'
+        ],
+        illustration: {
+          type: 'diagram',
+          title: 'MetaTrader F9 Order Ticket Anatomy',
+          caption: 'Visual breakdown of the F9 execution parameters in MT4/MT5',
+          content: `  ┌──────────────────────────────────────────────────────────┐
+  │ MT4 / MT5 NEW ORDER TICKET (Press F9)                   │
+  ├──────────────────────────────────────────────────────────┤
+  │ Symbol:      [ GBPUSD, Great Britain Pound vs US Dollar ]│
+  │ Volume:      [ 0.01 ] ◄── STRICT GILGIL 0.01 MICRO LOT!  │
+  │ Stop Loss:   [ 1.29369 ] (20 Pips = $2.00 Max Risk Cap)  │
+  │ Take Profit: [ 1.28669 ] (50 Pips = $5.00 Profit Target) │
+  │ Type:        [ Market Execution / Pending Limit ]        │
+  ├──────────────────────────────────────────────────────────┤
+  │       [ SELL BY MARKET ]        [ BUY BY MARKET ]        │
+  │            1.29169                   1.29181             │
+  └──────────────────────────────────────────────────────────┘`
+        },
+        realWorldExample: {
+          pair: 'GBP/USD',
+          context: 'Trader receives a high-probability AI signal to Sell GBP/USD at 1.29169.',
+          setup: 'Trader presses F9 in MT4. Inputs Volume: 0.01. Inputs Stop Loss: 1.29369. Inputs Take Profit: 1.28669. Clicks Sell By Market.',
+          outcome: 'Trade executes with zero slippage. When price hits 1.28919 (+25 pips), trader moves SL to 1.29169 (Breakeven) making the trade completely risk-free.',
+          keyTakeaway: 'Never click Buy or Sell without entering your Stop Loss first. Pressing F9 and having your numbers prepared prevents emotional errors.'
+        },
+        actionableChecklist: [
+          'Press F9 on your MT4/MT5 demo to open the order ticket and practice entering 0.01 lot with predefined SL and TP.',
+          'Press Ctrl+T to view your Terminal trade list, margin level, and floating profit/loss.',
+          'Practice modifying an existing trade to move Stop Loss to Breakeven once in profit.'
+        ]
       }
     ]
   },

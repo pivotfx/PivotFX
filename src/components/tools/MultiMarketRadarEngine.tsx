@@ -36,6 +36,12 @@ export interface MarketScanData {
   suggestedSL: number;
   suggestedTP1: number;
   suggestedTP2: number;
+  ema20: number;
+  ema50: number;
+  rsi: number;
+  keyLevel: number;
+  patternType: 'Tower Top Liquidity Sweep' | '20/50 EMA Trend Bounce' | 'Asian Liquidity Sweep' | 'Fair Value Gap Re-test' | 'Bearish Order Block Mitigation';
+  riskReward: string;
   isTopPick?: boolean;
   volatility: 'HIGH' | 'MEDIUM' | 'LOW';
   recommendedSession: string;
@@ -56,6 +62,12 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = [
     suggestedSL: 2732.00,
     suggestedTP1: 2752.00,
     suggestedTP2: 2760.00,
+    ema20: 2736.20,
+    ema50: 2728.80,
+    rsi: 58.4,
+    keyLevel: 2732.00,
+    patternType: 'Fair Value Gap Re-test',
+    riskReward: '1 : 2.6',
     isTopPick: true,
     volatility: 'HIGH',
     recommendedSession: 'London / NY Overlap (15:30 - 18:30 EAT)',
@@ -79,6 +91,12 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = [
     suggestedSL: 1.29680,
     suggestedTP1: 1.28850,
     suggestedTP2: 1.28520,
+    ema20: 1.28850,
+    ema50: 1.28520,
+    rsi: 76.4,
+    keyLevel: 1.29656,
+    patternType: 'Tower Top Liquidity Sweep',
+    riskReward: '1 : 2.5',
     volatility: 'HIGH',
     recommendedSession: 'London Open (10:00 - 12:30 EAT)',
     spreadByBroker: {
@@ -101,6 +119,12 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = [
     suggestedSL: 1.08200,
     suggestedTP1: 1.08700,
     suggestedTP2: 1.08950,
+    ema20: 1.08320,
+    ema50: 1.08180,
+    rsi: 54.2,
+    keyLevel: 1.08200,
+    patternType: '20/50 EMA Trend Bounce',
+    riskReward: '1 : 2.4',
     volatility: 'MEDIUM',
     recommendedSession: 'London / NY (10:00 - 17:00 EAT)',
     spreadByBroker: {
@@ -123,6 +147,12 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = [
     suggestedSL: 67100.00,
     suggestedTP1: 69500.00,
     suggestedTP2: 70500.00,
+    ema20: 67800.00,
+    ema50: 67200.00,
+    rsi: 62.8,
+    keyLevel: 67100.00,
+    patternType: 'Fair Value Gap Re-test',
+    riskReward: '1 : 2.8',
     volatility: 'HIGH',
     recommendedSession: '24/7 Global Liquidity Flow',
     spreadByBroker: {
@@ -145,6 +175,12 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = [
     suggestedSL: 152.800,
     suggestedTP1: 153.850,
     suggestedTP2: 154.300,
+    ema20: 153.050,
+    ema50: 152.750,
+    rsi: 57.6,
+    keyLevel: 152.800,
+    patternType: '20/50 EMA Trend Bounce',
+    riskReward: '1 : 2.2',
     volatility: 'MEDIUM',
     recommendedSession: 'Tokyo / NY Session (03:00 & 15:30 EAT)',
     spreadByBroker: {
@@ -167,6 +203,12 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = [
     suggestedSL: 197.300,
     suggestedTP1: 198.900,
     suggestedTP2: 199.500,
+    ema20: 197.650,
+    ema50: 197.100,
+    rsi: 61.5,
+    keyLevel: 197.300,
+    patternType: 'Asian Liquidity Sweep',
+    riskReward: '1 : 2.5',
     volatility: 'HIGH',
     recommendedSession: 'London Session (10:00 - 13:00 EAT)',
     spreadByBroker: {
@@ -189,6 +231,12 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = [
     suggestedSL: 1.39350,
     suggestedTP1: 1.38600,
     suggestedTP2: 1.38300,
+    ema20: 1.39150,
+    ema50: 1.39320,
+    rsi: 41.2,
+    keyLevel: 1.39350,
+    patternType: 'Bearish Order Block Mitigation',
+    riskReward: '1 : 2.2',
     volatility: 'MEDIUM',
     recommendedSession: 'New York Session (15:30 - 20:00 EAT)',
     spreadByBroker: {
@@ -211,6 +259,12 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = [
     suggestedSL: 0.65500,
     suggestedTP1: 0.65900,
     suggestedTP2: 0.66050,
+    ema20: 0.65820,
+    ema50: 0.65840,
+    rsi: 49.5,
+    keyLevel: 0.65500,
+    patternType: '20/50 EMA Trend Bounce',
+    riskReward: '1 : 1.5',
     volatility: 'LOW',
     recommendedSession: 'Asian / Sydney Session',
     spreadByBroker: {
@@ -224,7 +278,7 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = [
 
 interface MultiMarketRadarEngineProps {
   selectedBroker: BrokerId;
-  onSelectMarketForAnalysis: (market: MarketScanData) => void;
+  onSelectMarketForAnalysis: (market: MarketScanData, mode?: 'standard' | 'deep_ai') => void;
   onOpenTradingViewForPair: (pair: CurrencyPair) => void;
 }
 
@@ -439,22 +493,32 @@ input double   MaxRiskUsdPerTrade  = 2.00;        // 260 KES hard loss cap
               </div>
 
               {/* Action Buttons (3 cols) */}
-              <div className="lg:col-span-3 space-y-2.5">
+              <div className="lg:col-span-3 space-y-2">
                 <button
-                  onClick={() => onSelectMarketForAnalysis(topMarket)}
-                  className="w-full py-3.5 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition active:scale-95"
+                  onClick={() => onSelectMarketForAnalysis(topMarket, 'deep_ai')}
+                  className="w-full py-3 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg hover:scale-[1.01] transition active:scale-95"
                 >
-                  <Zap className="w-4 h-4" />
-                  <span>Load into EA Terminal</span>
+                  <Sparkles className="w-4 h-4" />
+                  <span>🧠 Deep AI Analyse ({topMarket.pair})</span>
                 </button>
 
-                <button
-                  onClick={() => onOpenTradingViewForPair(topMarket.pair)}
-                  className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-2 border border-slate-700 hover:border-[#D4AF37] transition"
-                >
-                  <BarChart3 className="w-3.5 h-3.5 text-[#D4AF37]" />
-                  <span>Open Live TradingView Chart</span>
-                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => onSelectMarketForAnalysis(topMarket, 'standard')}
+                    className="py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-slate-500 font-mono font-bold text-[11px] flex items-center justify-center gap-1.5 transition active:scale-95"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-amber-400" />
+                    <span>⚡ Standard</span>
+                  </button>
+
+                  <button
+                    onClick={() => onOpenTradingViewForPair(topMarket.pair)}
+                    className="py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white font-mono font-bold text-[11px] flex items-center justify-center gap-1.5 border border-slate-800 hover:border-[#D4AF37] transition"
+                  >
+                    <BarChart3 className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Live Chart</span>
+                  </button>
+                </div>
 
                 {/* Gilgil $2 Guarantee Stamp */}
                 <div className="p-2 rounded-xl bg-[#D4AF37]/10 border border-[#D4AF37]/30 text-[10px] font-mono text-center text-amber-200">
@@ -583,18 +647,28 @@ input double   MaxRiskUsdPerTrade  = 2.00;        // 260 KES hard loss cap
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-1.5 pt-1">
                   <button
-                    onClick={() => onSelectMarketForAnalysis(m)}
-                    className="py-2 rounded-xl bg-[#D4AF37]/15 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black font-mono font-bold text-[10px] transition border border-[#D4AF37]/30 flex items-center justify-center gap-1"
+                    onClick={() => onSelectMarketForAnalysis(m, 'standard')}
+                    className="py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 font-mono font-bold text-[10px] transition flex items-center justify-center gap-1 active:scale-95"
+                    title="Auto-update real quote & analyze technical confluence"
                   >
-                    <Zap className="w-3 h-3" />
-                    <span>Load Setup</span>
+                    <Zap className="w-3 h-3 text-amber-400" />
+                    <span>⚡ Analyse</span>
+                  </button>
+
+                  <button
+                    onClick={() => onSelectMarketForAnalysis(m, 'deep_ai')}
+                    className="py-2 rounded-xl bg-[#D4AF37]/20 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black font-mono font-bold text-[10px] transition border border-[#D4AF37]/40 flex items-center justify-center gap-1 shadow-sm active:scale-95"
+                    title="Deep AI Institutional Scan with real SL, TP and MT4 ticket"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>🧠 Deep AI</span>
                   </button>
 
                   <button
                     onClick={() => onOpenTradingViewForPair(m.pair)}
-                    className="py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white font-mono font-bold text-[10px] transition border border-slate-800 flex items-center justify-center gap-1"
+                    className="py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white font-mono font-bold text-[10px] transition border border-slate-800 flex items-center justify-center gap-1"
                   >
                     <BarChart3 className="w-3 h-3 text-cyan-400" />
                     <span>Chart</span>
