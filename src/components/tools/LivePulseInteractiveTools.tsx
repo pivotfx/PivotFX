@@ -9,19 +9,44 @@ import {
   Download,
   Copy,
   Calendar,
-  Activity
+  Activity,
+  Bell,
+  BellRing,
+  Timer,
+  Zap,
+  Volume2
 } from 'lucide-react';
 
 export const LivePulseInteractiveTools: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'bias' | 'sessions' | 'weekly'>('bias');
+  const [activeTab, setActiveTab] = useState<'bias' | 'sessions' | 'weekly'>('sessions');
 
   // Live EAT Time
   const [eatTime, setEatTime] = useState<string>('');
+  const [countdownStr, setCountdownStr] = useState<string>('');
+  const [nextEventName, setNextEventName] = useState<string>('London Open (11:00 EAT)');
+  const [chimeEnabled, setChimeEnabled] = useState<boolean>(true);
   const [activeSession, setActiveSession] = useState<{ name: string; volume: number; desc: string }>({
     name: 'Calculating EAT...',
     volume: 50,
     desc: 'Connecting to Nairobi liquidity feed...'
   });
+
+  const playSessionChime = (tone: number = 659) => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(tone, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.25);
+      gain.gain.setValueAtTime(0.06, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.45);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.45);
+    } catch {}
+  };
 
   useEffect(() => {
     const updateTime = () => {
@@ -36,6 +61,10 @@ export const LivePulseInteractiveTools: React.FC = () => {
 
       const eatHour = parseInt(
         now.toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', hour12: false }),
+        10
+      );
+      const eatMins = parseInt(
+        now.toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', minute: '2-digit', hour12: false }),
         10
       );
 
@@ -70,6 +99,28 @@ export const LivePulseInteractiveTools: React.FC = () => {
           desc: 'Range-bound accumulation. Mark the Asian High and Low boundaries.'
         });
       }
+
+      // Calculate countdown to next key EAT session
+      const eatMinutesTotal = eatHour * 60 + eatMins;
+      const targets = [
+        { name: 'Tokyo Asian Range (03:00 EAT)', minuteMark: 3 * 60 },
+        { name: 'London Open & Judas Swing (11:00 EAT)', minuteMark: 11 * 60 },
+        { name: 'London / NY Peak Overlap (15:30 EAT)', minuteMark: 15 * 60 + 30 },
+        { name: 'London Fix & Reversals (18:30 EAT)', minuteMark: 18 * 60 + 30 },
+        { name: 'Asian Dead Zone Rollover (23:00 EAT)', minuteMark: 23 * 60 }
+      ];
+
+      let nextTarget = targets.find((t) => t.minuteMark > eatMinutesTotal);
+      if (!nextTarget) {
+        nextTarget = { name: 'Tokyo Asian Range (03:00 EAT)', minuteMark: 24 * 60 + 3 * 60 };
+      }
+
+      const diffMinutes = nextTarget.minuteMark - eatMinutesTotal;
+      const hours = Math.floor(diffMinutes / 60);
+      const mins = diffMinutes % 60;
+      const secs = (60 - now.getSeconds()) % 60;
+      setNextEventName(nextTarget.name);
+      setCountdownStr(`${hours.toString().padStart(2, '0')}h ${mins.toString().padStart(2, '0')}m ${secs.toString().padStart(2, '0')}s`);
     };
 
     updateTime();
@@ -287,49 +338,135 @@ Primary Operational Bias: ${verdict}
         </div>
       )}
 
-      {/* TAB 2: LIVE SESSION CLOCK */}
+      {/* TAB 2: LIVE SESSION CLOCK & COUNTDOWN */}
       {activeTab === 'sessions' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-          <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-4 text-center">
-            <span className="text-xs font-mono text-slate-400 uppercase tracking-wider block">
-              Nairobi Local Time (East Africa Time - UTC+3)
-            </span>
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+            <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-4 text-center">
+              <span className="text-xs font-mono text-slate-400 uppercase tracking-wider block">
+                Nairobi Local Time (East Africa Time - UTC+3)
+              </span>
 
-            <div className="text-4xl sm:text-5xl font-black font-mono text-white tracking-widest text-gold-gradient">
-              {eatTime} EAT
+              <div className="text-4xl sm:text-5xl font-black font-mono text-white tracking-widest text-gold-gradient">
+                {eatTime} EAT
+              </div>
+
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40 text-xs font-mono font-bold">
+                <span className="w-2 h-2 rounded-full bg-[#00C261] animate-ping" />
+                <span>{activeSession.name}</span>
+              </div>
+
+              <p className="text-xs text-slate-300 max-w-sm mx-auto">
+                {activeSession.desc}
+              </p>
+
+              {/* Countdown Pill & Chime Button */}
+              <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+                <div className="px-3.5 py-1.5 rounded-xl bg-slate-900 border border-[#D4AF37]/50 font-mono text-xs flex items-center gap-2">
+                  <Timer className="w-4 h-4 text-[#D4AF37] animate-spin" />
+                  <span className="text-slate-400">Next Catalyst:</span>
+                  <strong className="text-white">{countdownStr}</strong>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => playSessionChime(880)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-amber-400 text-amber-300 font-mono text-xs font-bold flex items-center gap-1.5 transition active:scale-95"
+                >
+                  <Bell className="w-3.5 h-3.5" />
+                  <span>Test Chime</span>
+                </button>
+              </div>
             </div>
 
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40 text-xs font-mono font-bold">
-              <span className="w-2 h-2 rounded-full bg-[#00C261] animate-ping" />
-              <span>{activeSession.name}</span>
-            </div>
+            <div className="p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <span className="text-xs font-mono text-[#D4AF37] font-bold uppercase block">
+                  Nairobi Session Schedule:
+                </span>
+                <span className="text-[10px] font-mono text-slate-500">24/5 Institutional Flow</span>
+              </div>
 
-            <p className="text-xs text-slate-300 max-w-sm mx-auto">
-              {activeSession.desc}
-            </p>
+              <div className="space-y-2.5 text-xs font-mono">
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                  <span className="text-slate-300">Tokyo Asian Range:</span>
+                  <span className="text-slate-400 font-bold">03:00 - 10:00 EAT</span>
+                </div>
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-emerald-500/30">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-[#00C261]" />
+                    <span className="text-white font-bold">London Open &amp; Judas Swing:</span>
+                  </div>
+                  <span className="text-[#00C261] font-bold">11:00 - 14:00 EAT (HIGH)</span>
+                </div>
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-emerald-500/40">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                    <span className="text-white font-bold">London / NY Overlap:</span>
+                  </div>
+                  <span className="text-emerald-400 font-bold">15:30 - 19:30 EAT (PEAK)</span>
+                </div>
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-red-500/30">
+                  <span className="text-slate-300">Asian Rollover (Dead Zone):</span>
+                  <span className="text-red-400 font-bold">23:00 - 01:00 EAT (AVOID)</span>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="p-6 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-4">
-            <span className="text-xs font-mono text-[#D4AF37] font-bold uppercase block">
-              Nairobi Session Schedule:
-            </span>
+          {/* Asian Range High/Low Liquidity Sweep Radar Table */}
+          <div className="p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3 font-mono text-xs">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4 text-amber-400" />
+                <span className="text-xs font-bold text-white uppercase tracking-wider">
+                  Asian Session Boundary Liquidity Radar (03:00 - 09:00 EAT)
+                </span>
+              </div>
+              <span className="text-[10px] text-slate-400">
+                Judas Swing Rule: Look for fakeout wicks beyond these boundaries at 11:00 EAT
+              </span>
+            </div>
 
-            <div className="space-y-3 text-xs font-mono">
-              <div className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800">
-                <span className="text-slate-300">Tokyo Asian Range:</span>
-                <span className="text-slate-400">03:00 - 10:00 EAT</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                <div className="flex items-center justify-between">
+                  <strong className="text-white">EUR/USD (Fiber)</strong>
+                  <span className="text-[10px] text-emerald-400 font-bold">31 Pips</span>
+                </div>
+                <div className="text-[11px] text-slate-400">Asian High: <span className="text-white font-bold">1.08620</span></div>
+                <div className="text-[11px] text-slate-400">Asian Low: <span className="text-white font-bold">1.08310</span></div>
+                <span className="text-[9px] text-[#00C261] block font-bold mt-1">✓ Discount Low Defended</span>
               </div>
-              <div className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800">
-                <span className="text-slate-300">London Open Expansion:</span>
-                <span className="text-[#00C261] font-bold">11:00 - 14:00 EAT (HIGH)</span>
+
+              <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                <div className="flex items-center justify-between">
+                  <strong className="text-white">GBP/USD (Cable)</strong>
+                  <span className="text-[10px] text-amber-400 font-bold">47 Pips</span>
+                </div>
+                <div className="text-[11px] text-slate-400">Asian High: <span className="text-white font-bold">1.29656</span></div>
+                <div className="text-[11px] text-slate-400">Asian Low: <span className="text-white font-bold">1.28950</span></div>
+                <span className="text-[9px] text-red-400 block font-bold mt-1">▲ 1296.56 High Swept</span>
               </div>
-              <div className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800">
-                <span className="text-slate-300">London / NY Overlap:</span>
-                <span className="text-emerald-400 font-bold">15:30 - 19:30 EAT (PEAK)</span>
+
+              <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                <div className="flex items-center justify-between">
+                  <strong className="text-white">XAU/USD (Gold)</strong>
+                  <span className="text-[10px] text-cyan-400 font-bold">135 Pips</span>
+                </div>
+                <div className="text-[11px] text-slate-400">Asian High: <span className="text-white font-bold">2748.50</span></div>
+                <div className="text-[11px] text-slate-400">Asian Low: <span className="text-white font-bold">2735.00</span></div>
+                <span className="text-[9px] text-cyan-300 block font-bold mt-1">✓ SSL Swept at 2735</span>
               </div>
-              <div className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800">
-                <span className="text-slate-300">Asian Rollover (Dead):</span>
-                <span className="text-red-400 font-bold">23:00 - 01:00 EAT (AVOID)</span>
+
+              <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                <div className="flex items-center justify-between">
+                  <strong className="text-white">USD/JPY (Ninja)</strong>
+                  <span className="text-[10px] text-purple-400 font-bold">65 Pips</span>
+                </div>
+                <div className="text-[11px] text-slate-400">Asian High: <span className="text-white font-bold">152.800</span></div>
+                <div className="text-[11px] text-slate-400">Asian Low: <span className="text-white font-bold">152.150</span></div>
+                <span className="text-[9px] text-slate-400 block font-bold mt-1">Mid-Range Consolidation</span>
               </div>
             </div>
           </div>

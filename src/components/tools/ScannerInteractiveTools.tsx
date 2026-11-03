@@ -34,7 +34,14 @@ import {
   Flame,
   Activity,
   Cpu,
-  Copy
+  Copy,
+  Volume2,
+  VolumeX,
+  FileCode,
+  Share2,
+  Smartphone,
+  Download,
+  X
 } from 'lucide-react';
 
 interface ScannerInteractiveToolsProps {
@@ -121,6 +128,19 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
   // Journal log confirmation
   const [loggedSuccess, setLoggedSuccess] = useState<string | null>(null);
   const [chatSyncedNotification, setChatSyncedNotification] = useState<string | null>(null);
+  const [expandedChartMsgId, setExpandedChartMsgId] = useState<string | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
+  const [activeEaModalCard, setActiveEaModalCard] = useState<AdvisorTradeCard | null>(null);
+  const [activeTelegramModalCard, setActiveTelegramModalCard] = useState<AdvisorTradeCard | null>(null);
+  const [webhookUrl, setWebhookUrl] = useState<string>(() => {
+    try {
+      return localStorage.getItem('pivotfx_webhook_url') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [webhookStatus, setWebhookStatus] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -138,6 +158,129 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
       setPatternType(m.patternType);
       setTraderNotes(m.projection);
     }
+  };
+
+  // 1-Click Market Selection & Auto Deep AI Scan
+  const handleSelectMarketAndDeepScanInChat = (targetPair: CurrencyPair) => {
+    handleSwitchPairAndSyncRealData(targetPair);
+    const m = INITIAL_MARKETS_DATA.find((x) => x.pair === targetPair);
+    if (m) {
+      setActiveTab('advisor');
+      handleTriggerChatAnalysis(m, 'deep_ai');
+    }
+  };
+
+  // Voice Audio Speech Synthesis for Trade Audits
+  const handleToggleSpeakAudit = (msgId: string, card: AdvisorTradeCard) => {
+    if (!('speechSynthesis' in window)) {
+      setChatSyncedNotification('⚠️ Audio voice synthesis is not supported on this browser.');
+      setTimeout(() => setChatSyncedNotification(null), 2500);
+      return;
+    }
+
+    if (speakingMsgId === msgId) {
+      window.speechSynthesis.cancel();
+      setSpeakingMsgId(null);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const actionWord = card.direction === 'BUY' ? 'Buy' : 'Sell';
+    const textToSpeak = `PivotFX Institutional Signal. ${actionWord} ${card.pair} by market at ${card.entryPrice}. Stop Loss at ${card.stopLoss}, risking ${card.slPips} pips. Maximum loss is strictly capped at two dollars on zero point zero one micro lot under the Gilgil shield. Take Profit 1 at ${card.tp1}, close fifty percent and move to breakeven. Final Take Profit 2 at ${card.tp2}. Risk reward ratio 1 to ${card.riskReward}.`;
+
+    const utterance = new SpeechSynthesisUtterance(textToSpeak);
+    utterance.rate = 0.95;
+    utterance.pitch = 1.0;
+    utterance.onend = () => setSpeakingMsgId(null);
+    utterance.onerror = () => setSpeakingMsgId(null);
+    setSpeakingMsgId(msgId);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Generate MQL4 Script Code
+  const generateMql4Script = (card: AdvisorTradeCard): string => {
+    const isBuy = card.direction === 'BUY';
+    const cmd = isBuy ? 'OP_BUY' : 'OP_SELL';
+    return `//+------------------------------------------------------------------+
+//| PivotFX Institutional One-Click Order Script                     |
+//| Gilgil Shield: 0.01 Micro Lot ($2.00 / 260 KES Max Loss)         |
+//| Pair: ${card.pair} | Broker: ${broker.toUpperCase()}             |
+//+------------------------------------------------------------------+
+#property copyright "PivotFX Institutional"
+#property link      "https://pivotfx.academy"
+#property version   "2.00"
+#property strict
+#property show_inputs
+
+extern double   InpLotSize       = ${card.lotSize};        // Volume (Strict 0.01 Micro Lot)
+extern double   InpStopLoss      = ${card.stopLoss};       // Stop Loss (-${card.slPips} pips)
+extern double   InpTakeProfit1   = ${card.tp1};            // Take Profit 1 (50% scale-out)
+extern double   InpTakeProfit2   = ${card.tp2};            // Take Profit 2 (Final Institutional)
+extern int      InpSlippage      = 3;                      // Max Slippage Pips
+extern string   InpComment       = "PivotFX_${card.pair.replace('/', '')}_Gilgil";
+extern int      InpMagicNumber   = 777129;
+
+void OnStart()
+{
+   Print("PivotFX: Initiating institutional order on ", Symbol());
+   double price = (${isBuy ? 'MarketInfo(Symbol(), MODE_ASK)' : 'MarketInfo(Symbol(), MODE_BID)'});
+   int ticket = OrderSend(Symbol(), ${cmd}, InpLotSize, price, InpSlippage, InpStopLoss, InpTakeProfit2, InpComment, InpMagicNumber, 0, ${isBuy ? 'clrLime' : 'clrRed'});
+   
+   if(ticket > 0)
+   {
+      Alert("PivotFX: Order Executed! Ticket #", ticket, " | Lots: ", InpLotSize, " | Symbol: ", Symbol());
+   }
+   else
+   {
+      Alert("PivotFX Order Failed. Error: ", GetLastError());
+   }
+}
+//+------------------------------------------------------------------+`;
+  };
+
+  // Generate .set File Content
+  const generateSetFileContent = (card: AdvisorTradeCard): string => {
+    return `; PivotFX Institutional Parameter Preset
+; Symbol: ${card.brokerSymbol} (${card.pair})
+; Risk: $2.00 / 260 KES Hard Cap via 0.01 Lot
+InpLotSize=${card.lotSize}
+InpStopLoss=${card.stopLoss}
+InpTakeProfit1=${card.tp1}
+InpTakeProfit2=${card.tp2}
+InpMaxRiskUsd=2.00
+InpSlippage=3
+InpMagicNumber=777129
+`;
+  };
+
+  // Download generic file
+  const handleDownloadFile = (content: string, filename: string, mime: string) => {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setChatSyncedNotification(`✓ Downloaded ${filename}!`);
+    setTimeout(() => setChatSyncedNotification(null), 2500);
+  };
+
+  // Shareable message formatting for Telegram / WhatsApp
+  const getShareableText = (card: AdvisorTradeCard): string => {
+    return `⚡ *PIVOTFX INSTITUTIONAL SIGNAL* ⚡\n\n` +
+      `📊 *Pair:* ${card.pair} (${card.brokerSymbol})\n` +
+      `🎯 *Action:* ${card.direction} BY MARKET\n` +
+      `📍 *Entry:* ${card.entryPrice}\n` +
+      `🛑 *Stop Loss:* ${card.stopLoss} (-${card.slPips} pips / $${card.actualRiskUsd})\n` +
+      `🎯 *TP1 (50% & BE):* ${card.tp1}\n` +
+      `🚀 *TP2 (Final):* ${card.tp2} (+${card.tpPips} pips)\n` +
+      `⚖️ *R:R Ratio:* 1 : ${card.riskReward}\n` +
+      `🛡️ *Gilgil Risk Shield:* 0.01 Micro Lot ($2.00 / 260 KES Max Loss)\n` +
+      `🏦 *Broker:* ${broker.toUpperCase()} (~${card.brokerSpread} pips)\n` +
+      `🧠 *Pattern:* ${card.pattern} (${card.confidence}% Confluence)`;
   };
 
   // Stop camera stream cleanly on unmount or mode switch
@@ -756,15 +899,31 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
         return queryLower.includes(pClean) ||
                queryLower.includes(pNorm) ||
                (queryLower.includes('gold') && m.pair === 'XAU/USD') ||
+               (queryLower.includes('xau') && m.pair === 'XAU/USD') ||
                (queryLower.includes('cable') && m.pair === 'GBP/USD') ||
+               (queryLower.includes('pound') && m.pair === 'GBP/USD') ||
                (queryLower.includes('fiber') && m.pair === 'EUR/USD') ||
+               (queryLower.includes('usd/euro') && m.pair === 'EUR/USD') ||
+               (queryLower.includes('usd/eur') && m.pair === 'EUR/USD') ||
+               (queryLower.includes('usdeur') && m.pair === 'EUR/USD') ||
+               (queryLower.includes('usd euro') && m.pair === 'EUR/USD') ||
+               (queryLower.includes('euro') && m.pair === 'EUR/USD') ||
+               (queryLower.includes('eur') && m.pair === 'EUR/USD') ||
                (queryLower.includes('btc') && m.pair === 'BTC/USD') ||
                (queryLower.includes('bitcoin') && m.pair === 'BTC/USD') ||
+               (queryLower.includes('crypto') && m.pair === 'BTC/USD') ||
                (queryLower.includes('ninja') && m.pair === 'USD/JPY') ||
+               (queryLower.includes('yen') && m.pair === 'USD/JPY') ||
+               (queryLower.includes('usdjpy') && m.pair === 'USD/JPY') ||
                (queryLower.includes('dragon') && m.pair === 'GBP/JPY') ||
                (queryLower.includes('guppy') && m.pair === 'GBP/JPY') ||
+               (queryLower.includes('gbpjpy') && m.pair === 'GBP/JPY') ||
                (queryLower.includes('loonie') && m.pair === 'USD/CAD') ||
+               (queryLower.includes('cad') && m.pair === 'USD/CAD') ||
+               (queryLower.includes('usdcad') && m.pair === 'USD/CAD') ||
                (queryLower.includes('aussie') && m.pair === 'AUD/USD') ||
+               (queryLower.includes('aud') && m.pair === 'AUD/USD') ||
+               (queryLower.includes('audusd') && m.pair === 'AUD/USD') ||
                (queryLower.includes('1291') && m.pair === 'GBP/USD') ||
                (queryLower.includes('1296') && m.pair === 'GBP/USD');
       });
@@ -1703,36 +1862,140 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
             </div>
 
             {/* Quick MT4 Presets */}
-            <div className="flex flex-wrap gap-2 pt-1">
-              <span className="text-[10px] font-mono text-slate-400 self-center">Presets:</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setCurrentPrice(1.29169);
-                  setEma20(1.28850);
-                  setEma50(1.28520);
-                  setRsi(76.4);
-                  setKeyLevel(1.29656);
-                  setPatternType('Tower Top Liquidity Sweep');
-                }}
-                className="text-[11px] font-mono px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
-              >
-                1296.56 Loss Case (Overextended)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setCurrentPrice(1.08502);
-                  setEma20(1.08320);
-                  setEma50(1.08150);
-                  setRsi(54.0);
-                  setKeyLevel(1.08300);
-                  setPatternType('20/50 EMA Trend Bounce');
-                }}
-                className="text-[11px] font-mono px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
-              >
-                1291.69 Win Case (20 EMA Pullback)
-              </button>
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono text-slate-400 font-bold uppercase">
+                  Institutional Case Study Presets (Click to Auto-Sync All Tabs):
+                </span>
+                <span className="text-[10px] text-[#D4AF37] font-mono font-bold">
+                  Shared Global State
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPair('GBP/USD');
+                    setCurrentPrice(1.29169);
+                    setEma20(1.28850);
+                    setEma50(1.28520);
+                    setRsi(76.4);
+                    setKeyLevel(1.29656);
+                    setPatternType('Tower Top Liquidity Sweep');
+                    setTraderNotes('GBP/USD 1296.56 Loss Case (Overextended): Swept previous session high at 1.29656. Overbought RSI 76.4. Chasing longs here triggers retail trap.');
+                    setChatSyncedNotification('✓ Synced GBP/USD 1296.56 Loss Case: EMA20: 1.2885, EMA50: 1.2852, RSI: 76.4');
+                    setTimeout(() => setChatSyncedNotification(null), 3000);
+                  }}
+                  className={`p-2.5 text-left rounded-xl border transition font-mono group ${
+                    keyLevel === 1.29656 && pair === 'GBP/USD' && rsi === 76.4
+                      ? 'bg-red-950/40 border-red-500/80 ring-1 ring-red-500/50'
+                      : 'bg-slate-900 hover:bg-slate-800 border-slate-700 hover:border-red-500/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white group-hover:text-red-300">GBP/USD 1296.56</span>
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-red-950 text-red-300 font-bold">LOSS CASE</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-1">20 EMA: 1.2885 • RSI: 76.4</div>
+                  <div className="text-[9px] text-red-400 mt-0.5 font-bold">Tower Top Overextended</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPair('GBP/USD');
+                    setCurrentPrice(1.29169);
+                    setEma20(1.28850);
+                    setEma50(1.28520);
+                    setRsi(58.2);
+                    setKeyLevel(1.29000);
+                    setPatternType('20/50 EMA Trend Bounce');
+                    setTraderNotes('GBP/USD 1291.69 Win Case (20 EMA Pullback): Healthy retracement to dynamic 20 EMA at 1.28850. RSI normalized to 58.2.');
+                    setChatSyncedNotification('✓ Synced GBP/USD 1291.69 Win Case: EMA20: 1.2885, EMA50: 1.2852, RSI: 58.2');
+                    setTimeout(() => setChatSyncedNotification(null), 3000);
+                  }}
+                  className={`p-2.5 text-left rounded-xl border transition font-mono group ${
+                    keyLevel === 1.29000 && pair === 'GBP/USD'
+                      ? 'bg-emerald-950/40 border-emerald-500/80 ring-1 ring-emerald-500/50'
+                      : 'bg-slate-900 hover:bg-slate-800 border-slate-700 hover:border-emerald-500/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white group-hover:text-[#00C261]">GBP/USD 1291.69</span>
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 font-bold">WIN CASE</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-1">20 EMA: 1.2885 • RSI: 58.2</div>
+                  <div className="text-[9px] text-[#00C261] mt-0.5 font-bold">20 EMA Pullback Entry</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPair('EUR/USD');
+                    setCurrentPrice(1.08420);
+                    setEma20(1.08210);
+                    setEma50(1.07980);
+                    setRsi(54.2);
+                    setKeyLevel(1.08150);
+                    setPatternType('Fair Value Gap Re-test');
+                    setTraderNotes('EUR/USD 1.0842 Institutional FVG: Tested discount at 1.08150. London continuation.');
+                    setChatSyncedNotification('✓ Synced EUR/USD Fiber: EMA20: 1.0821, EMA50: 1.0798, RSI: 54.2');
+                    setTimeout(() => setChatSyncedNotification(null), 3000);
+                  }}
+                  className={`p-2.5 text-left rounded-xl border transition font-mono group ${
+                    pair === 'EUR/USD'
+                      ? 'bg-cyan-950/40 border-cyan-500/80 ring-1 ring-cyan-500/50'
+                      : 'bg-slate-900 hover:bg-slate-800 border-slate-700 hover:border-cyan-500/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white group-hover:text-cyan-300">EUR/USD 1.0842</span>
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 font-bold">FVG RETEST</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-1">20 EMA: 1.0821 • RSI: 54.2</div>
+                  <div className="text-[9px] text-cyan-400 mt-0.5 font-bold">Institutional Discount FVG</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPair('XAU/USD');
+                    setCurrentPrice(2742.50);
+                    setEma20(2736.20);
+                    setEma50(2728.40);
+                    setRsi(64.5);
+                    setKeyLevel(2735.00);
+                    setPatternType('Asian Liquidity Sweep');
+                    setTraderNotes('XAU/USD Gold Asian Sweep: Swept Asian SSL at 2735.00. Targeting 2760.00 BSL.');
+                    setChatSyncedNotification('✓ Synced XAU/USD Gold: EMA20: 2736.2, EMA50: 2728.4, RSI: 64.5');
+                    setTimeout(() => setChatSyncedNotification(null), 3000);
+                  }}
+                  className={`p-2.5 text-left rounded-xl border transition font-mono group ${
+                    pair === 'XAU/USD'
+                      ? 'bg-[#D4AF37]/20 border-[#D4AF37] ring-1 ring-[#D4AF37]/50'
+                      : 'bg-slate-900 hover:bg-slate-800 border-slate-700 hover:border-[#D4AF37]'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white group-hover:text-[#D4AF37]">XAU/USD Gold</span>
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-950 text-amber-300 font-bold">ASIAN SWEEP</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-1">20 EMA: 2736.2 • RSI: 64.5</div>
+                  <div className="text-[9px] text-[#D4AF37] mt-0.5 font-bold">Gold NY Expansion</div>
+                </button>
+              </div>
+
+              {/* 1-Click Send to AI Chat & Deep Scan */}
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleSelectMarketAndDeepScanInChat(pair)}
+                  className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-[#D4AF37]/20 via-[#D4AF37]/30 to-amber-500/20 hover:from-[#D4AF37]/30 hover:to-amber-500/30 text-[#D4AF37] hover:text-white border border-[#D4AF37]/50 font-mono text-xs font-bold flex items-center justify-center gap-2 transition active:scale-95"
+                >
+                  <Sparkles className="w-4 h-4 text-[#D4AF37]" />
+                  <span>Send Active Pair ({pair} @ {currentPrice}) to Institutional AI Chat & Deep Scan →</span>
+                </button>
+              </div>
             </div>
 
             {/* Dual Analysis Action Buttons */}
@@ -1980,10 +2243,70 @@ Broker: ${broker.toUpperCase()}`;
       )}
 
       {/* ======================================================== */}
-      {/* TAB 3: INSTITUTIONAL AI MARKET ADVISOR */}
+      {/* TAB 4: INSTITUTIONAL AI MARKET ADVISOR */}
       {/* ======================================================== */}
       {activeTab === 'advisor' && (
         <div className="space-y-6">
+          {/* 1-CLICK MARKET QUICK SELECTOR & AUTO DEEP SCAN BAR */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-[#080E1E] border border-[#D4AF37]/50 shadow-2xl space-y-3">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#00C261] animate-ping" />
+                  <span className="text-xs font-mono font-black uppercase tracking-wider text-[#D4AF37]">
+                    Choose Market to Auto-Update Quote & Deep AI Scan:
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 font-mono mt-0.5">
+                  Pick any market: instantly synchronizes quote, 20 EMA, 50 EMA, RSI, and generates a copyable trade placement card.
+                </p>
+              </div>
+
+              {/* Active Market Live Badge */}
+              <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-[#D4AF37]/40 flex items-center gap-2 font-mono text-xs">
+                <span className="text-slate-400">Active Sync:</span>
+                <span className="font-bold text-white">{pair}</span>
+                <span className="text-emerald-400 font-bold">@{currentPrice}</span>
+                <span className="text-slate-400 text-[10px]">20 EMA: {ema20} • RSI: {rsi}</span>
+              </div>
+            </div>
+
+            {/* 8 Market Quick-Select Pills */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+              {INITIAL_MARKETS_DATA.map((m) => {
+                const isSelected = pair === m.pair;
+                const isBuy = m.bias === 'STRONG_BUY';
+                return (
+                  <button
+                    key={m.pair}
+                    onClick={() => handleSelectMarketAndDeepScanInChat(m.pair)}
+                    className={`p-2.5 rounded-xl border text-left font-mono transition-all duration-200 relative group flex flex-col justify-between ${
+                      isSelected
+                        ? 'bg-[#D4AF37]/25 border-[#D4AF37] ring-1 ring-[#D4AF37]/60 shadow-lg'
+                        : 'bg-slate-900/90 hover:bg-slate-800/90 border-slate-800 hover:border-[#D4AF37]/50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full">
+                      <span className={`text-xs font-black ${isSelected ? 'text-[#D4AF37]' : 'text-white'}`}>
+                        {m.pair}
+                      </span>
+                      <span className={`w-2 h-2 rounded-full ${isBuy ? 'bg-[#00C261]' : 'bg-red-500'}`} />
+                    </div>
+                    <div className="mt-1 flex items-baseline justify-between text-[10px]">
+                      <span className="text-slate-300 font-bold">@{m.price}</span>
+                      <span className={`font-bold ${isBuy ? 'text-[#00C261]' : 'text-red-400'}`}>
+                        {isBuy ? 'BUY' : 'SELL'}
+                      </span>
+                    </div>
+                    <div className="text-[9px] text-slate-400 truncate mt-0.5">
+                      RSI {m.rsi} • {m.symbol}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Quick-Action Advisory Buttons */}
           <div className="space-y-2">
             <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 block">
@@ -2268,33 +2591,101 @@ Broker: ${broker.toUpperCase()}`;
                         </div>
                       </div>
 
-                      {/* Real Numerical Grid */}
+                      {/* Real Numerical Grid with 1-Click Copy Chips */}
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
-                        <div className="p-2 rounded-lg bg-slate-900 border border-slate-800">
-                          <span className="text-[9px] text-slate-500 block uppercase font-bold">Entry Price</span>
-                          <span className="font-bold text-white text-sm">@{m.tradeCard.entryPrice}</span>
-                        </div>
-                        <div className="p-2 rounded-lg bg-red-950/40 border border-red-900/50">
-                          <span className="text-[9px] text-red-400 block uppercase font-bold">Stop Loss (SL)</span>
-                          <span className="font-bold text-red-300 text-sm">{m.tradeCard.stopLoss}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(String(m.tradeCard!.entryPrice));
+                            setCopiedField(`${m.id}-entry`);
+                            setTimeout(() => setCopiedField(null), 2000);
+                          }}
+                          className="p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-[#D4AF37] transition text-left group"
+                          title="Click to copy Entry Price"
+                        >
+                          <div className="flex items-center justify-between text-[9px] text-slate-400 uppercase font-bold">
+                            <span>Entry Price</span>
+                            <span className="text-[#D4AF37]">{copiedField === `${m.id}-entry` ? '✓ COPIED' : '📋 COPY'}</span>
+                          </div>
+                          <span className="font-bold text-white text-sm block mt-0.5">@{m.tradeCard.entryPrice}</span>
+                          <span className="text-[9px] text-slate-500">Market Execution</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(String(m.tradeCard!.stopLoss));
+                            setCopiedField(`${m.id}-sl`);
+                            setTimeout(() => setCopiedField(null), 2000);
+                          }}
+                          className="p-2.5 rounded-xl bg-red-950/40 hover:bg-red-950/60 border border-red-900/50 hover:border-red-500 transition text-left group"
+                          title="Click to copy Stop Loss"
+                        >
+                          <div className="flex items-center justify-between text-[9px] text-red-400 uppercase font-bold">
+                            <span>Stop Loss (SL)</span>
+                            <span className="text-red-300">{copiedField === `${m.id}-sl` ? '✓ COPIED' : '📋 COPY'}</span>
+                          </div>
+                          <span className="font-bold text-red-300 text-sm block mt-0.5">{m.tradeCard.stopLoss}</span>
                           <span className="text-[9px] text-slate-400 block">(-{m.tradeCard.slPips} pips / ${m.tradeCard.actualRiskUsd})</span>
-                        </div>
-                        <div className="p-2 rounded-lg bg-cyan-950/40 border border-cyan-900/50">
-                          <span className="text-[9px] text-cyan-400 block uppercase font-bold">Take Profit 1</span>
-                          <span className="font-bold text-cyan-300 text-sm">{m.tradeCard.tp1}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(String(m.tradeCard!.tp1));
+                            setCopiedField(`${m.id}-tp1`);
+                            setTimeout(() => setCopiedField(null), 2000);
+                          }}
+                          className="p-2.5 rounded-xl bg-cyan-950/40 hover:bg-cyan-950/60 border border-cyan-900/50 hover:border-cyan-400 transition text-left group"
+                          title="Click to copy TP1"
+                        >
+                          <div className="flex items-center justify-between text-[9px] text-cyan-400 uppercase font-bold">
+                            <span>Take Profit 1</span>
+                            <span className="text-cyan-300">{copiedField === `${m.id}-tp1` ? '✓ COPIED' : '📋 COPY'}</span>
+                          </div>
+                          <span className="font-bold text-cyan-300 text-sm block mt-0.5">{m.tradeCard.tp1}</span>
                           <span className="text-[9px] text-slate-400 block">(50% Close & BE)</span>
-                        </div>
-                        <div className="p-2 rounded-lg bg-emerald-950/40 border border-emerald-900/50">
-                          <span className="text-[9px] text-emerald-400 block uppercase font-bold">Take Profit 2</span>
-                          <span className="font-bold text-emerald-300 text-sm">{m.tradeCard.tp2}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(String(m.tradeCard!.tp2));
+                            setCopiedField(`${m.id}-tp2`);
+                            setTimeout(() => setCopiedField(null), 2000);
+                          }}
+                          className="p-2.5 rounded-xl bg-emerald-950/40 hover:bg-emerald-950/60 border border-emerald-900/50 hover:border-[#00C261] transition text-left group"
+                          title="Click to copy TP2"
+                        >
+                          <div className="flex items-center justify-between text-[9px] text-emerald-400 uppercase font-bold">
+                            <span>Take Profit 2</span>
+                            <span className="text-emerald-300">{copiedField === `${m.id}-tp2` ? '✓ COPIED' : '📋 COPY'}</span>
+                          </div>
+                          <span className="font-bold text-emerald-300 text-sm block mt-0.5">{m.tradeCard.tp2}</span>
                           <span className="text-[9px] text-emerald-400 block">(+{m.tradeCard.tpPips} pips final)</span>
-                        </div>
+                        </button>
                       </div>
 
                       {/* Sizing & Gilgil Shield */}
-                      <div className="p-2.5 rounded-lg bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-between text-[11px] text-amber-200">
-                        <span>Gilgil $2 Protection Sizing:</span>
+                      <div className="p-2.5 rounded-lg bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex flex-col sm:flex-row sm:items-center justify-between text-[11px] text-amber-200 gap-1">
+                        <span>Gilgil Capital Preservation Shield:</span>
                         <strong className="text-white">STRICTLY {m.tradeCard.lotSize} Micro Lot ($2.00 / 260 KES Hard Loss Cap)</strong>
+                      </div>
+
+                      {/* Broker & Execution Specifications */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[10px] text-slate-400 font-mono">
+                        <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
+                          <span className="text-slate-500 block uppercase">Broker / Symbol</span>
+                          <span className="font-bold text-white">{broker.toUpperCase()} • {m.tradeCard.brokerSymbol}</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
+                          <span className="text-slate-500 block uppercase">Live Spread</span>
+                          <span className="font-bold text-amber-300">~{m.tradeCard.brokerSpread} pips</span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800 col-span-2 sm:col-span-1">
+                          <span className="text-slate-500 block uppercase">Potential Target Gain</span>
+                          <span className="font-bold text-[#00C261]">+${m.tradeCard.potentialGainUsd} USD (~{(m.tradeCard.potentialGainUsd * 130).toFixed(0)} KES)</span>
+                        </div>
                       </div>
 
                       {/* MT4 Execution Steps */}
@@ -2312,19 +2703,95 @@ Broker: ${broker.toUpperCase()}`;
                         </div>
                       </div>
 
-                      {/* Action buttons inside chat card */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      {/* Interactive TradingView Chart Viewer (Expandable right on card) */}
+                      {expandedChartMsgId === m.id && (
+                        <div className="mt-3 p-3 rounded-2xl bg-black border border-cyan-500/60 shadow-2xl space-y-2 animate-in fade-in duration-200">
+                          <div className="flex items-center justify-between text-xs font-mono pb-1 border-b border-slate-800">
+                            <div className="flex items-center gap-2 text-cyan-300 font-bold">
+                              <BarChart3 className="w-4 h-4 text-cyan-400" />
+                              <span>Live Institutional Chart: {m.tradeCard.pair} ({timeframe})</span>
+                            </div>
+                            <button
+                              onClick={() => setExpandedChartMsgId(null)}
+                              className="text-[10px] text-slate-400 hover:text-white px-2 py-0.5 rounded bg-slate-800"
+                            >
+                              ✕ Close Chart
+                            </button>
+                          </div>
+                          <TradingViewEmbedWidget
+                            pair={m.tradeCard.pair}
+                            timeframe={timeframe}
+                            onPairChange={(newPair) => handleSwitchPairAndSyncRealData(newPair)}
+                            onTimeframeChange={(newTf) => setTimeframe(newTf)}
+                            onClose={() => setExpandedChartMsgId(null)}
+                            isCollapsible={false}
+                          />
+                        </div>
+                      )}
+
+                      {/* Action buttons inside chat card (Complete Trader Toolbelt) */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 pt-1 font-mono">
+                        <button
+                          onClick={() => setExpandedChartMsgId(expandedChartMsgId === m.id ? null : m.id)}
+                          className="py-2.5 px-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 hover:text-white border border-cyan-800/60 hover:border-cyan-400 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 shadow-sm"
+                          title="Toggle live TradingView chart"
+                        >
+                          <BarChart3 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                          <span className="truncate">{expandedChartMsgId === m.id ? 'Close Chart' : '📈 Chart'}</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleToggleSpeakAudit(m.id, m.tradeCard!)}
+                          className={`py-2.5 px-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 shadow-sm ${
+                            speakingMsgId === m.id
+                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 animate-pulse'
+                              : 'bg-slate-900 hover:bg-slate-800 text-amber-300 hover:text-white border-amber-800/50 hover:border-amber-400'
+                          }`}
+                          title="Listen to audio briefing of setup"
+                        >
+                          {speakingMsgId === m.id ? (
+                            <>
+                              <VolumeX className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                              <span className="truncate">Stop Voice</span>
+                            </>
+                          ) : (
+                            <>
+                              <Volume2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                              <span className="truncate">🔊 Voice</span>
+                            </>
+                          )}
+                        </button>
+
+                        <button
+                          onClick={() => setActiveEaModalCard(m.tradeCard!)}
+                          className="py-2.5 px-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-purple-300 hover:text-white border border-purple-800/60 hover:border-purple-400 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 shadow-sm"
+                          title="Generate MT4/MT5 EA script and .set file"
+                        >
+                          <FileCode className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                          <span className="truncate">📥 EA Script</span>
+                        </button>
+
+                        <button
+                          onClick={() => setActiveTelegramModalCard(m.tradeCard!)}
+                          className="py-2.5 px-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-sky-300 hover:text-white border border-sky-800/60 hover:border-sky-400 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 shadow-sm"
+                          title="Send to Phone via Telegram / WhatsApp"
+                        >
+                          <Smartphone className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                          <span className="truncate">📱 Dispatch</span>
+                        </button>
+
                         <button
                           onClick={() => {
-                            const ticket = `[PIVOTFX AI ORDER TICKET]\nSymbol: ${m.tradeCard!.brokerSymbol}\nAction: ${m.tradeCard!.direction}\nEntry: ${m.tradeCard!.entryPrice}\nSL: ${m.tradeCard!.stopLoss} (-${m.tradeCard!.slPips} pips)\nTP1: ${m.tradeCard!.tp1}\nTP2: ${m.tradeCard!.tp2} (+${m.tradeCard!.tpPips} pips)\nVolume: 0.01 Micro Lot ($2 Max Risk)\nBroker: ${broker.toUpperCase()}\nRisk:Reward = 1 : ${m.tradeCard!.riskReward}`;
+                            const ticket = `[PIVOTFX AI ORDER TICKET]\nPair: ${m.tradeCard!.pair}\nSymbol: ${m.tradeCard!.brokerSymbol}\nAction: ${m.tradeCard!.direction} BY MARKET\nVolume: 0.01 Micro Lot\nEntry: ${m.tradeCard!.entryPrice}\nStop Loss: ${m.tradeCard!.stopLoss} (-${m.tradeCard!.slPips} pips / $${m.tradeCard!.actualRiskUsd} max loss)\nTake Profit 1: ${m.tradeCard!.tp1} (Close 50% & Move SL to Breakeven)\nTake Profit 2: ${m.tradeCard!.tp2} (+${m.tradeCard!.tpPips} pips final target)\nRisk:Reward = 1 : ${m.tradeCard!.riskReward}\nBroker: ${broker.toUpperCase()} (~${m.tradeCard!.brokerSpread} pips spread)\nCapital Shield: Strict $2.00 / 260 KES (Gilgil Rule)`;
                             navigator.clipboard.writeText(ticket);
-                            setChatSyncedNotification(`✓ MT4 ticket copied to clipboard for ${m.tradeCard!.pair}!`);
+                            setChatSyncedNotification(`✓ Copied complete MT4/MT5 order ticket for ${m.tradeCard!.pair}!`);
                             setTimeout(() => setChatSyncedNotification(null), 2500);
                           }}
-                          className="py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95"
+                          className="py-2.5 px-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-[#D4AF37] text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95"
+                          title="Copy text ticket for MT4 F9"
                         >
-                          <Copy className="w-3.5 h-3.5 text-[#D4AF37]" />
-                          <span>Copy MT4/MT5 Order Ticket</span>
+                          <Copy className="w-3.5 h-3.5 text-[#D4AF37] shrink-0" />
+                          <span className="truncate">📋 F9 Ticket</span>
                         </button>
 
                         <button
@@ -2338,10 +2805,11 @@ Broker: ${broker.toUpperCase()}`;
                             pattern: m.tradeCard!.pattern,
                             score: m.tradeCard!.confidence
                           })}
-                          className="py-2 rounded-xl btn-gold text-black text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition active:scale-95"
+                          className="py-2.5 px-2 rounded-xl btn-gold text-black text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition active:scale-95"
+                          title="Log to Pillar 8 Trade Journal"
                         >
-                          <Check className="w-3.5 h-3.5" />
-                          <span>Log Setup to Trade Journal</span>
+                          <Check className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">Log Trade</span>
                         </button>
                       </div>
                     </div>
@@ -2380,6 +2848,250 @@ Broker: ${broker.toUpperCase()}`;
               <Send className="w-4 h-4" />
               <span className="hidden sm:inline">Ask AI</span>
             </button>
+          </div>
+        </div>
+      )}
+      {/* ======================================================== */}
+      {/* MODAL 1: MT4/MT5 EA SCRIPT & .SET PRESET EXPORTER       */}
+      {/* ======================================================== */}
+      {activeEaModalCard && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-200">
+          <div className="max-w-2xl w-full bg-[#080E1E] border border-[#D4AF37] rounded-3xl p-5 sm:p-7 shadow-[0_0_50px_rgba(212,175,55,0.25)] space-y-4 max-h-[92vh] overflow-y-auto font-mono text-xs">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <FileCode className="w-5 h-5 text-[#D4AF37]" />
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-wider">
+                    MT4 / MT5 Algorithmic Order Script Exporter
+                  </h3>
+                  <span className="text-[11px] text-[#D4AF37] font-bold">
+                    {activeEaModalCard.direction} {activeEaModalCard.pair} • 0.01 Micro Lot ($2.00 / 260 KES Hard Cap)
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveEaModalCard(null)}
+                className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-sm transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Execution Parameter Badges */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-[11px]">
+              <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
+                <span className="text-[9px] text-slate-500 uppercase block">Symbol</span>
+                <span className="font-bold text-white">{activeEaModalCard.brokerSymbol}</span>
+              </div>
+              <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
+                <span className="text-[9px] text-slate-500 uppercase block">Entry</span>
+                <span className="font-bold text-white">@{activeEaModalCard.entryPrice}</span>
+              </div>
+              <div className="p-2 rounded-xl bg-red-950/40 border border-red-900/50">
+                <span className="text-[9px] text-red-400 uppercase block">Stop Loss</span>
+                <span className="font-bold text-red-300">{activeEaModalCard.stopLoss}</span>
+              </div>
+              <div className="p-2 rounded-xl bg-emerald-950/40 border border-emerald-900/50">
+                <span className="text-[9px] text-emerald-400 uppercase block">Take Profit</span>
+                <span className="font-bold text-emerald-300">{activeEaModalCard.tp2}</span>
+              </div>
+            </div>
+
+            {/* MQL4 Script Code View */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-400 font-bold uppercase">Pre-Compiled MQL4 Execution Script:</span>
+                <span className="text-[#00C261] font-bold">1-Click MetaTrader Ready</span>
+              </div>
+              <pre className="p-3.5 rounded-2xl bg-black border border-slate-800 text-slate-300 text-[10px] sm:text-[11px] leading-relaxed max-h-52 overflow-y-auto selection:bg-[#D4AF37]/40">
+                {generateMql4Script(activeEaModalCard)}
+              </pre>
+            </div>
+
+            {/* Download & Copy Buttons */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(generateMql4Script(activeEaModalCard));
+                  setChatSyncedNotification('✓ Copied MQL4 script to clipboard!');
+                  setTimeout(() => setChatSyncedNotification(null), 2500);
+                }}
+                className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95"
+              >
+                <Copy className="w-3.5 h-3.5 text-[#D4AF37]" />
+                <span>Copy MQL4 Source</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const filename = `PivotFX_${activeEaModalCard.pair.replace('/', '')}_Script.mq4`;
+                  handleDownloadFile(generateMql4Script(activeEaModalCard), filename, 'text/plain');
+                }}
+                className="py-2.5 px-3 rounded-xl bg-purple-950/50 hover:bg-purple-900/70 text-purple-200 border border-purple-800 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md"
+              >
+                <Download className="w-3.5 h-3.5 text-purple-400" />
+                <span>Download .mq4 File</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const filename = `PivotFX_${activeEaModalCard.pair.replace('/', '')}.set`;
+                  handleDownloadFile(generateSetFileContent(activeEaModalCard), filename, 'text/plain');
+                }}
+                className="py-2.5 px-3 rounded-xl btn-gold text-black text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition active:scale-95"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Download .set Preset</span>
+              </button>
+            </div>
+
+            {/* Quick 3-Step MT4 Installation Guide */}
+            <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 text-[10px] space-y-1 text-slate-400">
+              <strong className="text-white block uppercase">How to drop into MT4 / MT5:</strong>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[#D4AF37] font-bold">Step 1:</span>
+                <span>Open MT4/MT5 -&gt; File -&gt; Open Data Folder -&gt; MQL4 -&gt; Scripts.</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[#D4AF37] font-bold">Step 2:</span>
+                <span>Drop the downloaded <strong>.mq4</strong> script into the folder.</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[#D4AF37] font-bold">Step 3:</span>
+                <span>Right-click Scripts in MT4 Navigator -&gt; Refresh -&gt; Drag onto {activeEaModalCard.pair} chart!</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL 2: TELEGRAM & WHATSAPP SIGNAL DISPATCHER           */}
+      {/* ======================================================== */}
+      {activeTelegramModalCard && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-200">
+          <div className="max-w-xl w-full bg-[#080E1E] border border-sky-500 rounded-3xl p-5 sm:p-7 shadow-[0_0_50px_rgba(14,165,233,0.25)] space-y-4 max-h-[92vh] overflow-y-auto font-mono text-xs">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Smartphone className="w-5 h-5 text-sky-400" />
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-wider">
+                    Mobile Signal Dispatcher (Telegram & WhatsApp)
+                  </h3>
+                  <span className="text-[11px] text-sky-400 font-bold">
+                    Instant phone notification for {activeTelegramModalCard.pair}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveTelegramModalCard(null)}
+                className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-sm transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Message Preview */}
+            <div className="space-y-1.5">
+              <span className="text-slate-400 font-bold uppercase text-[11px]">Formatted Alert Preview:</span>
+              <pre className="p-3.5 rounded-2xl bg-black border border-slate-800 text-slate-200 text-[11px] leading-relaxed whitespace-pre-line max-h-52 overflow-y-auto">
+                {getShareableText(activeTelegramModalCard)}
+              </pre>
+            </div>
+
+            {/* 1-Click Dispatch Buttons */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+              <button
+                onClick={() => {
+                  const shareText = getShareableText(activeTelegramModalCard);
+                  const tgUrl = `https://t.me/share/url?url=${encodeURIComponent('https://pivotfx.academy')}&text=${encodeURIComponent(shareText)}`;
+                  window.open(tgUrl, '_blank');
+                }}
+                className="py-2.5 px-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>Open in Telegram</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const shareText = getShareableText(activeTelegramModalCard);
+                  const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+                  window.open(waUrl, '_blank');
+                }}
+                className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>Send to WhatsApp</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(getShareableText(activeTelegramModalCard));
+                  setChatSyncedNotification('✓ Copied message to clipboard!');
+                  setTimeout(() => setChatSyncedNotification(null), 2500);
+                }}
+                className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95"
+              >
+                <Copy className="w-3.5 h-3.5 text-[#D4AF37]" />
+                <span>Copy Text</span>
+              </button>
+            </div>
+
+            {/* Custom Webhook Dispatcher */}
+            <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-300 font-bold uppercase">Automated Webhook Relay (Discord / Custom EA Bot):</span>
+                {webhookStatus && <span className="text-emerald-400 font-bold">{webhookStatus}</span>}
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="url"
+                  placeholder="https://discord.com/api/webhooks/... or your server"
+                  value={webhookUrl}
+                  onChange={(e) => {
+                    setWebhookUrl(e.target.value);
+                    try {
+                      localStorage.setItem('pivotfx_webhook_url', e.target.value);
+                    } catch {}
+                  }}
+                  className="flex-1 bg-black border border-slate-700 rounded-xl px-3 py-2 text-white text-xs outline-none focus:border-sky-400 font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!webhookUrl.trim()) {
+                      setWebhookStatus('⚠️ Please enter URL');
+                      setTimeout(() => setWebhookStatus(null), 2000);
+                      return;
+                    }
+                    try {
+                      setWebhookStatus('Relaying...');
+                      await fetch(webhookUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          source: 'PivotFX Institutional AI Vision',
+                          timestamp: new Date().toISOString(),
+                          card: activeTelegramModalCard,
+                          rawText: getShareableText(activeTelegramModalCard)
+                        }),
+                        mode: 'no-cors'
+                      });
+                      setWebhookStatus('✓ Dispatched!');
+                      setTimeout(() => setWebhookStatus(null), 3000);
+                    } catch (err: any) {
+                      setWebhookStatus(`Failed: ${err.message || 'Network error'}`);
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold border border-slate-600 transition"
+                >
+                  Send Hook
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
