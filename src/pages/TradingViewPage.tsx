@@ -280,15 +280,13 @@ export const TradingViewPage: React.FC<TradingViewPageProps> = ({
         {/* Custom Strategy Alert Banner overlaid on top of chart */}
         {showPivotOverlay && (
           <div className="absolute top-4 left-4 right-4 z-20 flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-[#111827]/90 backdrop-blur-md border border-slate-700/80 text-xs">
-            <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1.5 font-bold text-red-400">
-                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
-                RED MARKERS: Tower Top Loss Traps (Avoid Buying Extended!)
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="font-bold text-red-400">
+                RED: Tower Top Loss Traps (Avoid Buying Extended)
               </span>
-              <span className="hidden sm:inline text-slate-600">|</span>
-              <span className="flex items-center gap-1.5 font-bold text-[#00C261]">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#00C261]" />
-                GREEN MARKERS: Disciplined 20 EMA Breakdown Entries (e.g. 1.35100)
+              <span className="hidden sm:inline text-slate-600">·</span>
+              <span className="font-bold text-[#00C261]">
+                GREEN: Disciplined 20 EMA Breakdown Entries (e.g. 1.35100)
               </span>
             </div>
 

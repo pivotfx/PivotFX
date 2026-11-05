@@ -64,12 +64,24 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
   onClearKillSwitch,
   onAwardXp,
 }) => {
-  const [liveMarkets, setLiveMarkets] = useState<MarketScanData[]>(INITIAL_MARKETS_DATA);
+  const [liveMarkets, setLiveMarkets] = useState<MarketScanData[]>(
+    () => globalLiveStream.getState().markets
+  );
   const [syncingFeed, setSyncingFeed] = useState(false);
-  const [lastSyncedAt, setLastSyncedAt] = useState<string>('Calibrated Live');
+  const [lastSyncedAt, setLastSyncedAt] = useState<string>(
+    () => globalLiveStream.getState().syncedAt
+  );
+  const [superAiAuto, setSuperAiAuto] = useState<boolean>(
+    () => globalLiveStream.getState().superAiAutoEnabled
+  );
+  const [superAiNotes, setSuperAiNotes] = useState(
+    () => globalLiveStream.getState().superAiNotes
+  );
 
   const [broker, setBroker] = useState<BrokerId>('fxpesa');
-  const [pair, setPair] = useState<CurrencyPair>('GBP/USD');
+  const [pair, setPair] = useState<CurrencyPair>(
+    () => globalLiveStream.getState().selectedPair || 'GBP/USD'
+  );
   const [timeframe, setTimeframe] = useState<Timeframe>('M15');
   const [price, setPrice] = useState<string>('1.35100');
   const [ema20, setEma20] = useState<string>('1.35180');
@@ -132,6 +144,8 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
     const unsubscribe = globalLiveStream.subscribe((streamState) => {
       setLiveMarkets(streamState.markets);
       setLastSyncedAt(streamState.syncedAt);
+      setSuperAiAuto(streamState.superAiAutoEnabled);
+      setSuperAiNotes(streamState.superAiNotes);
 
       if (!lockedRef.current) {
         const match =
@@ -314,24 +328,17 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
     let numRsi = parseFloat(rsi);
 
     if (!isCustomCandleLocked) {
-      setSyncingFeed(true);
-      try {
-        const [snap] = await Promise.all([
-          fetchPairLiveCandleSnapshot(pair, timeframe),
-          globalLiveStream.triggerScan('deep_ai')
-        ]);
-        numPrice = snap.price;
-        numEma20 = snap.ema20;
-        numEma50 = snap.ema50;
-        numRsi = snap.rsi;
-        setPrice(snap.price.toFixed(decimals));
-        setEma20(snap.ema20.toFixed(decimals));
-        setEma50(snap.ema50.toFixed(decimals));
-        setRsi(snap.rsi.toFixed(1));
-        setLastSyncedAt(snap.lastCandleTime);
-      } finally {
-        setSyncingFeed(false);
-      }
+      const snap = await fetchPairLiveCandleSnapshot(pair, timeframe);
+      numPrice = snap.price;
+      numEma20 = snap.ema20;
+      numEma50 = snap.ema50;
+      numRsi = snap.rsi;
+      setPrice(snap.price.toFixed(decimals));
+      setEma20(snap.ema20.toFixed(decimals));
+      setEma50(snap.ema50.toFixed(decimals));
+      setRsi(snap.rsi.toFixed(1));
+      setLastSyncedAt(snap.lastCandleTime);
+      void globalLiveStream.fetchSuperAiNoteForPair(pair, timeframe, true);
     }
 
     if (isNaN(numPrice) || numPrice <= 0 || isNaN(numEma20) || isNaN(numEma50) || isNaN(numRsi)) {
@@ -554,24 +561,36 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
       {/* Page Title & Mission */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
         <div>
-          <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#00C261] uppercase tracking-wider">
-            <BrainCircuit className="w-4 h-4" />
-            <span>Pillar 2 • Live Chart & MT4/MT5 Super Analysis Engine</span>
+          <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
+            <BrainCircuit className="w-4 h-4 text-[#D4AF37]" />
+            <span>Pillar 02 · MT4 &amp; MT5 Live Super Analysis</span>
           </div>
           <h1 className="text-2xl sm:text-4xl font-black text-white mt-1">
-            MT4 & MT5 Super Analysis Tool
+            MT4 &amp; MT5 Super Analysis Tool
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl font-mono">
-            Auto-syncing live quotes every second 24/7 (<strong className="text-[#00C261]">{lastSyncedAt}</strong>). Live candle changes automatically update EMAs, RSI, Entry, Stop Loss, and Take Profit.
+            Auto-syncing live quotes every 0.5s (<strong className="text-[#00C261]">{lastSyncedAt}</strong>). Live candle movements automatically recompute EMAs, RSI, Entry, Stop Loss, and Take Profit.
           </p>
         </div>
 
         {/* 1-Hour Revenge Trading Kill Switch Card */}
-        <div className="w-full md:w-auto">
+        <div className="w-full md:w-auto flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => globalLiveStream.setSuperAiAuto(!superAiAuto)}
+            className={`px-3.5 py-2.5 rounded-xl font-mono font-bold text-xs border transition whitespace-nowrap ${
+              superAiAuto
+                ? 'bg-emerald-950/70 text-[#00C261] border-[#00C261]/60'
+                : 'bg-slate-900 text-slate-400 hover:text-white border-slate-800'
+            }`}
+          >
+            Super AI Auto: {superAiAuto ? 'ON' : 'OFF'}
+          </button>
+
           {isLocked ? (
             <div className="p-3 rounded-2xl bg-red-950/90 border border-red-500/50 flex items-center justify-between gap-3 text-red-200">
               <div className="flex items-center gap-2">
-                <AlertOctagon className="w-5 h-5 text-red-400 animate-pulse" />
+                <AlertOctagon className="w-5 h-5 text-red-400" />
                 <div>
                   <span className="text-xs font-bold block text-white">REVENGE TRADING KILL SWITCH ACTIVE</span>
                   <span className="text-[11px] text-red-300 font-mono">
@@ -725,6 +744,28 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                 syncLiveRates(true);
               }}
             />
+
+            {/* Real-Time Super AI Tactical Note Strip */}
+            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono">
+              <div className="space-y-0.5">
+                <span className="text-[#D4AF37] font-bold flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>
+                    {superAiNotes[pair]?.headline || `Super AI Tactical Note · ${pair} (${timeframe})`}
+                  </span>
+                </span>
+                <p className="text-slate-200 leading-relaxed">
+                  {superAiNotes[pair]?.note || activeMarketItem.projection}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void globalLiveStream.fetchSuperAiNoteForPair(pair, timeframe, true)}
+                className="px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] border border-slate-700 font-bold shrink-0 whitespace-nowrap"
+              >
+                Refresh AI Note
+              </button>
+            </div>
           </div>
         );
       })()}

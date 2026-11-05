@@ -105,7 +105,6 @@ export const CandlestickVisualizer: React.FC<CandlestickVisualizerProps> = ({
         <div className="px-5 py-3.5 bg-slate-900/80 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
           <div>
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-[#D4AF37] animate-pulse" />
               <h4 className="text-xs sm:text-sm font-bold text-white tracking-wide">
                 {title || 'Institutional Candlestick Blueprint'}
               </h4>

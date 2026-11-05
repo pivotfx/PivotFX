@@ -608,9 +608,8 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
             {/* Live Chart Header Status */}
             <div className="px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-xs">
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
                 <span className="font-mono font-bold text-white">Live Institutional Feed</span>
-                <span className="text-slate-500">|</span>
+                <span className="text-slate-500">·</span>
                 <span className="text-[#D4AF37] font-mono font-semibold">
                   {selectedPair.replace('OANDA:', '').replace('BINANCE:', '')} • {selectedTimeframe}m Timeframe
                 </span>

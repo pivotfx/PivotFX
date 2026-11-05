@@ -219,11 +219,10 @@ export const BrokerHubPage: React.FC<BrokerHubPageProps> = ({ onNavigate, onAwar
                     </td>
 
                     {/* Live Spread */}
-                    <td className="p-4 sm:p-5 font-mono">
-                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-700">
-                        <span className="w-2 h-2 rounded-full bg-[#00C261] animate-ping" />
+                    <td className="p-4 sm:p-5 font-mono tabular-nums">
+                      <div className="inline-flex items-baseline gap-1.5">
                         <strong className="text-white text-sm">{currentSpread}</strong>
-                        <span className="text-[10px] text-slate-400">pips</span>
+                        <span className="text-[11px] text-slate-400">pips live</span>
                       </div>
                     </td>
 

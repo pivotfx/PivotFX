@@ -24,6 +24,7 @@ export interface FactorJudgmentItem {
 
 export interface MacroContextSnapshot {
   dxyPressurePct: number;
+  dxySummary: string;
   riskRegime: 'RISK-ON EXPANSION' | 'RISK-OFF SAFE-HAVEN' | 'MIXED CONSOLIDATION';
   safeHavenSurge: boolean;
   isRolloverWindow: boolean;
@@ -332,8 +333,16 @@ export function getCurrentMacroContext(
     10
   );
 
+  const dxySummary =
+    dxyPressurePct >= 0.12
+      ? `USD Basket strong (+${dxyPressurePct}%)`
+      : dxyPressurePct <= -0.12
+      ? `USD Basket softening (${dxyPressurePct}%)`
+      : `USD Basket balanced (${dxyPressurePct >= 0 ? `+${dxyPressurePct}%` : `${dxyPressurePct}%`})`;
+
   return {
     dxyPressurePct,
+    dxySummary,
     riskRegime,
     safeHavenSurge: goldPct >= 0.85 && jpyPct <= -0.12,
     isRolloverWindow: eatHour >= 22 || eatHour <= 2,
@@ -1528,6 +1537,43 @@ function parseKrakenOhlcRows(rows: any[][], isM10: boolean): OhlcCandle[] {
  * Fetches live real-time spot & OHLC candlestick data for a SINGLE pair & timeframe
  * so clicking Reanalyse, Deep AI Analyse, or switching pairs/timeframes ALWAYS syncs to the live candle!
  */
+async function fetchWithFastTimeout(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs = 1600
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...init,
+      cache: 'no-store',
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export interface SuperAiLiveNote {
+  pair: CurrencyPair;
+  source: 'gemini-3.8-flash' | 'quantitative-engine';
+  headline: string;
+  note: string;
+  invalidationNote: string;
+  catalystWatch: string;
+  tacticalNote: string;
+  riskNote: string;
+  macroNote: string;
+  syncedAt: string;
+}
+
+const inFlightPairCandleMap = new Map<string, Promise<any>>();
+
+/**
+ * Fetches live FX/Crypto/Gold spot rate AND recent OHLC candlesticks from public interbank APIs
+ * with fast 1.6s timeout protection and in-flight deduplication.
+ */
 export async function fetchPairLiveCandleSnapshot(
   pair: CurrencyPair,
   timeframe: Timeframe,
@@ -1550,35 +1596,44 @@ export async function fetchPairLiveCandleSnapshot(
   lastCandleTime: string;
   liveConnected: boolean;
 }> {
-  const baseline = INITIAL_MARKETS_DATA.find((m) => m.pair === pair) || INITIAL_MARKETS_DATA[0];
-  let livePrice = baseline.price;
-  let change24hPct = baseline.change24hPct;
-  let fetchedCandles: OhlcCandle[] = [];
-  let liveConnected = false;
+  const cacheKey = `${pair}_${timeframe}`;
+  if (!customPrice) {
+    const existingPromise = inFlightPairCandleMap.get(cacheKey);
+    if (existingPromise) {
+      return existingPromise;
+    }
+  }
 
-  try {
-    const { krakenPair, interval } = getKrakenPairAndInterval(pair, timeframe);
-    const binanceSym =
-      pair === 'BTC/USD' ? 'BTCUSDT' :
-      pair === 'XAU/USD' ? 'PAXGUSDT' :
-      pair === 'EUR/USD' ? 'EURUSDT' :
-      pair === 'GBP/USD' ? 'GBPUSDT' :
-      pair === 'AUD/USD' ? 'AUDUSDT' : null;
+  const runFetch = async () => {
+    const baseline = INITIAL_MARKETS_DATA.find((m) => m.pair === pair) || INITIAL_MARKETS_DATA[0];
+    let livePrice = baseline.price;
+    let change24hPct = baseline.change24hPct;
+    let fetchedCandles: OhlcCandle[] = [];
+    let liveConnected = false;
 
-    const binanceInterval =
-      timeframe === 'M1' ? '1m' :
-      timeframe === 'M5' || timeframe === 'M10' ? '5m' :
-      timeframe === 'M15' ? '15m' :
-      timeframe === 'H1' ? '1h' :
-      timeframe === 'H4' ? '4h' : '1d';
+    try {
+      const { krakenPair, interval } = getKrakenPairAndInterval(pair, timeframe);
+      const binanceSym =
+        pair === 'BTC/USD' ? 'BTCUSDT' :
+        pair === 'XAU/USD' ? 'PAXGUSDT' :
+        pair === 'EUR/USD' ? 'EURUSDT' :
+        pair === 'GBP/USD' ? 'GBPUSDT' :
+        pair === 'AUD/USD' ? 'AUDUSDT' : null;
 
-    const [coinbaseRes, frankfurterRes, krakenRes, binanceTickerRes, binanceKlinesRes] = await Promise.allSettled([
-      fetch(`https://api.coinbase.com/v2/exchange-rates?currency=USD&_t=${Date.now()}`, { cache: 'no-store' }),
-      fetch(`https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR,GBP,JPY,CAD,AUD`, { cache: 'no-store' }),
-      krakenPair ? fetch(`https://api.kraken.com/0/public/OHLC?pair=${krakenPair}&interval=${interval}`, { cache: 'no-store' }) : Promise.resolve(null),
-      binanceSym ? fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSym}`, { cache: 'no-store' }) : Promise.resolve(null),
-      binanceSym ? fetch(`https://api.binance.com/api/v3/klines?symbol=${binanceSym}&interval=${binanceInterval}&limit=80`, { cache: 'no-store' }) : Promise.resolve(null)
-    ]);
+      const binanceInterval =
+        timeframe === 'M1' ? '1m' :
+        timeframe === 'M5' || timeframe === 'M10' ? '5m' :
+        timeframe === 'M15' ? '15m' :
+        timeframe === 'H1' ? '1h' :
+        timeframe === 'H4' ? '4h' : '1d';
+
+      const [coinbaseRes, frankfurterRes, krakenRes, binanceTickerRes, binanceKlinesRes] = await Promise.allSettled([
+        fetchWithFastTimeout(`https://api.coinbase.com/v2/exchange-rates?currency=USD&_t=${Date.now()}`, {}, 1500),
+        fetchWithFastTimeout(`https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR,GBP,JPY,CAD,AUD`, {}, 1500),
+        krakenPair ? fetchWithFastTimeout(`https://api.kraken.com/0/public/OHLC?pair=${krakenPair}&interval=${interval}`, {}, 1700) : Promise.resolve(null),
+        binanceSym ? fetchWithFastTimeout(`https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSym}`, {}, 1500) : Promise.resolve(null),
+        binanceSym ? fetchWithFastTimeout(`https://api.binance.com/api/v3/klines?symbol=${binanceSym}&interval=${binanceInterval}&limit=80`, {}, 1600) : Promise.resolve(null)
+      ]);
 
     let cbEur: number | null = null;
     let cbGbp: number | null = null;
@@ -1718,24 +1773,35 @@ export async function fetchPairLiveCandleSnapshot(
 
   const { decimals } = getPairSpecs(pair);
 
-  return {
-    price: Number(finalPrice.toFixed(decimals)),
-    change24hPct: Number(change24hPct.toFixed(2)),
-    ema20: evalResult.ema20,
-    ema50: evalResult.ema50,
-    rsi: evalResult.rsi,
-    atrPips: evalResult.atrPips,
-    keyLevel: evalResult.keyLevel,
-    patternType: evalResult.patternType,
-    isBuy: evalResult.isBuy,
-    bullScorePct: evalResult.bullScorePct,
-    bearScorePct: evalResult.bearScorePct,
-    confidence: evalResult.confidence,
-    factorVerdicts: evalResult.factorVerdicts,
-    candles: evalResult.candles,
-    lastCandleTime,
-    liveConnected
+    return {
+      price: Number(finalPrice.toFixed(decimals)),
+      change24hPct: Number(change24hPct.toFixed(2)),
+      ema20: evalResult.ema20,
+      ema50: evalResult.ema50,
+      rsi: evalResult.rsi,
+      atrPips: evalResult.atrPips,
+      keyLevel: evalResult.keyLevel,
+      patternType: evalResult.patternType,
+      isBuy: evalResult.isBuy,
+      bullScorePct: evalResult.bullScorePct,
+      bearScorePct: evalResult.bearScorePct,
+      confidence: evalResult.confidence,
+      factorVerdicts: evalResult.factorVerdicts,
+      candles: evalResult.candles,
+      lastCandleTime,
+      liveConnected
+    };
   };
+
+  if (customPrice) {
+    return runFetch();
+  }
+
+  const p = runFetch().finally(() => {
+    inFlightPairCandleMap.delete(cacheKey);
+  });
+  inFlightPairCandleMap.set(cacheKey, p);
+  return p;
 }
 
 let cachedDailyOpenRates: {
@@ -1862,12 +1928,22 @@ async function refreshBackgroundRealOhlcCandles(force = false) {
   }
 }
 
+const inFlightSnapshotPromiseRef: { current: Promise<{ markets: MarketScanData[]; syncedAt: string; liveFeedConnected: boolean }> | null } = {
+  current: null
+};
+
 /**
- * Fetches live FX, Gold, and BTC spot prices & OHLC candles across all 8 markets simultaneously.
+ * Fetches live FX, Gold, and BTC spot prices & OHLC candles across all 8 markets simultaneously
+ * with deduplication and strict 1.6s timeout guards for high speed.
  */
 export async function fetchLiveMarketSnapshot(
   currentMarkets: MarketScanData[] = INITIAL_MARKETS_DATA
 ): Promise<{ markets: MarketScanData[]; syncedAt: string; liveFeedConnected: boolean }> {
+  if (inFlightSnapshotPromiseRef.current) {
+    return inFlightSnapshotPromiseRef.current;
+  }
+
+  const runSnapshot = async (): Promise<{ markets: MarketScanData[]; syncedAt: string; liveFeedConnected: boolean }> => {
   // Kick off background non-blocking real OHLC candle refresh
   void refreshBackgroundRealOhlcCandles(false);
 
@@ -1910,14 +1986,13 @@ export async function fetchLiveMarketSnapshot(
     const shouldRefreshDailyOpen =
       !cachedDailyOpenRates.fetchedAt || Date.now() - cachedDailyOpenRates.fetchedAt > 300_000;
 
-    const fastSignal = typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(2200) : undefined;
     const [coinbaseRes, frankfurterRes, binanceTickerRes, krakenBatchRes] = await Promise.allSettled([
-      fetch(`https://api.coinbase.com/v2/exchange-rates?currency=USD&_t=${Date.now()}`, { cache: 'no-store', signal: fastSignal }),
+      fetchWithFastTimeout(`https://api.coinbase.com/v2/exchange-rates?currency=USD&_t=${Date.now()}`, {}, 1500),
       shouldRefreshDailyOpen
-        ? fetch(`https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR,GBP,JPY,CAD,AUD`, { cache: 'no-store', signal: fastSignal })
+        ? fetchWithFastTimeout(`https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR,GBP,JPY,CAD,AUD`, {}, 1500)
         : Promise.resolve(null),
-      fetch('https://api.binance.com/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22PAXGUSDT%22%5D', { cache: 'no-store', signal: fastSignal }),
-      fetch('https://api.kraken.com/0/public/Ticker?pair=GBPUSD,USDCAD,AUDUSD,EURUSD,USDJPY,PAXGUSD,XBTUSD', { cache: 'no-store', signal: fastSignal })
+      fetchWithFastTimeout('https://api.binance.com/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22PAXGUSDT%22%5D', {}, 1500),
+      fetchWithFastTimeout('https://api.kraken.com/0/public/Ticker?pair=GBPUSD,USDCAD,AUDUSD,EURUSD,USDJPY,PAXGUSD,XBTUSD', {}, 1600)
     ]);
 
     // 1. Frankfurter reference baseline (cached for 5 min so 0.5s polls stay ultra-fast)
@@ -2177,7 +2252,14 @@ export async function fetchLiveMarketSnapshot(
     isTopPick: idx === 0
   }));
 
-  return { markets: withTop, syncedAt: nowTickStr, liveFeedConnected };
+    return { markets: withTop, syncedAt: nowTickStr, liveFeedConnected };
+  };
+
+  const p = runSnapshot().finally(() => {
+    inFlightSnapshotPromiseRef.current = null;
+  });
+  inFlightSnapshotPromiseRef.current = p;
+  return p;
 }
 
 function formatCountdownHms(totalSeconds: number): string {
@@ -2280,14 +2362,14 @@ export function evaluatePairKenyaTiming(pair: CurrencyPair, now: Date = new Date
     return {
       isFavorableTime: true,
       windowStatusCode: 'OPEN',
-      statusLabel: `MARKET OPEN · GOOD ENTRY WINDOW (${cd} left)`,
-      windowBadgeShort: `● MARKET OPEN · ${cd}`,
-      bannerHeadline: `MARKET OPEN · GOOD TIMEFRAME WINDOW (Closes in ${cd})`,
+      statusLabel: `MARKET OPEN · CLOSES IN ${cd}`,
+      windowBadgeShort: `OPEN · ${cd}`,
+      bannerHeadline: `MARKET OPEN · GOOD ENTRY WINDOW (Closes in ${cd})`,
       currentWindowName: activeWin.name,
-      nextWindowName: 'Active Now',
+      nextWindowName: 'Active Session Open',
       countdownFormatted: cd,
       countdownSeconds: secsLeft,
-      reasonText: `${pair} window OPEN inside ${activeWin.name} (${cd} left). Tight spreads & active liquidity.`
+      reasonText: `${pair} window OPEN inside ${activeWin.name} (${cd} remaining). Tight institutional spreads & active liquidity.`
     };
   }
 
@@ -2306,8 +2388,8 @@ export function evaluatePairKenyaTiming(pair: CurrencyPair, now: Date = new Date
   return {
     isFavorableTime: false,
     windowStatusCode: openingSoon ? 'OPENING_SOON' : 'CLOSED_WAIT',
-    statusLabel: openingSoon ? `TO OPEN SOON · OPENS IN ${cd}` : `WINDOW PAUSED · OPENS IN ${cd}`,
-    windowBadgeShort: openingSoon ? `⏳ OPENS IN ${cd}` : `⏳ TO OPEN: ${cd}`,
+    statusLabel: openingSoon ? `OPENS SOON · IN ${cd}` : `WINDOW PAUSED · OPENS IN ${cd}`,
+    windowBadgeShort: openingSoon ? `OPENS IN ${cd}` : `WAIT · ${cd}`,
     bannerHeadline: openingSoon
       ? `MARKET TO OPEN SOON · OPENS IN ${cd} (${nextWin.name})`
       : `MARKET WINDOW WAITING · OPENS IN ${cd} (${nextWin.name})`,
@@ -2315,7 +2397,7 @@ export function evaluatePairKenyaTiming(pair: CurrencyPair, now: Date = new Date
     nextWindowName: nextWin.name,
     countdownFormatted: cd,
     countdownSeconds: secsUntil,
-    reasonText: `Next good liquidity window (${nextWin.name}) opens in ${cd}.`
+    reasonText: `Next favourable liquidity window (${nextWin.name}) opens in ${cd}.`
   };
 }
 
@@ -2652,6 +2734,9 @@ export function computeDailyMacroSafetyReport(
 // ============================================================================
 export interface GlobalStreamState {
   markets: MarketScanData[];
+  selectedPair: CurrencyPair | null;
+  superAiAutoEnabled: boolean;
+  superAiNotes: Partial<Record<CurrencyPair, SuperAiLiveNote>>;
   syncedAt: string;
   liveFeedConnected: boolean;
   tickCount: number;
@@ -2664,6 +2749,10 @@ type StreamListener = (state: GlobalStreamState) => void;
 
 class GlobalLiveMarketStreamEngine {
   private markets: MarketScanData[] = INITIAL_MARKETS_DATA;
+  private selectedPair: CurrencyPair | null = 'GBP/USD';
+  private superAiAutoEnabled: boolean = true;
+  private superAiNotes: Partial<Record<CurrencyPair, SuperAiLiveNote>> = {};
+  private lastAiFetchByPair: Partial<Record<CurrencyPair, number>> = {};
   private syncedAt: string = 'Synchronizing...';
   private liveFeedConnected: boolean = false;
   private tickCount: number = 0;
@@ -2682,6 +2771,9 @@ class GlobalLiveMarketStreamEngine {
   public getState(): GlobalStreamState {
     return {
       markets: this.markets,
+      selectedPair: this.selectedPair,
+      superAiAutoEnabled: this.superAiAutoEnabled,
+      superAiNotes: { ...this.superAiNotes },
       syncedAt: this.syncedAt,
       liveFeedConnected: this.liveFeedConnected,
       tickCount: this.tickCount,
@@ -2689,6 +2781,137 @@ class GlobalLiveMarketStreamEngine {
       lockedPairs: { ...this.lockedPairs },
       customTimeframes: { ...this.customTimeframes }
     };
+  }
+
+  public setSelectedPair(pair: CurrencyPair | null, tf?: Timeframe) {
+    this.selectedPair = pair;
+    if (pair && tf) {
+      this.customTimeframes[pair] = tf;
+    }
+    this.broadcast();
+    if (pair && this.superAiAutoEnabled) {
+      void this.fetchSuperAiNoteForPair(pair, tf, false);
+    }
+  }
+
+  public setSuperAiAuto(enabled: boolean) {
+    this.superAiAutoEnabled = enabled;
+    if (enabled && this.markets[0]) {
+      const topPair = this.selectedPair || this.markets[0].pair;
+      this.selectedPair = topPair;
+      void this.fetchSuperAiNoteForPair(topPair, undefined, true);
+    }
+    this.broadcast();
+  }
+
+  public async fetchSuperAiNoteForPair(
+    targetPair?: CurrencyPair | null,
+    tfOrForce?: Timeframe | boolean,
+    forceOrPrompt?: boolean | string,
+    customPromptArg?: string
+  ): Promise<SuperAiLiveNote | null> {
+    if (typeof fetch === 'undefined') return null;
+    const resolvedPair = targetPair || this.selectedPair || this.markets[0]?.pair || 'GBP/USD';
+    const overrideTf = typeof tfOrForce === 'string' ? tfOrForce : undefined;
+    const force =
+      typeof tfOrForce === 'boolean'
+        ? tfOrForce
+        : typeof forceOrPrompt === 'boolean'
+        ? forceOrPrompt
+        : false;
+    const customPrompt =
+      typeof forceOrPrompt === 'string' ? forceOrPrompt : customPromptArg;
+
+    const now = Date.now();
+    const lastFetched = this.lastAiFetchByPair[resolvedPair] || 0;
+    if (!force && !customPrompt && now - lastFetched < 14_000 && this.superAiNotes[resolvedPair]) {
+      return this.superAiNotes[resolvedPair] || null;
+    }
+
+    const m = this.markets.find((x) => x.pair === resolvedPair) || this.markets[0];
+    if (!m) return null;
+
+    this.lastAiFetchByPair[resolvedPair] = now;
+    const activeTf = overrideTf || this.customTimeframes[resolvedPair] || m.recommendedTf;
+    if (overrideTf) {
+      this.customTimeframes[resolvedPair] = overrideTf;
+    }
+    const pctMap: Partial<Record<CurrencyPair, number>> = {};
+    this.markets.forEach((item) => {
+      pctMap[item.pair] = item.change24hPct;
+    });
+    const macro = getCurrentMacroContext(pctMap);
+    const computed = computeRealChartTradeParams({
+      targetPair: m.pair,
+      targetTf: activeTf,
+      targetBroker: 'fxpesa',
+      price: m.price,
+      keyLevel: m.keyLevel,
+      ema20: m.ema20,
+      ema50: m.ema50,
+      rsi: m.rsi,
+      atrPips: m.atrPips,
+      macro,
+      h1TrendDirection: m.h1TrendDirection
+    });
+    const timing = evaluatePairKenyaTiming(m.pair);
+
+    try {
+      const res = await fetchWithFastTimeout(
+        '/api/ai/super-analysis',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pair: m.pair,
+            timeframe: activeTf,
+            broker: 'FXPesa',
+            price: computed.entryPrice,
+            ema20: m.ema20,
+            ema50: m.ema50,
+            rsi: m.rsi,
+            direction: computed.direction,
+            stopLoss: computed.stopLoss,
+            tp1: computed.tp1,
+            tp2: computed.tp2,
+            tp3: computed.tp3,
+            riskReward: computed.riskReward,
+            dxyPressurePct: macro.dxyPressurePct,
+            riskRegime: macro.riskRegime,
+            windowHeadline: timing.bannerHeadline,
+            customPrompt
+          })
+        },
+        2400
+      );
+
+      if (res.ok) {
+        const data = await res.json();
+        const resolvedText = data.note || data.tacticalNote || m.projection;
+        const resolvedRisk = data.invalidationNote || data.riskNote || m.humanCheckNote || `Close beyond SL ${computed.stopLoss}`;
+        const resolvedMacro = data.catalystWatch || data.macroNote || macro.dxySummary;
+        const noteObj: SuperAiLiveNote = {
+          pair: m.pair,
+          source: data.source === 'gemini-3.8-flash' ? 'gemini-3.8-flash' : 'quantitative-engine',
+          headline:
+            data.headline ||
+            `${m.pair} (${activeTf}) · ${computed.direction} @ ${computed.entryPrice} (R:R ${computed.riskReward})`,
+          note: resolvedText,
+          invalidationNote: resolvedRisk,
+          catalystWatch: resolvedMacro,
+          tacticalNote: resolvedText,
+          riskNote: resolvedRisk,
+          macroNote: resolvedMacro,
+          syncedAt: this.formatNowEat()
+        };
+        this.superAiNotes[m.pair] = noteObj;
+        this.broadcast();
+        return noteObj;
+      }
+    } catch {
+      // Non-blocking fallback
+    }
+    return this.superAiNotes[m.pair] || null;
   }
 
   public subscribe(listener: StreamListener): () => void {
@@ -3020,6 +3243,12 @@ class GlobalLiveMarketStreamEngine {
     }
     void refreshBackgroundRealOhlcCandles(true);
     await this.pollLiveExchangeRest(mode);
+    if (this.superAiAutoEnabled && this.markets[0]) {
+      this.selectedPair = this.markets[0].pair;
+      void this.fetchSuperAiNoteForPair(this.selectedPair, true);
+    } else if (this.superAiAutoEnabled) {
+      void this.fetchSuperAiNoteForPair(this.selectedPair, true);
+    }
     return this.getState();
   }
 

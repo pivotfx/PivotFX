@@ -241,8 +241,8 @@ export const PsychologyInteractiveTools: React.FC = () => {
       {activeTab === 'killswitch' && (
         <div className="p-6 sm:p-8 rounded-2xl bg-slate-950 border border-red-500/30 text-center space-y-6">
           <div className="max-w-md mx-auto space-y-3">
-            <div className="w-16 h-16 rounded-full bg-red-500/20 text-red-400 border border-red-500/40 flex items-center justify-center mx-auto">
-              <ShieldAlert className="w-8 h-8 animate-pulse" />
+            <div className="w-16 h-16 rounded-2xl bg-red-500/20 text-red-400 border border-red-500/40 flex items-center justify-center mx-auto">
+              <ShieldAlert className="w-8 h-8" />
             </div>
 
             <h4 className="text-xl font-black text-white">

@@ -108,15 +108,12 @@ export const Logo: React.FC<LogoProps> = ({
             <span className={`font-black tracking-tight text-white leading-none ${currentSize.text}`}>
               Pivot<span className="text-gold-gradient">Fx</span>
             </span>
-            <span className="text-[10px] font-mono font-bold text-[#D4AF37] tracking-wider whitespace-nowrap">
-              INSTITUTIONAL QUANT
-            </span>
           </div>
 
           {showBadge && (
             <div className="text-slate-400 font-medium mt-0.5 leading-tight">
               <span className={`${currentSize.sub} font-mono text-slate-300 whitespace-nowrap`}>
-                Live Telemetry · Human Co-Pilot · Funded Execution
+                Institutional Desk · Live Telemetry · Human Co-Pilot
               </span>
             </div>
           )}

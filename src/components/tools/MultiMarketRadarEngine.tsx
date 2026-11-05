@@ -55,16 +55,23 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
   const [activeScanMode, setActiveScanMode] = useState<'auto_1s' | 'scan_all' | 'rescan' | 'deep_ai'>(
     () => globalLiveStream.getState().lastScanMode
   );
+  const [superAiAuto, setSuperAiAuto] = useState<boolean>(
+    () => globalLiveStream.getState().superAiAutoEnabled
+  );
+  const [superAiNotes, setSuperAiNotes] = useState(
+    () => globalLiveStream.getState().superAiNotes
+  );
   const [isScanning, setIsScanning] = useState(false);
   const [filterBias, setFilterBias] = useState<'ALL' | 'PCT_MOVERS' | 'BUY' | 'SELL' | 'FLIPPED'>('ALL');
-  // Independent card selection: null = uncongested 8-card grid; CurrencyPair = isolated single-market Chart & Analysis screen
-  const [selectedPair, setSelectedPair] = useState<CurrencyPair | null>(null);
+  const [selectedPair, setSelectedPair] = useState<CurrencyPair | null>(
+    () => globalLiveStream.getState().selectedPair
+  );
   const [inspectedSideByPair, setInspectedSideByPair] = useState<Partial<Record<CurrencyPair, 'AUTO' | 'BUY' | 'SELL'>>>({});
   const [scanBanner, setScanBanner] = useState<string | null>(null);
   const [copiedCardPair, setCopiedCardPair] = useState<string | null>(null);
   const [copiedEa, setCopiedEa] = useState(false);
 
-  // Subscribe to global 24/7 every-second live market stream
+  // Subscribe to global 24/7 every-second live market stream & Super AI Auto notes
   useEffect(() => {
     const unsubscribe = globalLiveStream.subscribe((streamState) => {
       setMarkets(streamState.markets);
@@ -72,9 +79,27 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
       setFeedConnected(streamState.liveFeedConnected);
       setLockedPairs(streamState.lockedPairs);
       setCustomTfs(streamState.customTimeframes);
+      setSuperAiAuto(streamState.superAiAutoEnabled);
+      setSuperAiNotes(streamState.superAiNotes);
+      if (streamState.selectedPair !== undefined && streamState.selectedPair !== selectedPair) {
+        setSelectedPair(streamState.selectedPair);
+      }
     });
     return () => unsubscribe();
-  }, []);
+  }, [selectedPair]);
+
+  const handleOpenPairCard = (pairToOpen: CurrencyPair) => {
+    setSelectedPair(pairToOpen);
+    globalLiveStream.setSelectedPair(pairToOpen);
+    if (superAiAuto || !superAiNotes[pairToOpen]) {
+      void globalLiveStream.fetchSuperAiNoteForPair(pairToOpen, customTfs[pairToOpen], true);
+    }
+  };
+
+  const handleClosePairCard = () => {
+    setSelectedPair(null);
+    globalLiveStream.setSelectedPair(null);
+  };
 
   const playRadarBeep = (freq = 1050) => {
     try {
@@ -153,38 +178,49 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
   return (
     <div className="space-y-6">
       {/* 1. TOP SPEED SCANNER HEADER: 24/7 EVERY-SECOND SYNC + 3 SCAN BUTTONS */}
-      <div className="p-5 sm:p-6 rounded-2xl bg-slate-950 border border-[#D4AF37]/45 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4 shadow-xl">
+      <div className="p-5 sm:p-6 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
         <div className="space-y-1.5">
-          <div className="flex items-center gap-2 text-xs font-mono font-bold flex-wrap tabular-nums">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#00C261]/15 text-[#00C261] border border-[#00C261]/40">
-              <Activity className="w-3.5 h-3.5 animate-pulse" />
-              <span>24/7 AUTO-SYNC LIVE (0.5s)</span>
-            </span>
+          <div className="flex items-center gap-2 text-xs font-mono text-slate-400 flex-wrap tabular-nums">
+            <span className="text-[#00C261] font-bold">24/7 Auto-Sync (0.5s)</span>
+            <span aria-hidden="true">·</span>
             <span className="text-[#D4AF37]">
-              {feedConnected ? 'Interbank & Crypto Stream Active' : 'Real-Time Calibrated Feed'}
+              {feedConnected ? 'Interbank & Crypto Stream Active' : 'Calibrated Real-Time Feed'}
             </span>
-            <span aria-hidden="true" className="text-slate-600">·</span>
-            <span className="text-white font-black">{lastScannedTime}</span>
+            <span aria-hidden="true">·</span>
+            <span className="text-white font-bold">{lastScannedTime}</span>
           </div>
 
           <h3 className="text-xl sm:text-2xl font-black text-white">
             AI Market Scanner · Trend, Open Window &amp; Independent Cards
           </h3>
           <p className="text-xs text-slate-300 font-mono max-w-3xl">
-            Updates automatically every 0.5s 24/7 with live trend projection, BUY/SELL verdict, and Market Open/Opens-In countdown. Click any card to inspect chart candles or flip between BUY &amp; SELL sides.
+            Updates automatically every 0.5s with live trend direction, BUY/SELL plan, and Market Open/Opens-In countdown. Click any card to inspect live candles and real-time Super AI notes.
           </p>
         </div>
 
-        {/* THREE SPEED SCAN BUTTONS: Scan All Markets | Rescan | Deep AI Scan */}
-        <div className="flex items-center gap-2.5 flex-wrap shrink-0 w-full xl:w-auto">
+        {/* FOUR INDEPENDENT CONTROLS: Super AI Auto | Scan All Markets | Rescan | Deep AI Scan */}
+        <div className="flex items-center gap-2 flex-wrap shrink-0 w-full xl:w-auto">
+          <button
+            type="button"
+            onClick={() => globalLiveStream.setSuperAiAuto(!superAiAuto)}
+            className={`px-3.5 py-2.5 rounded-xl font-mono font-bold text-xs flex items-center gap-1.5 transition whitespace-nowrap shrink-0 border ${
+              superAiAuto
+                ? 'bg-emerald-950/70 text-[#00C261] border-[#00C261]/60'
+                : 'bg-slate-900 text-slate-400 hover:text-white border-slate-800'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5" />
+            <span>Super AI Auto: {superAiAuto ? 'ON' : 'OFF'}</span>
+          </button>
+
           <button
             type="button"
             onClick={() => handleRunScan('scan_all')}
             disabled={isScanning}
-            className={`px-4 py-2.5 rounded-xl font-mono font-black text-xs uppercase tracking-wider flex items-center gap-1.5 transition active:scale-95 whitespace-nowrap ${
+            className={`px-4 py-2.5 rounded-xl font-mono font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 transition whitespace-nowrap shrink-0 ${
               activeScanMode === 'scan_all'
-                ? 'bg-cyan-400 text-black shadow-lg'
-                : 'bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40'
+                ? 'bg-cyan-400 text-black'
+                : 'bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-slate-700'
             }`}
           >
             <Radar className={`w-3.5 h-3.5 ${isScanning && activeScanMode === 'scan_all' ? 'animate-spin' : ''}`} />
@@ -195,10 +231,10 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
             type="button"
             onClick={() => handleRunScan('rescan')}
             disabled={isScanning}
-            className={`px-4 py-2.5 rounded-xl font-mono font-black text-xs uppercase tracking-wider flex items-center gap-1.5 transition active:scale-95 whitespace-nowrap ${
+            className={`px-4 py-2.5 rounded-xl font-mono font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 transition whitespace-nowrap shrink-0 ${
               activeScanMode === 'rescan'
-                ? 'bg-[#00C261] text-black shadow-lg'
-                : 'bg-slate-900 hover:bg-slate-800 text-[#00C261] border border-[#00C261]/40'
+                ? 'bg-[#00C261] text-black'
+                : 'bg-slate-900 hover:bg-slate-800 text-[#00C261] border border-slate-700'
             }`}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isScanning && activeScanMode === 'rescan' ? 'animate-spin' : ''}`} />
@@ -209,7 +245,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
             type="button"
             onClick={() => handleRunScan('deep_ai')}
             disabled={isScanning}
-            className="px-4 py-2.5 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-lg transition active:scale-95 whitespace-nowrap"
+            className="px-4 py-2.5 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center gap-1.5 transition whitespace-nowrap shrink-0"
           >
             <Sparkles className={`w-3.5 h-3.5 ${isScanning && activeScanMode === 'deep_ai' ? 'animate-spin' : ''}`} />
             <span>Deep AI Scan</span>
@@ -293,25 +329,25 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
 
           return (
             <div className="space-y-5 animate-in fade-in duration-200 font-mono tabular-nums">
-              {/* Top Return Bar + Quick Switcher for Top #1, #2, #3 */}
-              <div className="p-4 rounded-2xl bg-slate-900 border-2 border-[#D4AF37]/60 flex flex-wrap items-center justify-between gap-3 shadow-lg">
+              {/* Top Return Bar + Quick Switcher for Top #1–#4 */}
+              <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-wrap items-center justify-between gap-3">
                 <button
                   type="button"
-                  onClick={() => setSelectedPair(null)}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] hover:text-white border border-[#D4AF37]/50 text-xs font-black transition group"
+                  onClick={handleClosePairCard}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] hover:text-white border border-slate-700 text-xs font-bold transition whitespace-nowrap"
                 >
-                  <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-                  <span>← Back to All Scanned Cards (Ranks #1–#{markets.length})</span>
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>Back to All Scanned Cards (#1–#{markets.length})</span>
                 </button>
 
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[11px] text-slate-400 mr-1">Top Leaders:</span>
+                  <span className="text-[11px] text-slate-400 mr-1">Top Setups:</span>
                   {markets.slice(0, 4).map((mItem, idx) => (
                     <button
                       key={mItem.pair}
                       type="button"
-                      onClick={() => setSelectedPair(mItem.pair)}
-                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition ${
+                      onClick={() => handleOpenPairCard(mItem.pair)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap ${
                         mItem.pair === focusedMarket.pair
                           ? 'bg-[#D4AF37] text-black font-black'
                           : 'bg-slate-950 text-slate-300 hover:text-white border border-slate-800'
@@ -342,7 +378,7 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                         {computed.orderType}
                       </span>
                       {focusedMarket.directionFlipped && (
-                        <span className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-400/50 font-black animate-pulse">
+                        <span className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-400/50 font-black">
                           DIRECTION FLIPPED ({focusedMarket.previousDirection} → {computed.direction})
                         </span>
                       )}
@@ -566,6 +602,57 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                   </div>
                 </div>
 
+                {/* REAL-TIME SUPER AI LIVE TACTICAL NOTES PANEL */}
+                {(() => {
+                  const aiNote = superAiNotes[focusedMarket.pair];
+                  return (
+                    <div className="p-4 rounded-2xl bg-slate-900 border border-[#D4AF37]/40 space-y-2 text-xs">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2 text-[#D4AF37] font-bold">
+                          <Sparkles className="w-4 h-4 shrink-0" />
+                          <span>
+                            {aiNote?.headline || `Super AI Live Note · ${focusedMarket.pair} (${activeTf})`}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                          <span>
+                            {aiNote
+                              ? `${aiNote.source === 'gemini-3.8-flash' ? 'Super AI Live' : 'Quant Stream'} · ${aiNote.syncedAt}`
+                              : `Synced · ${lastScannedTime}`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void globalLiveStream.fetchSuperAiNoteForPair(focusedMarket.pair, activeTf, true)
+                            }
+                            className="px-2.5 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 text-[#D4AF37] border border-slate-700 font-bold transition whitespace-nowrap"
+                          >
+                            Refresh Note
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-slate-200 leading-relaxed">
+                        {aiNote?.note || focusedMarket.projection}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-300 pt-1">
+                        <span>
+                          Invalidation:{' '}
+                          <strong className="text-red-300">
+                            {aiNote?.invalidationNote || `Close beyond SL ${computed.stopLoss}`}
+                          </strong>
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span>
+                          Catalyst Watch:{' '}
+                          <strong className="text-cyan-300">
+                            {aiNote?.catalystWatch || `${kenyaTiming.currentWindowName} · DXY ${macroContext.dxyPressurePct >= 0 ? `+${macroContext.dxyPressurePct}%` : `${macroContext.dxyPressurePct}%`}`}
+                          </strong>
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* Opposite Side Quick Comparison + Human Co-Pilot Verification */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 text-xs">
                   <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-3">
@@ -587,13 +674,13 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                           [focusedMarket.pair]: oppositeSide
                         }))
                       }
-                      className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/40 text-[11px] font-black shrink-0 transition"
+                      className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] border border-slate-700 text-[11px] font-black shrink-0 transition whitespace-nowrap"
                     >
                       Switch to {oppositeSide}
                     </button>
                   </div>
 
-                  <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-[#D4AF37]/30 flex items-start gap-2">
+                  <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-start gap-2">
                     <CheckCircle2 className="w-4 h-4 text-[#00C261] shrink-0 mt-0.5" />
                     <span className="text-slate-200 leading-snug">{computed.humanCheckNote}</span>
                   </div>
@@ -820,16 +907,16 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
 
             return (
               <div
-                onClick={() => setSelectedPair(topLeader.pair)}
+                onClick={() => handleOpenPairCard(topLeader.pair)}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    setSelectedPair(topLeader.pair);
+                    handleOpenPairCard(topLeader.pair);
                   }
                 }}
-                className="p-5 rounded-3xl bg-gradient-to-r from-slate-900 via-[#0E1629] to-slate-900 border-2 border-[#D4AF37] shadow-2xl cursor-pointer flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 font-mono tabular-nums hover:shadow-[0_0_30px_rgba(212,175,55,0.2)] transition"
+                className="p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-[#0E1629] to-slate-900 border border-[#D4AF37] cursor-pointer flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 font-mono tabular-nums transition"
               >
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2 flex-wrap text-xs">
@@ -956,13 +1043,13 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
               return (
                 <div
                   key={m.pair}
-                  onClick={() => setSelectedPair(m.pair)}
+                  onClick={() => handleOpenPairCard(m.pair)}
                   role="button"
                   tabIndex={0}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      setSelectedPair(m.pair);
+                      handleOpenPairCard(m.pair);
                     }
                   }}
                   className={`rounded-2xl p-4 sm:p-5 bg-slate-950 border transition-all cursor-pointer flex flex-col justify-between space-y-4 font-mono tabular-nums hover:-translate-y-0.5 ${
@@ -1110,8 +1197,8 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
 
                       <button
                         type="button"
-                        onClick={() => setSelectedPair(m.pair)}
-                        className="px-2.5 py-1.5 rounded-lg bg-[#D4AF37]/20 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black font-black text-[11px] flex items-center gap-1 transition"
+                        onClick={() => handleOpenPairCard(m.pair)}
+                        className="px-2.5 py-1.5 rounded-lg bg-[#D4AF37]/20 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black font-black text-[11px] flex items-center gap-1 transition whitespace-nowrap"
                       >
                         <span>Chart</span>
                         <ArrowRight className="w-3 h-3" />

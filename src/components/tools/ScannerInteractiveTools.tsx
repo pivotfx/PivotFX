@@ -56,7 +56,8 @@ import {
   Share2,
   Smartphone,
   Download,
-  X
+  X,
+  Crosshair
 } from 'lucide-react';
 
 interface ScannerInteractiveToolsProps {
@@ -106,29 +107,54 @@ interface AdvisorMessage {
 }
 
 export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = ({ onLogTrade }) => {
-  const [scannerView, setScannerView] = useState<'hub' | 'radar' | 'favorable_chart' | 'manual' | 'advisor' | 'camera'>('hub');
-  const [activeTab, setActiveTab] = useState<'camera' | 'manual' | 'radar' | 'advisor'>('manual');
-  const [liveMarkets, setLiveMarkets] = useState<MarketScanData[]>(INITIAL_MARKETS_DATA);
-  const [feedSyncedAt, setFeedSyncedAt] = useState<string>('Synchronizing...');
+  const initialStreamState = globalLiveStream.getState();
+  const initialPair = initialStreamState.selectedPair || 'GBP/USD';
+  const initialMarketMatch =
+    initialStreamState.markets.find((m) => m.pair === initialPair) || initialStreamState.markets[0];
+
+  const [scannerView, setScannerView] = useState<'hub' | 'radar' | 'favorable_chart' | 'manual' | 'advisor' | 'camera'>(() =>
+    initialStreamState.selectedPair ? 'favorable_chart' : 'hub'
+  );
+  const [liveMarkets, setLiveMarkets] = useState<MarketScanData[]>(initialStreamState.markets);
+  const [feedSyncedAt, setFeedSyncedAt] = useState<string>(initialStreamState.syncedAt);
+  const [superAiAuto, setSuperAiAuto] = useState<boolean>(initialStreamState.superAiAutoEnabled);
+  const [superAiNotes, setSuperAiNotes] = useState(initialStreamState.superAiNotes);
   const [syncingQuotes, setSyncingQuotes] = useState<boolean>(false);
   const [userLockedCandlePrice, setUserLockedCandlePrice] = useState<boolean>(false);
 
-  // Shared Required Data Ingestion State (Anchored to live GBP/USD M10/M15 setup)
+  // Shared Required Data Ingestion State
   const [broker, setBroker] = useState<BrokerId>('fxpesa');
-  const [pair, setPair] = useState<CurrencyPair>('GBP/USD');
+  const [pair, setPair] = useState<CurrencyPair>(initialPair);
   const [showTradingView, setShowTradingView] = useState<boolean>(false);
   const [analysisExecutionMode, setAnalysisExecutionMode] = useState<'standard' | 'deep_ai'>('deep_ai');
   const [copiedManualEa, setCopiedManualEa] = useState<boolean>(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('M15');
   const [biasOverride, setBiasOverride] = useState<'AUTO' | 'BUY' | 'SELL'>('AUTO');
   const [session, setSession] = useState<'London Open (10:00 EAT)' | 'New York AM (15:30 EAT)' | 'Asian Range (03:00 EAT)' | 'London Close (18:30 EAT)'>('London Open (10:00 EAT)');
-  const [patternType, setPatternType] = useState<'Tower Top Liquidity Sweep' | '20/50 EMA Trend Bounce' | 'Asian Liquidity Sweep' | 'Fair Value Gap Re-test' | 'Bearish Order Block Mitigation'>('20/50 EMA Trend Bounce');
-  const [currentPrice, setCurrentPrice] = useState<number>(1.34998);
-  const [keyLevel, setKeyLevel] = useState<number>(1.34818);
-  const [ema20, setEma20] = useState<number>(1.34878);
-  const [ema50, setEma50] = useState<number>(1.34718);
-  const [rsi, setRsi] = useState<number>(58.3);
-  const [traderNotes, setTraderNotes] = useState<string>('GBP/USD live quote @ 1.34998 (+0.66%). Swept sell-side liquidity below 1.34818 with clean 20 EMA displacement.');
+  const [patternType, setPatternType] = useState<'Tower Top Liquidity Sweep' | '20/50 EMA Trend Bounce' | 'Asian Liquidity Sweep' | 'Fair Value Gap Re-test' | 'Bearish Order Block Mitigation'>(
+    initialMarketMatch?.patternType || '20/50 EMA Trend Bounce'
+  );
+  const [currentPrice, setCurrentPrice] = useState<number>(initialMarketMatch?.price || 1.34998);
+  const [keyLevel, setKeyLevel] = useState<number>(initialMarketMatch?.keyLevel || 1.34818);
+  const [ema20, setEma20] = useState<number>(initialMarketMatch?.ema20 || 1.34878);
+  const [ema50, setEma50] = useState<number>(initialMarketMatch?.ema50 || 1.34718);
+  const [rsi, setRsi] = useState<number>(initialMarketMatch?.rsi || 58.3);
+  const [liveAutoNotes, setLiveAutoNotes] = useState<string>(
+    initialMarketMatch?.projection || 'GBP/USD live quote @ 1.34998 (+0.66%). Swept sell-side liquidity below 1.34818 with clean 20 EMA displacement.'
+  );
+  const [traderNotes, setTraderNotes] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('pivotfx_custom_trade_notes');
+      if (saved) return saved;
+    } catch {}
+    return '';
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('pivotfx_custom_trade_notes', traderNotes);
+    } catch {}
+  }, [traderNotes]);
 
   // Camera State
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
@@ -188,21 +214,33 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
   }, [pair]);
 
   useEffect(() => {
+    if (initialStreamState.selectedPair) {
+      void globalLiveStream.fetchSuperAiNoteForPair(initialStreamState.selectedPair, 'M15', true);
+    }
     const unsubscribe = globalLiveStream.subscribe((streamState) => {
       setLiveMarkets(streamState.markets);
       setFeedSyncedAt(streamState.syncedAt);
+      setSuperAiAuto(streamState.superAiAutoEnabled);
+      setSuperAiNotes(streamState.superAiNotes);
 
-      if (!userLockedRef.current) {
-        const match =
-          streamState.markets.find((x) => x.pair === selectedPairRef.current) || streamState.markets[0];
-        if (match) {
+      const activeTarget = streamState.selectedPair || selectedPairRef.current;
+      const match =
+        streamState.markets.find((x) => x.pair === activeTarget) || streamState.markets[0];
+      if (match) {
+        if (streamState.selectedPair && streamState.selectedPair !== selectedPairRef.current) {
+          setPair(streamState.selectedPair);
+          setScannerView('favorable_chart');
+        }
+        const liveAiNote = streamState.superAiNotes[match.pair];
+        setLiveAutoNotes(liveAiNote ? `${liveAiNote.headline}: ${liveAiNote.note}` : match.projection);
+
+        if (!userLockedRef.current) {
           setCurrentPrice(match.price);
           setKeyLevel(match.keyLevel);
           setEma20(match.ema20);
           setEma50(match.ema50);
           setRsi(match.rsi);
           setPatternType(match.patternType);
-          setTraderNotes(match.projection);
         }
       }
     });
@@ -258,8 +296,12 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
       setEma50(reEvaluated.ema50);
       setRsi(reEvaluated.rsi);
       setPatternType(reEvaluated.patternType);
-      setTraderNotes(m.projection);
+      const aiNote = superAiNotes[newPair];
+      setLiveAutoNotes(aiNote ? `${aiNote.headline}: ${aiNote.note}` : m.projection);
     }
+
+    globalLiveStream.setSelectedPair(newPair);
+    void globalLiveStream.fetchSuperAiNoteForPair(newPair, activeTf, true);
 
     // Fetch live OHLC bars in background for exact latest candlestick quote
     fetchPairLiveCandleSnapshot(newPair, activeTf).then((snap) => {
@@ -300,7 +342,7 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
     handleSwitchPairAndSyncRealData(targetPair);
     const m = liveMarkets.find((x) => x.pair === targetPair) || INITIAL_MARKETS_DATA.find((x) => x.pair === targetPair);
     if (m) {
-      setActiveTab('advisor');
+      setScannerView('advisor');
       handleTriggerChatAnalysis(m, 'deep_ai');
     }
   };
@@ -552,7 +594,7 @@ InpMagicNumber=777129
     setEma50(m.ema50);
     setRsi(m.rsi);
     setPatternType(m.patternType);
-    setTraderNotes(m.projection);
+    setLiveAutoNotes(m.projection);
     runInstitutionalVisionAnalysis(
       sampleType === 'gbpusd'
         ? '/samples/gbpusd_tower.png'
@@ -562,15 +604,12 @@ InpMagicNumber=777129
     );
   };
 
-  // Run Real-Time Institutional Vision Analysis (Guaranteed Safe MT4 S/L & T/P Resolution)
+  // Zero-Latency Institutional Vision Analysis (Immediate MT4 S/L & T/P Resolution)
   const runInstitutionalVisionAnalysis = (imageSrc: string) => {
-    setAnalyzingCamera(true);
-    setCameraAnalysisResult(null);
-
-    setTimeout(() => {
-      try {
-        const pipMultiplier = pair.includes('JPY') ? 100 : pair.includes('XAU') ? 10 : pair.includes('BTC') ? 1 : 10000;
-        const distFromEma20Pips = Math.abs(currentPrice - ema20) * pipMultiplier;
+    setAnalyzingCamera(false);
+    try {
+      const pipMultiplier = pair.includes('JPY') ? 100 : pair.includes('XAU') ? 10 : pair.includes('BTC') ? 1 : 10000;
+      const distFromEma20Pips = Math.abs(currentPrice - ema20) * pipMultiplier;
         const computed = computeRealChartTradeParams({
           targetPair: pair,
           targetTf: timeframe,
@@ -651,7 +690,6 @@ InpMagicNumber=777129
         setAnalyzingCamera(false);
         playAudioBeep(880, 0.12);
       }
-    }, 380);
   };
 
   // Run Analysis Engine (Supports both Standard Confluence and Deep AI Institutional EA)
@@ -900,89 +938,85 @@ InpMagicNumber=777129
     };
 
     setAdvisorMessages((prev) => [...prev, userMsg]);
-    setAdvisorLoading(true);
+    setAdvisorLoading(false);
 
-    const delay = mode === 'deep_ai' ? 650 : 350;
+    const isBuy = m.bias === 'STRONG_BUY';
+    const computed = computeRealChartTradeParams({
+      targetPair: m.pair,
+      targetTf: timeframe,
+      targetBroker: broker,
+      price: m.price,
+      keyLevel: m.keyLevel,
+      ema20: m.ema20,
+      ema50: m.ema50,
+      rsi: m.rsi,
+      biasOverride: isBuy ? 'BUY' : 'SELL'
+    });
 
-    setTimeout(() => {
-      const isBuy = m.bias === 'STRONG_BUY';
-      const computed = computeRealChartTradeParams({
-        targetPair: m.pair,
-        targetTf: timeframe,
-        targetBroker: broker,
-        price: m.price,
-        keyLevel: m.keyLevel,
-        ema20: m.ema20,
-        ema50: m.ema50,
-        rsi: m.rsi,
-        biasOverride: isBuy ? 'BUY' : 'SELL'
-      });
+    const orderType = computed.orderType;
+    const slDistancePips = computed.slPips;
+    const tpDistancePips = computed.tpPips;
+    const decimals = computed.decimals;
+    const cleanSymbol = computed.brokerSymbol;
 
-      const orderType = computed.orderType;
-      const slDistancePips = computed.slPips;
-      const tpDistancePips = computed.tpPips;
-      const decimals = computed.decimals;
-      const cleanSymbol = computed.brokerSymbol;
+    const mt4Steps = [
+      `1. Open MT4/MT5 -> Select ${cleanSymbol} (Timeframe: ${timeframe}) -> Press F9 (New Order Ticket)`,
+      `2. Type: ${orderType} (Instant Algorithmic Execution)`,
+      `3. Volume: STRICTLY 0.01 Micro Lot (Gilgil $2.00 / 260 KES Capital Shield)`,
+      `4. Set Stop Loss: ${computed.stopLoss.toFixed(decimals)} (-${slDistancePips} pips)`,
+      `5. Set Take Profit: ${computed.tp2.toFixed(decimals)} (+${tpDistancePips} pips)`,
+      `6. Scale-Out Protocol: Close 50% at ${computed.tp1.toFixed(decimals)} & move SL to Breakeven`
+    ];
 
-      const mt4Steps = [
-        `1. Open MT4/MT5 -> Select ${cleanSymbol} (Timeframe: ${timeframe}) -> Press F9 (New Order Ticket)`,
-        `2. Type: ${orderType} (Instant Algorithmic Execution)`,
-        `3. Volume: STRICTLY 0.01 Micro Lot (Gilgil $2.00 / 260 KES Capital Shield)`,
-        `4. Set Stop Loss: ${computed.stopLoss.toFixed(decimals)} (-${slDistancePips} pips)`,
-        `5. Set Take Profit: ${computed.tp2.toFixed(decimals)} (+${tpDistancePips} pips)`,
-        `6. Scale-Out Protocol: Close 50% at ${computed.tp1.toFixed(decimals)} & move SL to Breakeven`
-      ];
+    const confluences = [
+      `Timeframe Alignment: ${timeframe} institutional order flow with verified stop clearance.`,
+      `Session Timing: ${m.recommendedSession} aligns with institutional order books.`,
+      `Broker Execution: ${broker.toUpperCase()} typical spread is ~${computed.brokerSpread} pips.`,
+      `Indicator Matrix: 20 EMA at ${m.ema20}, 50 EMA at ${m.ema50}, RSI at ${m.rsi}.`,
+      `Institutional Footprint: ${m.ictPattern}.`,
+      `Trajectory: ${m.projection}`,
+      `Gilgil $2 Shield: 0.01 micro lot caps risk strictly at $2.00 (260 KES).`
+    ];
 
-      const confluences = [
-        `Timeframe Alignment: ${timeframe} institutional order flow with verified stop clearance.`,
-        `Session Timing: ${m.recommendedSession} aligns with institutional order books.`,
-        `Broker Execution: ${broker.toUpperCase()} typical spread is ~${computed.brokerSpread} pips.`,
-        `Indicator Matrix: 20 EMA at ${m.ema20}, 50 EMA at ${m.ema50}, RSI at ${m.rsi}.`,
-        `Institutional Footprint: ${m.ictPattern}.`,
-        `Trajectory: ${m.projection}`,
-        `Gilgil $2 Shield: 0.01 micro lot caps risk strictly at $2.00 (260 KES).`
-      ];
+    const aiMsg: AdvisorMessage = {
+      id: `ai-${Date.now()}`,
+      sender: 'ai',
+      text: `**${mode === 'deep_ai' ? 'DEEP AI INSTITUTIONAL' : 'REAL CONFLUENCE'} AUDIT FOR ${m.pair} (${m.symbol}) [${timeframe}]:**\n• **Order Type:** ${orderType}\n• **Entry Price:** ${m.price}\n• **Stop Loss:** ${computed.stopLoss} (-${slDistancePips} pips)\n• **Take Profit 1:** ${computed.tp1} (50% scale-out & move SL to Breakeven)\n• **Take Profit 2:** ${computed.tp2} (+${tpDistancePips} pips final target)\n• **Risk:Reward:** ${computed.riskReward}\n• **Max Risk:** $2.00 / 260 KES strictly on 0.01 micro lot\n• **MT4 Ticket:** Symbol ${cleanSymbol} on ${broker.toUpperCase()} (~${computed.brokerSpread}p spread)`,
+      verdict: isBuy || m.bias === 'STRONG_SELL' ? 'GREEN_LIGHT' : 'CAUTION',
+      lotCap: '0.01 Micro Lot ($2.00 Max Risk)',
+      timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+      tradeCard: {
+        pair: m.pair,
+        timeframe,
+        orderType,
+        direction: isBuy ? 'BUY' : 'SELL',
+        entryPrice: m.price,
+        stopLoss: computed.stopLoss,
+        tp1: computed.tp1,
+        tp2: computed.tp2,
+        slPips: slDistancePips,
+        tpPips: tpDistancePips,
+        riskReward: computed.riskReward,
+        lotSize: 0.01,
+        actualRiskUsd: computed.actualRiskUsd,
+        potentialGainUsd: computed.potentialGainUsd,
+        confidence: m.confidence,
+        pattern: m.ictPattern,
+        trend: m.trend,
+        brokerSymbol: cleanSymbol,
+        brokerSpread: computed.brokerSpread,
+        cmaProtection: computed.cmaProtection,
+        mt4Steps,
+        confluences
+      }
+    };
 
-      const aiMsg: AdvisorMessage = {
-        id: `ai-${Date.now()}`,
-        sender: 'ai',
-        text: `**${mode === 'deep_ai' ? '🧠 DEEP AI INSTITUTIONAL' : '⚡ REAL CONFLUENCE'} AUDIT FOR ${m.pair} (${m.symbol}) [${timeframe}]:**\n• **Order Type:** ${orderType}\n• **Entry Price:** ${m.price}\n• **Stop Loss:** ${computed.stopLoss} (-${slDistancePips} pips)\n• **Take Profit 1:** ${computed.tp1} (50% scale-out & move SL to Breakeven)\n• **Take Profit 2:** ${computed.tp2} (+${tpDistancePips} pips final institutional target)\n• **Risk:Reward:** ${computed.riskReward}\n• **Max Risk:** $2.00 / 260 KES strictly on 0.01 micro lot\n• **MT4 Ticket:** Symbol ${cleanSymbol} on ${broker.toUpperCase()} (~${computed.brokerSpread}p spread)\n• **CMA Guarantee:** Zero negative balance debt risk`,
-        verdict: isBuy || m.bias === 'STRONG_SELL' ? 'GREEN_LIGHT' : 'CAUTION',
-        lotCap: '0.01 Micro Lot ($2.00 Max Risk)',
-        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-        tradeCard: {
-          pair: m.pair,
-          timeframe,
-          orderType,
-          direction: isBuy ? 'BUY' : 'SELL',
-          entryPrice: m.price,
-          stopLoss: computed.stopLoss,
-          tp1: computed.tp1,
-          tp2: computed.tp2,
-          slPips: slDistancePips,
-          tpPips: tpDistancePips,
-          riskReward: computed.riskReward,
-          lotSize: 0.01,
-          actualRiskUsd: computed.actualRiskUsd,
-          potentialGainUsd: computed.potentialGainUsd,
-          confidence: m.confidence,
-          pattern: m.ictPattern,
-          trend: m.trend,
-          brokerSymbol: cleanSymbol,
-          brokerSpread: computed.brokerSpread,
-          cmaProtection: computed.cmaProtection,
-          mt4Steps,
-          confluences
-        }
-      };
-
-      setAdvisorMessages((prev) => [...prev, aiMsg]);
-      setAdvisorLoading(false);
-      playAudioBeep(mode === 'deep_ai' ? 980 : 880, 0.15);
-    }, delay);
+    setAdvisorMessages((prev) => [...prev, aiMsg]);
+    playAudioBeep(mode === 'deep_ai' ? 980 : 880, 0.12);
+    void globalLiveStream.fetchSuperAiNoteForPair(m.pair, timeframe, true);
   };
 
-  // AI Market Advisor Engine
+  // Instant AI Market Advisor Engine
   const handleAskAdvisor = (queryText: string) => {
     const textToQuery = queryText || advisorInput;
     if (!textToQuery.trim()) return;
@@ -996,9 +1030,7 @@ InpMagicNumber=777129
 
     setAdvisorMessages((prev) => [...prev, userMsg]);
     setAdvisorInput('');
-    setAdvisorLoading(true);
-
-    setTimeout(() => {
+    setAdvisorLoading(false);
       let reply = '';
       let verdict: 'GREEN_LIGHT' | 'CAUTION' | 'DO_NOT_TRADE' = 'GREEN_LIGHT';
       let lotCap = '0.01 Micro Lot ($2.00 Max Risk)';
@@ -1195,9 +1227,7 @@ InpMagicNumber=777129
       };
 
       setAdvisorMessages((prev) => [...prev, aiMsg]);
-      setAdvisorLoading(false);
       playAudioBeep(750, 0.1);
-    }, 800);
   };
 
   // Transfer Scanned Trade Directly into Pillar 8 Trade Journal
@@ -1258,300 +1288,244 @@ InpMagicNumber=777129
 
   return (
     <div className="space-y-6 rounded-3xl p-6 sm:p-8 glass-panel-gold border border-[#D4AF37]/30 my-8">
-      {/* Top Scanner Hub or Return Header */}
+      {/* Top Scanner Hub or Single-Line Return Header */}
       {scannerView === 'hub' ? (
-        <div className="p-6 rounded-3xl bg-[#090F1D] border border-[#D4AF37]/40 shadow-xl space-y-3">
+        <div className="p-6 rounded-3xl bg-[#090F1D] border border-slate-800 space-y-3">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="space-y-1">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#D4AF37]/15 border border-[#D4AF37]/35 text-[#D4AF37] text-xs font-mono font-bold">
+              <div className="flex items-center gap-2 text-xs font-mono text-[#D4AF37] font-bold">
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>AI MARKET SCANNER • INDEPENDENT CARDS HUB</span>
+                <span>AI Market Scanner · Independent Cards Hub ({feedSyncedAt})</span>
               </div>
               <h3 className="text-xl sm:text-3xl font-black text-white tracking-tight">
-                Dual AI Market Scanner & Execution Terminal
+                AI Market Scanner &amp; Execution Terminal
               </h3>
             </div>
 
-            <div className="flex items-center gap-2 font-mono text-xs">
-              <span className="text-slate-400">Gilgil Shield:</span>
-              <span className="px-2.5 py-1 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold">
-                0.01 Micro Lot ($2.00 / 260 KES Hard Cap)
-              </span>
+            <div className="flex items-center gap-2 font-mono text-xs tabular-nums">
+              <button
+                type="button"
+                onClick={() => globalLiveStream.setSuperAiAuto(!superAiAuto)}
+                className={`px-3 py-1.5 rounded-xl font-bold border transition whitespace-nowrap ${
+                  superAiAuto
+                    ? 'bg-emerald-950/70 text-[#00C261] border-[#00C261]/60'
+                    : 'bg-slate-900 text-slate-400 hover:text-white border-slate-800'
+                }`}
+              >
+                Super AI Auto: {superAiAuto ? 'ON' : 'OFF'}
+              </button>
+              <span className="text-slate-400">0.01 Lot · $2.00 Cap</span>
             </div>
           </div>
 
           <p className="text-xs sm:text-sm text-slate-300 max-w-3xl leading-relaxed">
-            Every tool operates as an independent clickable card with its own dedicated view and return button. Real candlestick quotes scale SL and TP dynamically so MT4 never rejects your orders.
+            Every workstation operates as an independent clickable card. Real-time candle quotes automatically update Strategy, AI Notes, SL, and TP across every market.
           </p>
         </div>
       ) : (
-        <div className="p-4 sm:p-5 rounded-2xl bg-[#090F1D] border border-[#D4AF37]/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl">
+        <div className="p-4 sm:p-5 rounded-2xl bg-[#090F1D] border border-slate-800 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
           <button
-            onClick={() => setScannerView('hub')}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] hover:text-white border border-[#D4AF37]/50 text-xs font-mono font-bold transition shadow-md group"
+            type="button"
+            onClick={() => {
+              setScannerView('hub');
+              globalLiveStream.setSelectedPair(null);
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] hover:text-white border border-slate-700 text-xs font-mono font-bold transition whitespace-nowrap shrink-0"
           >
-            <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-            <span>← Return to Scanner Hub (Independent Cards)</span>
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back to Scanner Hub</span>
           </button>
 
           <div className="flex items-center gap-1.5 flex-wrap">
-            <button
-              onClick={() => {
-                setScannerView('radar');
-                setActiveTab('radar');
-              }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-                scannerView === 'radar'
-                  ? 'bg-[#D4AF37] text-black font-extrabold'
-                  : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
-              }`}
-            >
-              <Globe className="w-3.5 h-3.5" />
-              <span>1. Radar</span>
-            </button>
-            <button
-              onClick={() => setScannerView('favorable_chart')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-                scannerView === 'favorable_chart'
-                  ? 'bg-[#D4AF37] text-black font-extrabold'
-                  : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
-              }`}
-            >
-              <BarChart3 className="w-3.5 h-3.5" />
-              <span>2. Live Chart & Ticket</span>
-            </button>
-            <button
-              onClick={() => {
-                setScannerView('advisor');
-                setActiveTab('advisor');
-              }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-                scannerView === 'advisor'
-                  ? 'bg-[#D4AF37] text-black font-extrabold'
-                  : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
-              }`}
-            >
-              <Bot className="w-3.5 h-3.5" />
-              <span>3. AI Advisor</span>
-            </button>
-            <button
-              onClick={() => {
-                setScannerView('camera');
-                setActiveTab('camera');
-              }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-                scannerView === 'camera'
-                  ? 'bg-[#D4AF37] text-black font-extrabold'
-                  : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
-              }`}
-            >
-              <Camera className="w-3.5 h-3.5" />
-              <span>4. Camera OCR</span>
-            </button>
-            <button
-              onClick={() => {
-                setScannerView('manual');
-                setActiveTab('manual');
-              }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-                scannerView === 'manual'
-                  ? 'bg-[#D4AF37] text-black font-extrabold'
-                  : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
-              }`}
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5" />
-              <span>5. Manual Confluence</span>
-            </button>
+            {([
+              { id: 'radar', label: '1. Radar', icon: <Globe className="w-3.5 h-3.5" /> },
+              { id: 'favorable_chart', label: '2. Live Chart & Ticket', icon: <BarChart3 className="w-3.5 h-3.5" /> },
+              { id: 'advisor', label: '3. AI Advisor', icon: <Bot className="w-3.5 h-3.5" /> },
+              { id: 'camera', label: '4. Camera OCR', icon: <Camera className="w-3.5 h-3.5" /> },
+              { id: 'manual', label: '5. Manual EA', icon: <SlidersHorizontal className="w-3.5 h-3.5" /> }
+            ] as const).map((tabItem) => (
+              <button
+                key={tabItem.id}
+                type="button"
+                onClick={() => setScannerView(tabItem.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                  scannerView === tabItem.id
+                    ? 'bg-[#D4AF37] text-black font-black'
+                    : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
+                }`}
+              >
+                {tabItem.icon}
+                <span>{tabItem.label}</span>
+              </button>
+            ))}
           </div>
         </div>
       )}
 
       {/* SUCCESS BANNER WHEN TRADE LOGGED */}
       {loggedSuccess && (
-        <div className="p-3.5 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 text-xs font-mono flex items-center gap-2 animate-in fade-in duration-300">
+        <div className="p-3.5 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 text-xs font-mono flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{loggedSuccess}</span>
         </div>
       )}
 
       {/* =========================================================================
-          VIEW 1: SCANNER OPERATIONS HUB (Uncongested, 4 Independent Clickable Cards)
+          VIEW 1: SCANNER OPERATIONS HUB (4 Independent Clickable Cards)
           ========================================================================= */}
       {scannerView === 'hub' && (
-        <div className="space-y-6 animate-in fade-in duration-300">
-          {/* 4 PRIMARY INDEPENDENT CARDS GRID */}
+        <div className="space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {/* CARD 1: 🌐 MULTI-MARKET RADAR (DEEP AI SCAN) */}
-            <div className="p-6 rounded-3xl bg-slate-950/90 border border-slate-800 hover:border-[#D4AF37]/60 transition-all duration-300 flex flex-col justify-between space-y-4 hover:shadow-[0_0_25px_rgba(212,175,55,0.12)] group">
+            {/* CARD 1: MULTI-MARKET RADAR */}
+            <div className="p-6 rounded-2xl bg-slate-950/90 border border-slate-800 hover:border-[#D4AF37] transition-colors flex flex-col justify-between space-y-4">
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="w-10 h-10 rounded-2xl bg-[#D4AF37]/15 border border-[#D4AF37]/40 text-[#D4AF37] flex items-center justify-center">
-                    <Globe className="w-5 h-5" />
-                  </span>
-                  <span className="text-[11px] font-mono px-2.5 py-1 rounded-xl bg-slate-900 text-cyan-400 border border-cyan-800/60 font-bold">
-                    8 Pairs Monitored
-                  </span>
+                <div className="flex items-center justify-between text-xs font-mono text-cyan-400">
+                  <Globe className="w-5 h-5 text-[#D4AF37]" />
+                  <span>8 Markets Monitored · 0.5s Sync</span>
                 </div>
 
                 <div className="space-y-1">
-                  <h4 className="text-base sm:text-lg font-bold text-white group-hover:text-[#D4AF37] transition-colors">
-                    1. Live Multi-Market Radar & Opportunities
+                  <h4 className="text-base sm:text-lg font-bold text-white">
+                    1. Live Multi-Market Radar &amp; Opportunities
                   </h4>
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    Scans 8 major FX pairs and spot gold simultaneously. Pinpoints liquidity sweeps, order blocks, and live broker spreads across FXPesa, Exness, HFM, and FBS.
+                    Scans 8 FX pairs, gold, and crypto simultaneously. Pinpoints liquidity sweeps, order blocks, and broker spreads across FXPesa, Exness, HFM, and FBS.
                   </p>
                 </div>
 
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 font-mono text-[11px] text-slate-300 flex items-center justify-between">
-                  <span>Current Favorable Setup:</span>
-                  <strong className="text-[#D4AF37]">GBP/USD (15m) & XAU/USD</strong>
+                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 font-mono text-xs text-slate-300 flex items-center justify-between">
+                  <span>Active Leader:</span>
+                  <strong className="text-[#D4AF37]">
+                    {liveMarkets[0]?.pair || 'GBP/USD'} @ {liveMarkets[0]?.price || '1.34998'}
+                  </strong>
                 </div>
               </div>
 
               <button
-                onClick={() => {
-                  setScannerView('radar');
-                  setActiveTab('radar');
-                }}
-                className="w-full py-3 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition hover:scale-[1.02] active:scale-95 shadow-md"
+                type="button"
+                onClick={() => setScannerView('radar')}
+                className="w-full py-3 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition whitespace-nowrap"
               >
-                <span>Launch Multi-Market Radar</span>
+                <span>Open Multi-Market Radar</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
 
-            {/* CARD 2: ⚡ LIVE FAVORABLE TRADE & MATCHING REAL CHART */}
-            <div className="p-6 rounded-3xl bg-slate-950/90 border border-[#D4AF37]/60 shadow-[0_0_25px_rgba(212,175,55,0.15)] flex flex-col justify-between space-y-4 group">
+            {/* CARD 2: LIVE FAVORABLE TRADE & MATCHING REAL CHART */}
+            <div className="p-6 rounded-2xl bg-slate-950/90 border border-[#D4AF37]/60 flex flex-col justify-between space-y-4">
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="w-10 h-10 rounded-2xl bg-[#00C261]/20 border border-[#00C261]/40 text-[#00C261] flex items-center justify-center">
-                    <BarChart3 className="w-5 h-5" />
-                  </span>
-                  <span className="text-[11px] font-mono px-2.5 py-1 rounded-xl bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40 font-bold flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-[#00C261] animate-ping" />
-                    <span>Live Chart Feed</span>
-                  </span>
+                <div className="flex items-center justify-between text-xs font-mono text-[#00C261]">
+                  <BarChart3 className="w-5 h-5 text-[#00C261]" />
+                  <span>Live Candlestick Feed · {feedSyncedAt}</span>
                 </div>
 
                 <div className="space-y-1">
-                  <h4 className="text-base sm:text-lg font-bold text-white group-hover:text-[#D4AF37] transition-colors">
-                    2. Live Favorable Trade & Matching Interactive Chart
+                  <h4 className="text-base sm:text-lg font-bold text-white">
+                    2. Live Chart, Super AI Notes &amp; Order Ticket
                   </h4>
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    View the live TradingView chart for the scanned favorable trade. Ingest your screen's exact last candlestick quote (e.g. 4041.495 or 1.35100) to get matching SL, TP1, and TP2.
+                    Inspect real-time candlesticks, toggle Super AI Auto live notes, edit or sync custom notes, and generate exact SL, TP1, and TP2 parameters.
                   </p>
                 </div>
 
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 font-mono text-[11px] text-slate-300 flex items-center justify-between">
-                  <span>Active Live Symbol:</span>
-                  <strong className="text-white">{pair} [{timeframe}] @ {currentPrice}</strong>
+                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 font-mono text-xs text-slate-300 flex items-center justify-between tabular-nums">
+                  <span>Active Symbol:</span>
+                  <strong className="text-white">
+                    {pair} [{timeframe}] @ {currentPrice}
+                  </strong>
                 </div>
               </div>
 
               <button
+                type="button"
                 onClick={() => setScannerView('favorable_chart')}
-                className="w-full py-3 rounded-xl bg-[#00C261] hover:bg-[#00D66C] text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition hover:scale-[1.02] active:scale-95 shadow-md"
+                className="w-full py-3 rounded-xl bg-[#00C261] hover:bg-[#00D66C] text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition whitespace-nowrap"
               >
-                <span>Open Live Chart & Order Ticket</span>
+                <span>Open Live Chart &amp; Order Ticket</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
 
-            {/* CARD 3: 🧠 DEEP AI STRATEGY ADVISOR & CHAT */}
-            <div className="p-6 rounded-3xl bg-slate-950/90 border border-slate-800 hover:border-[#D4AF37]/60 transition-all duration-300 flex flex-col justify-between space-y-4 hover:shadow-[0_0_25px_rgba(212,175,55,0.12)] group">
+            {/* CARD 3: DEEP AI STRATEGY ADVISOR */}
+            <div className="p-6 rounded-2xl bg-slate-950/90 border border-slate-800 hover:border-[#D4AF37] transition-colors flex flex-col justify-between space-y-4">
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-300 flex items-center justify-center">
-                    <Bot className="w-5 h-5" />
-                  </span>
-                  <span className="text-[11px] font-mono px-2.5 py-1 rounded-xl bg-slate-900 text-amber-300 border border-amber-800/60 font-bold">
-                    Conversational AI
-                  </span>
+                <div className="flex items-center justify-between text-xs font-mono text-amber-300">
+                  <Bot className="w-5 h-5 text-amber-300" />
+                  <span>Interactive Strategy Co-Pilot</span>
                 </div>
 
                 <div className="space-y-1">
-                  <h4 className="text-base sm:text-lg font-bold text-white group-hover:text-[#D4AF37] transition-colors">
-                    3. Deep AI Strategy Advisor & NLP Chat
+                  <h4 className="text-base sm:text-lg font-bold text-white">
+                    3. Deep AI Strategy Advisor &amp; Trade Audits
                   </h4>
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    Ask market questions or paste indicator values (EMA 20, EMA 50, RSI 14). Returns institutional algorithmic trade cards with 0.01 lot Gilgil risk controls.
+                    Ask market questions or paste EMA 20, EMA 50, and RSI 14 values for instant trade cards with 0.01 lot Gilgil risk protection.
                   </p>
                 </div>
 
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 font-mono text-[11px] text-slate-300 flex items-center justify-between">
-                  <span>Input Method:</span>
-                  <strong className="text-amber-300">Natural Language & Indicators</strong>
+                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 font-mono text-xs text-slate-300 flex items-center justify-between">
+                  <span>Input Mode:</span>
+                  <strong className="text-amber-300">Instant Pair Audit &amp; Custom Prompts</strong>
                 </div>
               </div>
 
               <button
-                onClick={() => {
-                  setScannerView('advisor');
-                  setActiveTab('advisor');
-                }}
-                className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/50 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition hover:scale-[1.02] active:scale-95 shadow-md"
+                type="button"
+                onClick={() => setScannerView('advisor')}
+                className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-slate-700 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition whitespace-nowrap"
               >
-                <span>Open Strategy Advisor Chatroom</span>
+                <span>Open Strategy Advisor</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
 
-            {/* CARD 4: 📷 LIVE CAMERA & OCR CHART SCANNER */}
-            <div className="p-6 rounded-3xl bg-slate-950/90 border border-slate-800 hover:border-[#D4AF37]/60 transition-all duration-300 flex flex-col justify-between space-y-4 hover:shadow-[0_0_25px_rgba(212,175,55,0.12)] group">
+            {/* CARD 4: LIVE CAMERA & OCR SCANNER */}
+            <div className="p-6 rounded-2xl bg-slate-950/90 border border-slate-800 hover:border-[#D4AF37] transition-colors flex flex-col justify-between space-y-4">
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="w-10 h-10 rounded-2xl bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 flex items-center justify-center">
-                    <Camera className="w-5 h-5" />
-                  </span>
-                  <span className="text-[11px] font-mono px-2.5 py-1 rounded-xl bg-slate-900 text-cyan-300 border border-cyan-800/60 font-bold">
-                    Vision OCR Lens
-                  </span>
+                <div className="flex items-center justify-between text-xs font-mono text-cyan-300">
+                  <Camera className="w-5 h-5 text-cyan-300" />
+                  <span>Camera &amp; Screenshot Lens</span>
                 </div>
 
                 <div className="space-y-1">
-                  <h4 className="text-base sm:text-lg font-bold text-white group-hover:text-[#D4AF37] transition-colors">
-                    4. Live Camera & Screenshot OCR Scanner
+                  <h4 className="text-base sm:text-lg font-bold text-white">
+                    4. Live Camera &amp; Chart Screenshot Scanner
                   </h4>
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    Point your device camera at your MT4/MT5 laptop screen or upload screenshots. Automatically extracts rejection wicks, fair value gaps, and key levels.
+                    Scan live MT4/MT5 screens or upload chart screenshots to compute entry levels, invalidation stops, and micro lot sizing.
                   </p>
                 </div>
 
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 font-mono text-[11px] text-slate-300 flex items-center justify-between">
-                  <span>Extraction Engine:</span>
-                  <strong className="text-cyan-300">1080p Panoramic HUD</strong>
+                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 font-mono text-xs text-slate-300 flex items-center justify-between">
+                  <span>Extraction Speed:</span>
+                  <strong className="text-cyan-300">Instant Local + Live Sync</strong>
                 </div>
               </div>
 
               <button
-                onClick={() => {
-                  setScannerView('camera');
-                  setActiveTab('camera');
-                }}
-                className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-800/60 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition hover:scale-[1.02] active:scale-95 shadow-md"
+                type="button"
+                onClick={() => setScannerView('camera')}
+                className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-slate-700 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition whitespace-nowrap"
               >
-                <span>Launch Camera / OCR Reader</span>
+                <span>Open Camera / Screenshot Scanner</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           </div>
 
-          {/* ADVANCED MANUAL CONFLUENCE ENGINE DIRECT ACCESS */}
           <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <SlidersHorizontal className="w-4 h-4 text-[#D4AF37]" />
               <span className="text-xs font-mono text-slate-300">
-                Advanced manual inputs? Configure full numerical parameters and generate customized MQL4 Expert Advisor scripts.
+                Configure manual numerical parameters and generate MQL4 Expert Advisor templates.
               </span>
             </div>
             <button
-              onClick={() => {
-                setScannerView('manual');
-                setActiveTab('manual');
-              }}
-              className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700 text-xs font-mono font-bold transition shrink-0"
+              type="button"
+              onClick={() => setScannerView('manual')}
+              className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700 text-xs font-mono font-bold transition shrink-0 whitespace-nowrap"
             >
-              <span>Open Manual Confluence & EA Engine →</span>
+              <span>Open Manual Confluence &amp; EA Engine</span>
             </button>
           </div>
         </div>
@@ -2172,19 +2146,69 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
                 </pre>
               </div>
 
-              {/* Bottom Return Button */}
-              <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between">
-                <button
-                  onClick={() => setScannerView('hub')}
-                  className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 text-xs font-mono font-bold flex items-center gap-1.5 transition"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5 text-[#D4AF37]" />
-                  <span>← Return to Scanner Hub</span>
-                </button>
+              {/* Real-Time Super AI Tactical Note + Persistent Custom Trader Notes */}
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3 font-mono text-xs">
+                <div className="flex items-center justify-between gap-2 flex-wrap border-b border-slate-800 pb-2">
+                  <div className="flex items-center gap-2 text-[#D4AF37] font-bold">
+                    <Sparkles className="w-4 h-4 shrink-0" />
+                    <span>
+                      {superAiNotes[pair]?.headline || `Live Auto-Synced Tactical Note · ${pair} (${timeframe})`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => globalLiveStream.setSuperAiAuto(!superAiAuto)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition whitespace-nowrap ${
+                        superAiAuto
+                          ? 'bg-emerald-950/70 text-[#00C261] border-[#00C261]/50'
+                          : 'bg-slate-900 text-slate-400 border-slate-700'
+                      }`}
+                    >
+                      Super AI Auto: {superAiAuto ? 'ON' : 'OFF'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void globalLiveStream.fetchSuperAiNoteForPair(pair, timeframe, true)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-slate-700 text-[11px] font-bold transition whitespace-nowrap"
+                    >
+                      Refresh AI Note
+                    </button>
+                  </div>
+                </div>
 
-                <span className="text-xs font-mono text-slate-400">
-                  Station: Live Chart & Matching Order Execution
-                </span>
+                <p className="text-slate-200 leading-relaxed">
+                  {superAiNotes[pair]?.note || liveAutoNotes}
+                </p>
+
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <label htmlFor="scanner-custom-notes" className="font-bold">
+                      My Persistent Execution Notes (Saved Locally):
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setTraderNotes((prev) =>
+                          prev
+                            ? `${prev} · [${pair} @ ${favorableComputed.entryPrice}: SL ${favorableComputed.stopLoss} / TP2 ${favorableComputed.tp2}]`
+                            : `${pair} (${favorableComputed.orderType}) @ ${favorableComputed.entryPrice} — SL ${favorableComputed.stopLoss}, TP2 ${favorableComputed.tp2}`
+                        )
+                      }
+                      className="text-[#D4AF37] hover:text-white font-bold"
+                    >
+                      + Append Current Setup
+                    </button>
+                  </div>
+                  <input
+                    id="scanner-custom-notes"
+                    type="text"
+                    value={traderNotes}
+                    onChange={(e) => setTraderNotes(e.target.value)}
+                    placeholder="Record your personal checklist or invalidation notes (never overwritten by stream)..."
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white text-xs focus:border-[#D4AF37] outline-none"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -2219,14 +2243,12 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
             </button>
 
             <button
-              onClick={() => {
-                setScannerView('radar');
-                setActiveTab('radar');
-              }}
-              className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 bg-slate-900 text-cyan-400 border border-cyan-500/40 hover:bg-slate-800 transition"
+              type="button"
+              onClick={() => setScannerView('radar')}
+              className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 bg-slate-900 text-cyan-400 border border-slate-700 hover:bg-slate-800 transition whitespace-nowrap"
             >
               <Globe className="w-3.5 h-3.5" />
-              <span>Deep AI Scan All Markets</span>
+              <span>Multi-Market Radar</span>
             </button>
           </div>
         </div>
@@ -2383,11 +2405,11 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
       {/* ======================================================== */}
       {/* TAB 1: LIVE CAMERA & VISION OCR SCANNER (WIDE DIMENSION) */}
       {/* ======================================================== */}
-      {(scannerView === 'camera' || (scannerView !== 'hub' && activeTab === 'camera')) && (
+      {scannerView === 'camera' && (
         <div className="space-y-6">
           {/* 1. Full-Width Panoramic 16:9 Camera Viewfinder */}
           <div className="space-y-3">
-            <div className="relative w-full aspect-[16/9] min-h-[360px] sm:min-h-[480px] lg:min-h-[540px] rounded-3xl bg-black border-2 border-slate-700 hover:border-[#D4AF37] overflow-hidden flex flex-col items-center justify-center shadow-[0_0_40px_rgba(0,0,0,0.8)]">
+            <div className="relative w-full aspect-[16/9] min-h-[360px] sm:min-h-[480px] lg:min-h-[540px] rounded-3xl bg-black border border-slate-700 hover:border-[#D4AF37] overflow-hidden flex flex-col items-center justify-center">
               {/* Live WebRTC Video Stream */}
               {isStreaming ? (
                 <div className="relative w-full h-full">
@@ -2404,12 +2426,11 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
                     {/* Top HUD Telemetry */}
                     <div className="flex items-center justify-between w-full">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-[10px] sm:text-xs font-bold px-3 py-1 rounded-xl bg-red-600/90 text-white flex items-center gap-1.5 animate-pulse shadow-md">
-                          <span className="w-2 h-2 rounded-full bg-white" />
-                          <span>LIVE 1080P WIDE LENS</span>
+                        <span className="font-mono text-[10px] sm:text-xs font-bold px-3 py-1 rounded-xl bg-red-600/90 text-white">
+                          LIVE CAMERA STREAM
                         </span>
                         <span className="font-mono text-[10px] text-cyan-300 px-2.5 py-1 rounded-xl bg-black/80 border border-cyan-500/40">
-                          {pair} • {timeframe} • {broker.toUpperCase()}
+                          {pair} · {timeframe} · {broker.toUpperCase()}
                         </span>
                       </div>
 
@@ -2435,7 +2456,7 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
                       <div className="w-full flex items-center justify-center relative">
                         <div className="w-full h-[1px] bg-[#D4AF37]/40 border-b border-dashed border-[#D4AF37]/60" />
                         <div className="absolute px-3 py-1 rounded-md bg-black/90 border border-[#D4AF37] flex items-center gap-1.5 shadow-lg">
-                          <span className="w-2 h-2 rounded-full bg-[#D4AF37] animate-ping" />
+                          <Crosshair className="w-3.5 h-3.5 text-[#D4AF37]" />
                           <span className="text-[10px] font-mono font-bold text-[#D4AF37]">
                             AI SCAN PIVOT: {currentPrice} (50% C.E.)
                           </span>
@@ -2654,7 +2675,7 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#00C261] animate-ping" />
+                    <CheckCircle2 className="w-4 h-4 text-[#00C261] shrink-0" />
                     <span className="text-base sm:text-lg font-black text-white font-mono">
                       {cameraAnalysisResult.pair} • {cameraAnalysisResult.timeframe} • {cameraAnalysisResult.session}
                     </span>
@@ -2821,57 +2842,45 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
                 </button>
 
                 <button
-                  onClick={() => setActiveTab('manual')}
-                  className="w-full sm:w-auto px-5 py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 text-xs font-mono font-bold flex items-center justify-center gap-2 transition"
+                  type="button"
+                  onClick={() => setScannerView('manual')}
+                  className="w-full sm:w-auto px-5 py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 text-xs font-mono font-bold flex items-center justify-center gap-2 transition whitespace-nowrap"
                 >
                   <SlidersHorizontal className="w-4 h-4 text-[#D4AF37]" />
-                  <span>Open Deep AI EA Parameter Terminal →</span>
+                  <span>Open Manual EA Confluence</span>
                 </button>
               </div>
             </div>
           ) : (
-            <div className="p-8 rounded-3xl bg-slate-950/60 border border-slate-800 text-center space-y-3">
-              <Camera className="w-8 h-8 text-slate-600 mx-auto animate-pulse" />
+            <div className="p-8 rounded-2xl bg-slate-950/60 border border-slate-800 text-center space-y-2">
+              <Camera className="w-7 h-7 text-[#D4AF37] mx-auto" />
               <div className="space-y-1">
-                <h5 className="text-sm font-bold text-white font-mono">Camera Ready for Live Ingestion</h5>
+                <h5 className="text-sm font-bold text-white font-mono">Camera Ready for Chart Capture</h5>
                 <p className="text-xs text-slate-400 max-w-md mx-auto">
-                  Click "Prompt & Open 16:9 Camera" or pick one of the instant samples above. The AI will ingest your candlesticks, calculate exact MT4 trade parameters, and render your placement order ticket.
+                  Start your camera or load one of the chart presets above to compute MT4 entry, Stop Loss, and Take Profit levels.
                 </p>
               </div>
             </div>
           )}
-
-          {/* Bottom Return to Hub Button */}
-          <div className="pt-4 border-t border-slate-800 flex justify-center">
-            <button
-              onClick={() => setScannerView('hub')}
-              className="px-6 py-2.5 rounded-xl btn-gold text-black font-black text-xs font-mono uppercase tracking-wider flex items-center gap-2 shadow-lg hover:scale-105 active:scale-95 transition"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span>← Return to Scanner Hub</span>
-            </button>
-          </div>
         </div>
       )}
 
       {/* ======================================================== */}
       {/* TAB 2: MANUAL CONFLUENCE SCANNER */}
       {/* ======================================================== */}
-      {(scannerView === 'manual' || (scannerView !== 'hub' && activeTab === 'manual')) && (
+      {scannerView === 'manual' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Manual Indicator Inputs (7 Cols) */}
           <div className="lg:col-span-7 space-y-4">
             {/* Live Chart Real-Time Re-Anchor Banner */}
-            <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-950 to-slate-900 border border-[#D4AF37]/50 space-y-2.5">
+            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-2.5">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800 pb-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#00C261] animate-ping" />
-                  <span className="font-mono text-xs font-bold text-white">
-                    Live MT4/MT5 Chart Re-Anchor: <strong className="text-[#D4AF37]">{pair}</strong>
+                <div className="flex items-center gap-2 flex-wrap text-xs font-mono">
+                  <span className="font-bold text-white">
+                    Live MT4/MT5 Re-Anchor: <strong className="text-[#D4AF37]">{pair}</strong>
                   </span>
-                  <span className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 font-mono text-[10px] font-bold border border-cyan-500/40">
-                    {timeframe} Chart
-                  </span>
+                  <span aria-hidden="true" className="text-slate-600">·</span>
+                  <span className="text-cyan-300 font-bold">{timeframe} Chart</span>
                 </div>
                 <span className="text-[10px] font-mono text-emerald-400 font-bold">
                   {broker.toUpperCase()} (~{broker === 'fxpesa' ? '1.1' : broker === 'exness' ? '0.6' : '1.3'}p Spread)
@@ -3358,10 +3367,10 @@ Broker: ${broker.toUpperCase()}`;
                 </div>
               </div>
             ) : (
-              <div className="h-full min-h-[260px] flex flex-col items-center justify-center text-center p-6 space-y-3 text-slate-500">
-                <SlidersHorizontal className="w-8 h-8 text-slate-600 animate-pulse" />
-                <p className="text-xs">
-                  Choose your market parameters on the left and click <strong>⚡ Analyse Market</strong> for standard technicals or <strong>🧠 Deep AI Analyse</strong> for institutional ICT EA execution.
+              <div className="h-full min-h-[260px] flex flex-col items-center justify-center text-center p-6 space-y-3 text-slate-400">
+                <SlidersHorizontal className="w-7 h-7 text-[#D4AF37]" />
+                <p className="text-xs max-w-sm">
+                  Configure your parameters on the left and run standard technical confluence or Deep AI institutional execution.
                 </p>
               </div>
             )}
@@ -3370,10 +3379,10 @@ Broker: ${broker.toUpperCase()}`;
       )}
 
       {/* ======================================================== */}
-      {/* TAB 3: FULL MULTI-MARKET RADAR (DEEP AI SCAN) */}
+      {/* TAB 3: FULL MULTI-MARKET RADAR */}
       {/* ======================================================== */}
-      {(scannerView === 'radar' || (scannerView !== 'hub' && activeTab === 'radar')) && (
-        <div className="space-y-6 animate-in fade-in duration-300">
+      {scannerView === 'radar' && (
+        <div className="space-y-6">
           <MultiMarketRadarEngine
             selectedBroker={broker}
             onSelectMarketForAnalysis={(market, mode = 'deep_ai') => {
@@ -3385,7 +3394,8 @@ Broker: ${broker.toUpperCase()}`;
               setEma50(market.ema50);
               setRsi(market.rsi);
               setPatternType(market.patternType);
-              setTraderNotes(market.projection);
+              setLiveAutoNotes(market.projection);
+              globalLiveStream.setSelectedPair(market.pair);
               setScannerView('favorable_chart');
               handleRunAnalysis(mode, market);
             }}
@@ -3397,42 +3407,27 @@ Broker: ${broker.toUpperCase()}`;
               setScannerView('favorable_chart');
             }}
           />
-
-          {/* Bottom Return Button */}
-          <div className="pt-4 border-t border-slate-800 flex justify-center">
-            <button
-              onClick={() => setScannerView('hub')}
-              className="px-6 py-2.5 rounded-xl btn-gold text-black font-black text-xs font-mono uppercase tracking-wider flex items-center gap-2 shadow-lg hover:scale-105 active:scale-95 transition"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span>← Return to Scanner Hub</span>
-            </button>
-          </div>
         </div>
       )}
 
       {/* ======================================================== */}
       {/* TAB 4: INSTITUTIONAL AI MARKET ADVISOR */}
       {/* ======================================================== */}
-      {(scannerView === 'advisor' || (scannerView !== 'hub' && activeTab === 'advisor')) && (
+      {scannerView === 'advisor' && (
         <div className="space-y-6">
           {/* 1-CLICK MARKET QUICK SELECTOR & AUTO DEEP SCAN BAR */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-[#080E1E] border border-[#D4AF37]/50 shadow-2xl space-y-3">
+          <div className="p-4 sm:p-5 rounded-2xl bg-[#080E1E] border border-slate-800 space-y-3">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
               <div>
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#00C261] animate-ping" />
-                  <span className="text-xs font-mono font-black uppercase tracking-wider text-[#D4AF37]">
-                    Choose Market to Auto-Update Quote & Deep AI Scan:
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-300 font-mono mt-0.5">
-                  Pick any market: instantly synchronizes quote, 20 EMA, 50 EMA, RSI, and generates a copyable trade placement card.
+                <span className="text-xs font-mono font-bold text-[#D4AF37] block">
+                  Choose Market to Sync Quote &amp; Generate Instant Audit:
+                </span>
+                <p className="text-xs text-slate-300 font-mono mt-0.5">
+                  Synchronizes live candle price, EMAs, RSI, and creates a copyable execution ticket.
                 </p>
               </div>
 
-              {/* Active Market Live Badge */}
-              <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-[#D4AF37]/40 flex items-center gap-2 font-mono text-xs">
+              <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-2 font-mono text-xs shrink-0">
                 <span className="text-slate-400">Active Sync:</span>
                 <span className="font-bold text-white">{pair}</span>
                 <span className="text-emerald-400 font-bold">@{currentPrice}</span>
@@ -4144,7 +4139,7 @@ Broker: ${broker.toUpperCase()}`;
                           onClick={() => handleToggleSpeakAudit(m.id, syncedCard!)}
                           className={`py-2.5 px-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 shadow-sm ${
                             speakingMsgId === m.id
-                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 animate-pulse'
+                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/60'
                               : 'bg-slate-900 hover:bg-slate-800 text-amber-300 hover:text-white border-amber-800/50 hover:border-amber-400'
                           }`}
                           title="Listen to audio briefing of setup"
@@ -4220,7 +4215,7 @@ Broker: ${broker.toUpperCase()}`;
             })}
 
             {advisorLoading && (
-              <div className="flex items-center gap-2 text-xs font-mono text-[#D4AF37] p-3 rounded-xl bg-slate-900 border border-slate-800 animate-pulse">
+              <div className="flex items-center gap-2 text-xs font-mono text-[#D4AF37] p-3 rounded-xl bg-slate-900 border border-slate-800">
                 <RefreshCw className="w-4 h-4 animate-spin" />
                 <span>Institutional AI Advisor calculating real-time order book confluences...</span>
               </div>

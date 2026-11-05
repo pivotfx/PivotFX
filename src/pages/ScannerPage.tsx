@@ -373,9 +373,9 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
         <div className="lg:col-span-7 space-y-6">
           <div className="glass-panel rounded-3xl p-6 border border-slate-800 space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-mono text-slate-300 font-bold uppercase flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#00C261] animate-ping" />
-                {scannerMode === 'chart' ? 'Live Chart Viewfinder' : 'Live Camera Lens Feed'}
+              <span className="text-xs font-mono text-[#00C261] font-bold uppercase flex items-center gap-2">
+                <Crosshair className="w-3.5 h-3.5" />
+                <span>{scannerMode === 'chart' ? 'Live Chart Viewfinder' : 'Live Camera Lens Feed'}</span>
               </span>
               <span className="text-xs font-mono text-[#00C261] font-semibold">
                 {selectedPair} ({selectedTimeframe}) • {chartCandlePrice}

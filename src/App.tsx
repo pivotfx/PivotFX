@@ -70,6 +70,12 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleOpenPairInScanner = async (pair: any) => {
+    const { globalLiveStream } = await import('./utils/liveMarketEngine');
+    globalLiveStream.setSelectedPair(pair);
+    handleSelectTab('/ai-scanner');
+  };
+
   useEffect(() => {
     const handlePopState = () => {
       const hash = window.location.hash.replace(/^#\/?/, '').replace(/^\//, '');
@@ -104,12 +110,15 @@ export default function App() {
       />
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 pt-6">
         {activeTab === 'landing' || !activePillar ? (
-          <LandingPage onSelectPillar={handleSelectTab} />
+          <LandingPage
+            onSelectPillar={handleSelectTab}
+            onOpenPairWorkspace={handleOpenPairInScanner}
+          />
         ) : (
           <Suspense
             fallback={
               <div className="min-h-[55vh] flex items-center justify-center">
-                <div className="px-6 py-4 rounded-2xl bg-[#0C1220] border border-[#D4AF37]/40 text-xs font-mono text-[#D4AF37] animate-pulse">
+                <div className="px-6 py-4 rounded-2xl bg-[#0C1220] border border-[#D4AF37]/40 text-xs font-mono text-[#D4AF37]">
                   Loading Pillar Workstation...
                 </div>
               </div>

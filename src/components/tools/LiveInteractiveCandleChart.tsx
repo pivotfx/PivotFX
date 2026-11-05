@@ -366,7 +366,7 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
             {isBuy ? 'BUY STRUCTURE ▲' : 'SELL STRUCTURE ▼'}
           </span>
           <span className="px-2 py-0.5 rounded bg-black/80 border border-slate-700 text-[10px] text-slate-300 flex items-center gap-1">
-            <Activity className="w-3 h-3 text-[#00C261] animate-pulse" />
+            <Activity className="w-3 h-3 text-[#00C261]" />
             <span>{isLockedToCustom ? 'Custom Candle Simulation' : '24/7 Live Feed Active'}</span>
           </span>
         </div>

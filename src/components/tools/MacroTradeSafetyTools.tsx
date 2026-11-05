@@ -10,6 +10,7 @@ import {
   SideSafetyVerdict
 } from '../../utils/liveMarketEngine';
 import { LiveInteractiveCandleChart } from './LiveInteractiveCandleChart';
+import sessionWorldMapImg from '../../assets/images/session_world_map_1793873187765.jpg';
 import {
   Globe,
   ShieldCheck,
@@ -26,7 +27,7 @@ import {
   ArrowRight,
   ArrowLeft,
   Scale,
-  Activity,
+  Sparkles,
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
@@ -44,6 +45,9 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
   const [lockedPairs, setLockedPairs] = useState<Partial<Record<CurrencyPair, boolean>>>(
     () => globalLiveStream.getState().lockedPairs
   );
+  const [superAiNotes, setSuperAiNotes] = useState(
+    () => globalLiveStream.getState().superAiNotes
+  );
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [selectedBroker, setSelectedBroker] = useState<BrokerId>('fxpesa');
   const [selectedPairFilter, setSelectedPairFilter] = useState<CurrencyPair | 'ALL'>('ALL');
@@ -51,6 +55,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
   const [inspectedSide, setInspectedSide] = useState<'AUTO' | 'BUY' | 'SELL'>('AUTO');
   const [showManualOverrides, setShowManualOverrides] = useState<boolean>(false);
   const [manualFlags, setManualFlags] = useState<Partial<MacroFactorFlags>>({});
+  const [mapImgFailed, setMapImgFailed] = useState<boolean>(false);
 
   useEffect(() => {
     const unsubscribe = globalLiveStream.subscribe((streamState) => {
@@ -58,6 +63,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
       setSyncedAt(streamState.syncedAt);
       setLiveConnected(streamState.liveFeedConnected);
       setLockedPairs(streamState.lockedPairs);
+      setSuperAiNotes(streamState.superAiNotes);
     });
     return () => unsubscribe();
   }, []);
@@ -149,22 +155,20 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
   return (
     <div className="space-y-6 rounded-3xl p-6 sm:p-8 glass-panel-gold border border-[#D4AF37]/35 my-6">
       {/* 1. TOP DAILY GLOBAL SAFETY HEADER & EVERY-SECOND KENYA EAT CLOCK */}
-      <div className="p-5 sm:p-6 rounded-2xl bg-[#090F1D] border border-[#D4AF37]/40 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 shadow-xl">
+      <div className="p-5 sm:p-6 rounded-2xl bg-[#090F1D] border border-slate-800 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div className="space-y-1.5">
-          <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#D4AF37] flex-wrap tabular-nums">
-            <Globe className="w-4 h-4 text-[#D4AF37]" />
-            <span>24/7 AUTO-UPDATING GLOBAL & KENYA (EAT) SAFETY SHIELD</span>
+          <div className="flex items-center gap-2 text-xs font-mono text-slate-400 flex-wrap tabular-nums">
+            <span className="text-[#D4AF37] font-bold">Global &amp; Kenya EAT Safety Shield</span>
             <span aria-hidden="true">·</span>
-            <span className="text-[#00C261] inline-flex items-center gap-1">
-              <Activity className="w-3.5 h-3.5 animate-pulse" />
-              <span>{liveConnected ? 'Live Interbank 0.5s Sync' : 'Live 0.5s Clock Sync'} ({syncedAt})</span>
+            <span className="text-[#00C261] font-semibold">
+              {liveConnected ? 'Live 0.5s Interbank Sync' : 'Live 0.5s Clock Sync'} ({syncedAt})
             </span>
           </div>
           <h3 className="text-xl sm:text-2xl font-black text-white">
-            Is It Safe to Buy or Sell Today? Kenya Time Sync & Global Entry Guard
+            Is It Safe to Buy or Sell Today? Kenya Time Sync &amp; Entry Guard
           </h3>
           <p className="text-xs text-slate-300 font-mono max-w-3xl">
-            Automatically detects daily USD basket shocks, safe-haven flows, and Nairobi (EAT / UTC+3) liquidity windows. Shows live countdown timers when an entry window is unfavorable.
+            Detects daily USD basket shifts, safe-haven flows, and Nairobi (UTC+3) liquidity windows. Shows exact countdown timers when an entry window is unfavorable.
           </p>
         </div>
 
@@ -185,7 +189,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
             type="button"
             onClick={refreshLiveMacroFeed}
             disabled={isRefreshing}
-            className="px-4 py-2.5 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-lg transition active:scale-95 disabled:opacity-50"
+            className="px-4 py-2.5 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center gap-1.5 transition disabled:opacity-50 whitespace-nowrap shrink-0"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
             <span>{isRefreshing ? 'Syncing...' : 'Rescan Macro Factors'}</span>
@@ -193,47 +197,73 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
         </div>
       </div>
 
-      {/* 2. PROMINENT GLOBAL PLANNED-ENTRY WARNING / VERDICT BANNER */}
-      <div
-        className={`p-5 rounded-2xl border-2 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 shadow-lg ${
-          report.overallDaySafety === 'SAFE_OPTIMAL'
-            ? 'bg-emerald-950/35 border-[#00C261]/75 text-emerald-100'
-            : report.overallDaySafety === 'SAFE_SELECTIVE'
-            ? 'bg-cyan-950/35 border-cyan-400/65 text-cyan-100'
-            : report.overallDaySafety === 'CAUTION_WAIT'
-            ? 'bg-amber-950/45 border-amber-400/80 text-amber-100'
-            : 'bg-red-950/60 border-red-500 text-red-100'
-        }`}
-      >
-        <div className="space-y-1.5 font-mono">
-          <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider flex-wrap">
-            {report.overallDaySafety === 'SAFE_OPTIMAL' || report.overallDaySafety === 'SAFE_SELECTIVE' ? (
-              <ShieldCheck className="w-5 h-5 text-[#00C261] shrink-0" />
-            ) : (
-              <ShieldAlert className="w-5 h-5 text-red-400 animate-pulse shrink-0" />
-            )}
-            <span>
-              {report.overallDaySafety === 'UNSAFE_AVOID'
-                ? 'GLOBAL ENTRY ALERT: NOT SAFE FOR BLIND ENTRIES RIGHT NOW'
-                : report.overallDaySafety === 'CAUTION_WAIT'
-                ? 'GLOBAL SESSION GUARD: OFF-PEAK OR VOLATILITY CAUTION'
-                : 'TODAY’S GLOBAL ENVIRONMENT VERDICT: CLEAR'}
-            </span>
+      {/* 2. GLOBAL SESSION MAP & PROMINENT PLANNED-ENTRY SAFETY VERDICT */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
+        <div
+          className={`lg:col-span-8 p-5 rounded-2xl border flex flex-col justify-between gap-4 ${
+            report.overallDaySafety === 'SAFE_OPTIMAL'
+              ? 'bg-emerald-950/35 border-[#00C261]/70 text-emerald-100'
+              : report.overallDaySafety === 'SAFE_SELECTIVE'
+              ? 'bg-cyan-950/35 border-cyan-400/60 text-cyan-100'
+              : report.overallDaySafety === 'CAUTION_WAIT'
+              ? 'bg-amber-950/40 border-amber-400/75 text-amber-100'
+              : 'bg-red-950/55 border-red-500 text-red-100'
+          }`}
+        >
+          <div className="space-y-1.5 font-mono">
+            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider flex-wrap">
+              {report.overallDaySafety === 'SAFE_OPTIMAL' || report.overallDaySafety === 'SAFE_SELECTIVE' ? (
+                <ShieldCheck className="w-5 h-5 text-[#00C261] shrink-0" />
+              ) : (
+                <ShieldAlert className="w-5 h-5 text-red-400 shrink-0" />
+              )}
+              <span>
+                {report.overallDaySafety === 'UNSAFE_AVOID'
+                  ? 'GLOBAL ENTRY ALERT: AVOID BLIND ENTRIES RIGHT NOW'
+                  : report.overallDaySafety === 'CAUTION_WAIT'
+                  ? 'GLOBAL SESSION GUARD: OFF-PEAK OR VOLATILITY CAUTION'
+                  : 'TODAY’S GLOBAL ENVIRONMENT VERDICT: CLEAR'}
+              </span>
+            </div>
+            <p className="text-sm sm:text-base font-black text-white">
+              {report.overallHeadline}
+            </p>
+            <p className="text-xs opacity-90 leading-relaxed">{report.sessionAdvice}</p>
           </div>
-          <p className="text-sm sm:text-base font-black text-white">
-            {report.overallHeadline}
-          </p>
-          <p className="text-xs opacity-90">{report.sessionAdvice}</p>
+
+          <div className="flex items-center gap-3 flex-wrap font-mono tabular-nums pt-2 border-t border-white/10">
+            <div className="text-xs">
+              <span className="text-slate-400">Nairobi EAT: </span>
+              <strong className="text-cyan-300">{report.eatTimeString}</strong>
+            </div>
+            <span aria-hidden="true" className="text-slate-600">·</span>
+            <div className="text-xs">
+              <span className="text-slate-400">Gilgil Cap: </span>
+              <strong className="text-[#D4AF37]">0.01 Lot · Max $2.00 / 260 KES</strong>
+            </div>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3 flex-wrap shrink-0 font-mono tabular-nums">
-          <div className="px-4 py-2.5 rounded-xl bg-black/60 border border-white/15 text-xs">
-            <span className="text-slate-400 block text-[10px]">KENYA NAIROBI TIME</span>
-            <strong className="text-cyan-300 text-sm">{report.eatTimeString}</strong>
-          </div>
-          <div className="px-4 py-2.5 rounded-xl bg-black/60 border border-white/15 text-xs">
-            <span className="text-slate-400 block text-[10px]">GILGIL SHIELD</span>
-            <strong className="text-[#D4AF37]">0.01 Lot · Max $2.00</strong>
+        {/* 4:3 Cartographic Session Corridors Card */}
+        <div className="lg:col-span-4 relative min-h-[170px] lg:min-h-full rounded-2xl overflow-hidden border border-slate-800 bg-slate-950">
+          {!mapImgFailed ? (
+            <img
+              src={sessionWorldMapImg}
+              alt="Global London, New York, Tokyo, and Nairobi foreign exchange liquidity corridors"
+              referrerPolicy="no-referrer"
+              onError={() => setMapImgFailed(true)}
+              className="w-full h-full lg:h-full object-cover object-center opacity-85"
+            />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center p-4 text-center">
+              <Globe className="w-8 h-8 text-[#D4AF37] mb-1" />
+              <span className="text-xs font-bold text-white">Global FX Session Corridors</span>
+            </div>
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent pointer-events-none" />
+          <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-[11px] font-mono text-slate-200 tabular-nums">
+            <span>Tokyo · London · Nairobi · NY</span>
+            <span className="text-[#D4AF37] font-bold">24/5 Flow</span>
           </div>
         </div>
       </div>
@@ -388,7 +418,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                 >
                   <div className="flex items-start gap-2.5 text-xs">
                     {focusedCard.isEntryBlockedGlobally ? (
-                      <ShieldAlert className="w-5 h-5 text-red-400 shrink-0 mt-0.5 animate-pulse" />
+                      <ShieldAlert className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
                     ) : (
                       <ShieldCheck className="w-5 h-5 text-[#00C261] shrink-0 mt-0.5" />
                     )}
@@ -405,7 +435,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
 
                 {/* Color-Coded Kenya EAT Entry Window & Live Countdown Timer Box */}
                 <div
-                  className={`p-5 rounded-2xl border-2 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 ${
+                  className={`p-5 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 ${
                     focusedCard.kenyaTiming.windowStatusCode === 'OPEN'
                       ? 'bg-emerald-950/35 border-[#00C261]/70'
                       : focusedCard.kenyaTiming.windowStatusCode === 'OPENING_SOON'
@@ -447,15 +477,39 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                       }`}
                     >
                       {focusedCard.kenyaTiming.windowStatusCode === 'OPEN'
-                        ? '● MARKET OPEN · CLOSES IN'
+                        ? 'MARKET OPEN · CLOSES IN'
                         : focusedCard.kenyaTiming.windowStatusCode === 'OPENING_SOON'
-                        ? '⏳ TO OPEN · OPENS IN'
-                        : '✕ MARKET CLOSED · OPENS IN'}
+                        ? 'OPENS IN'
+                        : 'MARKET CLOSED · OPENS IN'}
                     </span>
                     <strong className="text-lg sm:text-xl font-black text-white tracking-wider">
                       {focusedCard.kenyaTiming.countdownFormatted}
                     </strong>
                   </div>
+                </div>
+
+                {/* Real-Time Synced Tactical Note */}
+                <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-3 text-xs">
+                  <div className="space-y-0.5">
+                    <span className="text-[#D4AF37] font-bold flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>
+                        {superAiNotes[focusedCard.pair]?.headline || `Live Session Note · ${focusedCard.pair}`}
+                      </span>
+                    </span>
+                    <p className="text-slate-200 leading-snug">
+                      {superAiNotes[focusedCard.pair]?.note || focusedMarket.projection}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void globalLiveStream.fetchSuperAiNoteForPair(focusedCard.pair, focusedMarket.recommendedTf, true)
+                    }
+                    className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] border border-slate-700 text-[11px] font-bold shrink-0 whitespace-nowrap"
+                  >
+                    Sync AI Note
+                  </button>
                 </div>
 
                 {/* Dual Safe to BUY vs Safe to SELL Today Badges */}
@@ -690,10 +744,10 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                         <Clock className="w-3 h-3 shrink-0" />
                         <span>
                           {card.kenyaTiming.windowStatusCode === 'OPEN'
-                            ? '● MARKET OPEN'
+                            ? 'MARKET OPEN'
                             : card.kenyaTiming.windowStatusCode === 'OPENING_SOON'
-                            ? '⏳ OPENS IN'
-                            : '✕ CLOSED · OPENS IN'}
+                            ? 'OPENS IN'
+                            : 'CLOSED · OPENS IN'}
                         </span>
                       </span>
                       <strong className="text-white font-black">{card.kenyaTiming.countdownFormatted}</strong>

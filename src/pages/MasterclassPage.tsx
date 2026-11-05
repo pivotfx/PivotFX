@@ -311,7 +311,6 @@ export const MasterclassPage: React.FC<MasterclassPageProps> = ({ onNavigate, on
                 >
                   <BarChart3 className="w-3.5 h-3.5 text-emerald-400" />
                   <span>6. Live TradingView Chart</span>
-                  <span className="w-2 h-2 rounded-full bg-[#00C261] animate-ping" />
                 </button>
               </div>
 
@@ -734,12 +733,11 @@ export const MasterclassPage: React.FC<MasterclassPageProps> = ({ onNavigate, on
                       <span className="text-xs font-mono text-[#D4AF37] font-bold uppercase block">
                         Interactive Real-Time Workstation
                       </span>
-                      <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+                      <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2 flex-wrap">
                         <span>Live TradingView Feed: {activeClass.tvSymbol || 'GBPUSD'}</span>
-                        <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-cyan-300 border border-slate-700">
-                          {activeClass.tvTimeframe || '15'}m Timeframe
+                        <span className="text-xs font-mono text-cyan-300">
+                          · {activeClass.tvTimeframe || '15'}m Timeframe
                         </span>
-                        <span className="w-2 h-2 rounded-full bg-[#00C261] animate-ping" />
                       </h3>
                     </div>
                     <div className="flex items-center gap-2">

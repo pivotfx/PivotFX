@@ -158,38 +158,29 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
           </div>
         </div>
 
-        {/* Pillar Title and Badges */}
+        {/* Pillar Title & Unboxed Metadata */}
         <div className="space-y-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-mono text-xs font-black px-2.5 py-1 rounded-xl bg-[#D4AF37] text-black">
-              PILLAR {pillar.number}
+          <div className="flex items-center gap-2 text-xs font-mono text-slate-400 flex-wrap tabular-nums">
+            <span className="text-[#D4AF37] font-bold">Pillar {pillar.number}</span>
+            <span aria-hidden="true">·</span>
+            <span className="text-cyan-300 font-semibold">{pillar.category}</span>
+            <span aria-hidden="true">·</span>
+            <span>{pillar.badge}</span>
+            <span aria-hidden="true">·</span>
+            <span className="text-white font-semibold">
+              {selectedLesson
+                ? `Lesson ${selectedLesson.number} of ${pillar.lessons.length}`
+                : showCurriculumChamber
+                ? `Curriculum Chamber (${pillar.lessons.length} Lessons)`
+                : `${pillar.lessons.length} Lessons Inside Chamber`}
             </span>
-            <span className="text-xs font-mono px-2.5 py-1 rounded-xl bg-slate-900 text-cyan-400 border border-slate-800 uppercase font-semibold">
-              {pillar.category}
-            </span>
-            <span className="text-xs font-mono px-2.5 py-1 rounded-xl bg-slate-900 text-[#D4AF37] border border-slate-800">
-              {pillar.badge}
-            </span>
-            {selectedLesson ? (
-              <span className="text-xs font-mono px-2.5 py-1 rounded-xl bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/50 font-bold">
-                Isolated Lesson {selectedLesson.number} View
-              </span>
-            ) : showCurriculumChamber ? (
-              <span className="text-xs font-mono px-2.5 py-1 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold">
-                Curriculum Chamber ({pillar.lessons.length} Lessons)
-              </span>
-            ) : (
-              <span className="text-xs font-mono text-slate-400 hidden sm:inline">
-                Uncongested Interactive Workstation · {pillar.lessons.length} Lessons Ready
-              </span>
-            )}
           </div>
 
-          <h1 className="text-2xl sm:text-4xl lg:text-5xl font-black text-white tracking-tight">
+          <h1 className="text-2xl sm:text-4xl lg:text-5xl font-black text-white tracking-tight text-balance">
             {selectedLesson
               ? selectedLesson.title
               : showCurriculumChamber
-              ? `Pillar ${pillar.number} Masterclass Curriculum (Lessons 01–${pillar.lessons.length})`
+              ? `Pillar ${pillar.number} Curriculum (Lessons 01–${pillar.lessons.length})`
               : pillar.title}
           </h1>
 
@@ -197,87 +188,83 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
             {selectedLesson
               ? selectedLesson.summary
               : showCurriculumChamber
-              ? `Select any independent lesson card below to study it in 100% isolation. You can return here anytime to advance to the next lesson.`
+              ? `Select any independent lesson card below to study it in isolation. Return anytime to advance to the next lesson.`
               : pillar.overview}
           </p>
         </div>
 
         {/* Progress Bar */}
         <div className="space-y-1.5 pt-2">
-          <div className="w-full h-2 rounded-full bg-slate-950 overflow-hidden border border-slate-800">
+          <div className="w-full h-2 rounded-full bg-slate-950 overflow-hidden border border-slate-800 tabular-nums">
             <div
-              className="h-full bg-gradient-to-r from-[#D4AF37] via-amber-400 to-[#F3E5AB] rounded-full transition-all duration-500 shadow-[0_0_12px_rgba(212,175,55,0.5)]"
+              className="h-full bg-gradient-to-r from-[#D4AF37] via-amber-400 to-[#F3E5AB] rounded-full transition-all duration-300"
               style={{ width: `${progressPercent}%` }}
             />
           </div>
         </div>
       </div>
 
-      {/* 2. ISOLATED FULL-WIDTH VIEW SWITCHER (1: Single Lesson | 2: Curriculum Chamber 01-10 | 3: Clean Workstation + Curriculum Card) */}
+      {/* 2. ISOLATED FULL-WIDTH VIEW SWITCHER (1: Single Lesson | 2: Curriculum Chamber 01-10 | 3: Workstation + Curriculum Card) */}
       <div className="space-y-8">
         {selectedLesson ? (
           /* =========================================================================
-             CASE A: DEDICATED SINGLE-LESSON FOCUS VIEW (100% Isolated to Selected Lesson)
+             CASE A: DEDICATED SINGLE-LESSON FOCUS VIEW
              ========================================================================= */
-          <div className="space-y-6 animate-in fade-in duration-300">
-            {/* Top Navigation & Breadcrumb Return Header */}
-            <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-[#D4AF37]/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+          <div className="space-y-6">
+            <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2.5 flex-wrap">
                 <button
+                  type="button"
                   onClick={() => {
                     setSelectedLessonId(null);
                     setShowCurriculumChamber(true);
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] hover:text-white border border-[#D4AF37]/40 text-xs font-mono font-bold transition group"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] hover:text-white border border-slate-700 text-xs font-mono font-bold transition whitespace-nowrap"
                 >
-                  <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-                  <span>← Return to Lessons 01–{pillar.lessons.length}</span>
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>All Lessons 01–{pillar.lessons.length}</span>
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => {
                     setSelectedLessonId(null);
                     setShowCurriculumChamber(false);
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
-                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 text-xs font-mono font-bold transition"
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-mono font-bold transition whitespace-nowrap"
                 >
                   <span>Pillar {pillar.number} Tools</span>
                 </button>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3 tabular-nums">
                 <span className="text-xs font-mono text-slate-400">
-                  Lesson {selectedLesson.number} of {pillar.lessons.length}
+                  Lesson {selectedLesson.number} / {pillar.lessons.length}
                 </span>
                 <button
+                  type="button"
                   onClick={() => toggleCompleteLesson(selectedLesson.id)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 transition ${
+                  className={`px-3.5 py-2 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 transition whitespace-nowrap ${
                     completedLessons.includes(selectedLesson.id)
                       ? 'bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40'
                       : 'bg-slate-800 text-slate-300 hover:text-white border border-slate-700'
                   }`}
                 >
                   <Check className="w-3.5 h-3.5" />
-                  <span>{completedLessons.includes(selectedLesson.id) ? '✓ Completed' : 'Mark Lesson Done'}</span>
+                  <span>{completedLessons.includes(selectedLesson.id) ? 'Completed' : 'Mark Done'}</span>
                 </button>
               </div>
             </div>
 
-            {/* The Dedicated Lesson Card */}
-            <div className="rounded-3xl border border-[#D4AF37]/50 bg-[#0C1220] shadow-[0_0_35px_rgba(212,175,55,0.15)] overflow-hidden">
+            <div className="rounded-3xl border border-slate-800 bg-[#0C1220] overflow-hidden">
               <div className="p-6 sm:p-8 space-y-7">
-                {/* Header */}
                 <div className="space-y-3 pb-6 border-b border-slate-800">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="w-7 h-7 rounded-xl font-mono text-xs font-black bg-[#D4AF37] text-black flex items-center justify-center">
-                      {selectedLesson.number}
-                    </span>
-                    <span className="text-xs font-mono px-2.5 py-1 rounded-xl bg-slate-900 text-cyan-300 border border-slate-700 font-semibold">
-                      {selectedLesson.levelTag}
-                    </span>
-                    <span className="text-xs font-mono text-slate-400 flex items-center gap-1">
+                  <div className="flex items-center gap-2 text-xs font-mono text-slate-400 flex-wrap tabular-nums">
+                    <span className="text-[#D4AF37] font-bold">Lesson {selectedLesson.number}</span>
+                    <span aria-hidden="true">·</span>
+                    <span className="text-cyan-300 font-semibold">{selectedLesson.levelTag}</span>
+                    <span aria-hidden="true">·</span>
+                    <span className="inline-flex items-center gap-1">
                       <Clock className="w-3.5 h-3.5 text-[#D4AF37]" />
                       <span>{selectedLesson.duration}</span>
                     </span>
@@ -428,24 +415,16 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
                     }`}
                   >
                     <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="w-7 h-7 rounded-xl font-mono text-xs font-black bg-[#D4AF37] text-black flex items-center justify-center shrink-0">
-                          {lesson.number}
+                      <div className="flex items-center justify-between gap-2 text-xs font-mono text-slate-400 tabular-nums">
+                        <span className="text-[#D4AF37] font-bold">
+                          Lesson {lesson.number}{isIct ? ' · ICT' : ''}
                         </span>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {isIct && (
-                            <span className="text-[10px] font-mono font-black px-1.5 py-0.5 rounded bg-[#D4AF37] text-black">
-                              ICT
-                            </span>
-                          )}
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-cyan-300 border border-slate-700">
-                            {lesson.levelTag}
-                          </span>
-                          <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
-                            <Clock className="w-3 h-3 text-[#D4AF37]" />
-                            <span>{lesson.duration}</span>
-                          </span>
-                        </div>
+                        <span className="inline-flex items-center gap-1">
+                          <span className="text-cyan-300 font-semibold">{lesson.levelTag}</span>
+                          <span aria-hidden="true">·</span>
+                          <Clock className="w-3 h-3 text-[#D4AF37]" />
+                          <span>{lesson.duration}</span>
+                        </span>
                       </div>
 
                       <h4 className="text-sm sm:text-base font-bold text-white line-clamp-1">
@@ -462,8 +441,9 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
                       onClick={(e) => e.stopPropagation()}
                     >
                       <button
+                        type="button"
                         onClick={() => toggleCompleteLesson(lesson.id)}
-                        className={`p-1.5 rounded-lg text-[11px] font-mono font-bold flex items-center gap-1 transition ${
+                        className={`p-1.5 rounded-lg text-[11px] font-mono font-bold flex items-center gap-1 transition whitespace-nowrap ${
                           isCompleted
                             ? 'text-[#00C261] hover:text-[#00C261]/80'
                             : 'text-slate-500 hover:text-slate-300'
@@ -474,14 +454,15 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
                       </button>
 
                       <button
+                        type="button"
                         onClick={() => {
                           setSelectedLessonId(lesson.id);
                           window.scrollTo({ top: 0, behavior: 'smooth' });
                         }}
-                        className="px-3.5 py-1.5 rounded-xl bg-[#D4AF37]/15 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black border border-[#D4AF37]/40 text-xs font-mono font-bold flex items-center gap-1.5 transition group"
+                        className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black border border-slate-700 text-xs font-mono font-bold flex items-center gap-1.5 transition whitespace-nowrap"
                       >
                         <span>Open Lesson {lesson.number}</span>
-                        <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                        <ChevronRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
@@ -492,15 +473,11 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
         ) : (
           /* =========================================================================
              CASE C: UNCONGESTED PILLAR WORKSTATION
-             Shows:
-             1. Interactive Workstation for this Pillar (Scanner, Macro Safety, Risk, etc.)
-             2. Single Clickable Masterclass Curriculum Card (01–10 housed inside)
              ========================================================================= */
           <div className="space-y-8">
-            {/* Specific Interactive Tool Injection per Pillar (Lazy-loaded for high speed) */}
             <Suspense
               fallback={
-                <div className="p-8 rounded-3xl bg-[#0C1220] border border-[#D4AF37]/30 text-center text-xs font-mono text-[#D4AF37]">
+                <div className="p-8 rounded-2xl bg-[#0C1220] border border-slate-800 text-center text-xs font-mono text-[#D4AF37]">
                   Initializing Live Interactive Market Workstation...
                 </div>
               }
@@ -516,7 +493,7 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
               {pillar.id === '/macro-safety' && <MacroTradeSafetyTools onNavigatePillar={onNavigatePillar} />}
             </Suspense>
 
-            {/* Single Clean Clickable Masterclass Curriculum Card (Eliminates 01-10 overcrowding) */}
+            {/* Single Clean Clickable Masterclass Curriculum Card */}
             <div
               onClick={() => {
                 setShowCurriculumChamber(true);
@@ -531,14 +508,15 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }
               }}
-              className="rounded-3xl p-6 sm:p-8 bg-gradient-to-br from-[#0B1222] to-[#070B14] border-2 border-[#D4AF37]/50 hover:border-[#D4AF37] shadow-2xl transition cursor-pointer flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 group"
+              className="rounded-3xl p-6 sm:p-8 bg-[#0B1222] border border-[#D4AF37]/50 hover:border-[#D4AF37] transition cursor-pointer flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 group"
             >
-              <div className="space-y-2.5 max-w-2xl">
-                <div className="flex items-center gap-2.5 flex-wrap font-mono text-xs">
-                  <span className="px-3 py-1 rounded-xl bg-[#D4AF37] text-black font-black flex items-center gap-1.5">
-                    <BookOpen className="w-3.5 h-3.5" />
-                    <span>PILLAR {pillar.number} CURRICULUM ({pillar.lessons.length} LESSONS)</span>
+              <div className="space-y-2 max-w-2xl">
+                <div className="flex items-center gap-2 text-xs font-mono text-slate-400 flex-wrap tabular-nums">
+                  <BookOpen className="w-4 h-4 text-[#D4AF37]" />
+                  <span className="text-[#D4AF37] font-bold">
+                    Pillar {pillar.number} Curriculum ({pillar.lessons.length} Lessons)
                   </span>
+                  <span aria-hidden="true">·</span>
                   <span className="text-[#00C261] font-bold">
                     {completedLessons.length} / {pillar.lessons.length} Completed ({progressPercent}%)
                   </span>
@@ -549,7 +527,7 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
                 </h3>
 
                 <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-                  All {pillar.lessons.length} structured institutional lessons, visual candlestick schematics, real-world case studies, and MT4/MT5 checklists are organized inside this dedicated card to keep your workspace clean.
+                  Study all {pillar.lessons.length} institutional lessons, candlestick schematics, and MT4/MT5 checklists inside this isolated chamber.
                 </p>
               </div>
 
@@ -563,10 +541,10 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
                     setShowCurriculumChamber(true);
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
-                  className="px-5 py-3 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition hover:scale-[1.02] active:scale-95 whitespace-nowrap"
+                  className="px-5 py-3 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition whitespace-nowrap"
                 >
                   <Sparkles className="w-4 h-4" />
-                  <span>Open Lessons 01–{pillar.lessons.length} Chamber →</span>
+                  <span>Open Lessons 01–{pillar.lessons.length}</span>
                 </button>
 
                 {nextUnfinishedLesson && (
@@ -576,9 +554,9 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
                       setSelectedLessonId(nextUnfinishedLesson.id);
                       window.scrollTo({ top: 0, behavior: 'smooth' });
                     }}
-                    className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/40 font-mono font-bold text-xs flex items-center justify-center gap-1.5 transition whitespace-nowrap"
+                    className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-slate-700 font-mono font-bold text-xs flex items-center justify-center gap-1.5 transition whitespace-nowrap"
                   >
-                    <span>Start Lesson {nextUnfinishedLesson.number}: {nextUnfinishedLesson.title.slice(0, 22)}...</span>
+                    <span>Lesson {nextUnfinishedLesson.number}: {nextUnfinishedLesson.title.slice(0, 22)}...</span>
                     <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 )}
@@ -586,26 +564,6 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
             </div>
           </div>
         )}
-
-        {/* Standalone Return to Home Portal (Enforcing Pillar Independence) */}
-        <div className="pt-8 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="space-y-1 text-center sm:text-left">
-            <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#D4AF37] block">
-              Independent Masterclass Chamber
-            </span>
-            <p className="text-xs text-slate-400">
-              Pillars are isolated curriculum environments. Return to the Home Portal to enter another academy.
-            </p>
-          </div>
-
-          <button
-            onClick={onBackToLanding}
-            className="w-full sm:w-auto px-6 py-3.5 rounded-2xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl hover:scale-105 active:scale-95 transition"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Return to Home Portal (All {PILLARS_MASTERCLASS_DATA.length} Pillars)</span>
-          </button>
-        </div>
       </div>
     </div>
   );

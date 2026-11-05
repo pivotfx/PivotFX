@@ -1,11 +1,11 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 @layer base {
   :root {
     --gold: #D4AF37;
     --gold-light: #F3E5AB;
     --gold-dark: #997A15;
-    --gold-glow: rgba(212, 175, 55, 0.25);
     --surface-bg: #080C14;
     --surface-card: #0F172A;
     --surface-card-hover: #141F38;
@@ -21,7 +21,13 @@
 
   code, pre, .font-mono {
     font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
   }
+}
+
+/* Tabular figures for live prices, SL/TP, countdown timers & analytics */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Custom scrollbars */
@@ -40,54 +46,42 @@
   background: #D4AF37;
 }
 
-/* Glass card styling with Gold Accents */
+/* Clean institutional surface elevation */
 .glass-panel {
-  background: rgba(15, 23, 42, 0.7);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #0B1120;
+  border: 1px solid #1E293B;
 }
 
 .glass-panel-gold {
-  background: rgba(15, 23, 42, 0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(212, 175, 55, 0.3);
-  box-shadow: 0 0 30px rgba(212, 175, 55, 0.1);
+  background: #0B1120;
+  border: 1px solid rgba(212, 175, 55, 0.35);
 }
 
 .glass-card-hover {
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: border-color 180ms ease, background-color 180ms ease, transform 180ms ease;
 }
 .glass-card-hover:hover {
-  border-color: rgba(212, 175, 55, 0.6);
-  background: rgba(20, 31, 56, 0.85);
-  box-shadow: 0 0 25px rgba(212, 175, 55, 0.18);
+  border-color: rgba(212, 175, 55, 0.65);
+  background: #111A2E;
   transform: translateY(-2px);
 }
 
-/* Gold Gradient text & borders */
+/* Gold Gradient text */
 .text-gold-gradient {
-  background: linear-gradient(135deg, #FFF1B0 0%, #D4AF37 50%, #AA820A 100%);
+  background: linear-gradient(135deg, #FFF1B0 0%, #D4AF37 55%, #B89224 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
-.border-gold-gradient {
-  border-image: linear-gradient(to bottom right, #D4AF37, rgba(212, 175, 55, 0.2)) 1;
-}
-
-/* Gold Button CTA */
+/* Primary Gold Action Button */
 .btn-gold {
   background: linear-gradient(135deg, #F3E5AB 0%, #D4AF37 60%, #B89224 100%);
   color: #080C14;
   font-weight: 800;
-  box-shadow: 0 4px 20px rgba(212, 175, 55, 0.3);
-  transition: all 0.2s ease;
+  transition: filter 160ms ease, transform 160ms ease;
 }
 .btn-gold:hover {
-  background: linear-gradient(135deg, #FFF6D0 0%, #E6C24F 60%, #C9A331 100%);
-  box-shadow: 0 6px 28px rgba(212, 175, 55, 0.45);
+  filter: brightness(1.06);
   transform: translateY(-1px);
 }
 .btn-gold:active {

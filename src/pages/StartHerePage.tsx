@@ -125,10 +125,9 @@ export const StartHerePage: React.FC<StartHerePageProps> = ({ onNavigate, onAwar
         <div className="absolute -bottom-24 -left-24 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative z-10 max-w-4xl mx-auto space-y-6">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#00C261]/15 border border-[#00C261]/30 text-[#00C261] text-xs font-bold font-mono">
+          <div className="flex items-center justify-center sm:justify-start gap-2 text-[#00C261] text-xs font-bold font-mono">
             <Sparkles className="w-3.5 h-3.5" />
             <span>KENYA FOREX EDUCATION PROTOCOL</span>
-            <span className="w-1.5 h-1.5 rounded-full bg-[#00C261] animate-ping" />
           </div>
 
           <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-white tracking-tight leading-tight">
