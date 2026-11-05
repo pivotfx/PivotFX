@@ -104,8 +104,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <header className="sticky top-0 z-40 w-full bg-[#080C14]/95 backdrop-blur-md border-b border-slate-800">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        {/* ROW 1 - 36px */}
-        <div className="flex items-center justify-between gap-4 h-9">
+        {/* ROW 1 - BACK TO ORIGINAL 64px */}
+        <div className="flex items-center justify-between gap-4 h-16">
           <button
             onClick={() => onSelectTab('landing')}
             className="flex items-center text-left focus:outline-none shrink-0"
@@ -120,7 +120,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   key={item.id}
                   onClick={() => onSelectTab(item.id)}
-                  className={`relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
+                  className={`relative flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
                     isActive
                       ? 'text-white bg-[#111A2E] border border-[#D4AF37]/50'
                       : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'
@@ -180,8 +180,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* ROW 2 - 28px - P7 P8 P9 ONLY */}
-        <div className="hidden xl:flex items-center justify-center gap-1 h-7">
+        {/* ROW 2 - SLIM 32px */}
+        <div className="hidden xl:flex items-center justify-center gap-1 h-8">
           {row2Items.map((item) => {
             const isActive = activeTab === item.id;
             return (
