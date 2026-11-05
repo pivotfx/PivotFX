@@ -80,7 +80,8 @@ export const Navbar: React.FC<NavbarProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  const navItems: { id: PageTab; label: string; icon: React.ReactNode }[] = [
+  // ROW 1 - as it was, stays on top row
+  const row1Items: { id: PageTab; label: string; icon: React.ReactNode }[] = [
     { id: 'landing', label: 'Home', icon: <Home className="w-3.5 h-3.5" /> },
     { id: '/fx-academy', label: 'P1 Academy', icon: <GraduationCap className="w-3.5 h-3.5" /> },
     { id: '/chart-mastery', label: 'P2 Charts', icon: <CandlestickChart className="w-3.5 h-3.5" /> },
@@ -88,10 +89,39 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: '/ai-scanner', label: 'P4 Scanner', icon: <Scan className="w-3.5 h-3.5" /> },
     { id: '/risk-management', label: 'P5 Risk', icon: <ShieldCheck className="w-3.5 h-3.5" /> },
     { id: '/psychology', label: 'P6 Mindset', icon: <Brain className="w-3.5 h-3.5" /> },
+  ];
+
+  // ROW 2 - the invisible ones, now visible underneath
+  const row2Items: { id: PageTab; label: string; icon: React.ReactNode }[] = [
     { id: '/live-pulse', label: 'P7 Pulse', icon: <Activity className="w-3.5 h-3.5" /> },
     { id: '/growth-lab', label: 'P8 Funded', icon: <Award className="w-3.5 h-3.5" /> },
     { id: '/macro-safety', label: 'P9 Safety', icon: <Globe className="w-3.5 h-3.5" /> },
   ];
+
+  const allItems = [...row1Items, ...row2Items];
+
+  const renderPill = (item: { id: PageTab; label: string; icon: React.ReactNode }) => {
+    const isActive = activeTab === item.id;
+    return (
+      <button
+        key={item.id}
+        onClick={() => onSelectTab(item.id)}
+        className={`relative flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
+          isActive
+            ? 'text-white bg-[#111A2E] border border-[#D4AF37]/50'
+            : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'
+        }`}
+      >
+        <span className={isActive ? 'text-[#D4AF37]' : 'text-slate-400'}>
+          {item.icon}
+        </span>
+        <span>{item.label}</span>
+        {isActive && (
+          <span className="absolute bottom-0 left-2.5 right-2.5 h-0.5 bg-[#D4AF37] rounded-full" />
+        )}
+      </button>
+    );
+  };
 
   const isLocked = killSwitchUntil && killSwitchUntil > Date.now();
   const minutesLeft = isLocked ? Math.ceil((killSwitchUntil - Date.now()) / 60000) : 0;
@@ -99,8 +129,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <header className="sticky top-0 z-40 w-full bg-[#080C14]/95 backdrop-blur-md border-b border-slate-800">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        {/* ROW 1 - EXACTLY AS IT WAS: Logo + P1-P6 + Clock */}
         <div className="flex items-center justify-between gap-4 h-16">
-          {/* Left Zone: Brand Wordmark */}
           <button
             onClick={() => onSelectTab('landing')}
             className="flex items-center text-left focus:outline-none shrink-0"
@@ -108,33 +138,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Logo size="md" showBadge={false} />
           </button>
 
-          {/* Center Zone: Single-Line Navigation */}
-          <nav className="hidden 2xl:flex items-center gap-1 min-w-0">
-            {navItems.map((item) => {
-              const isActive = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onSelectTab(item.id)}
-                  className={`relative flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
-                    isActive
-                      ? 'text-white bg-[#111A2E] border border-[#D4AF37]/50'
-                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'
-                  }`}
-                >
-                  <span className={isActive ? 'text-[#D4AF37]' : 'text-slate-400'}>
-                    {item.icon}
-                  </span>
-                  <span>{item.label}</span>
-                  {isActive && (
-                    <span className="absolute bottom-0 left-2.5 right-2.5 h-0.5 bg-[#D4AF37] rounded-full" />
-                  )}
-                </button>
-              );
-            })}
+          <nav className="hidden xl:flex items-center gap-1 min-w-0">
+            {row1Items.map(renderPill)}
           </nav>
 
-          {/* Right Zone: Live EAT Clock + Session Status + Brand Kit */}
           <div className="hidden sm:flex items-center gap-2.5 shrink-0">
             {isLocked && (
               <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-red-950/90 border border-red-500/40 text-red-300 text-xs font-mono whitespace-nowrap">
@@ -166,8 +173,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </div>
 
-          {/* Mobile Drawer Trigger */}
-          <div className="flex 2xl:hidden items-center gap-2 shrink-0">
+          <div className="flex xl:hidden items-center gap-2 shrink-0">
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               aria-label="Toggle Navigation Menu"
@@ -177,11 +183,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </div>
         </div>
+
+        {/* ROW 2 - ONLY P7, P8, P9 - centered underneath */}
+        <div className="hidden xl:flex items-center justify-center gap-1 pb-2">
+          {row2Items.map(renderPill)}
+        </div>
       </div>
 
       {/* Mobile Drawer Navigation */}
       {mobileMenuOpen && (
-        <div className="2xl:hidden bg-[#0A0E18] border-b border-slate-800 px-4 pt-3 pb-6 space-y-3">
+        <div className="xl:hidden bg-[#0A0E18] border-b border-slate-800 px-4 pt-3 pb-6 space-y-3">
           <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-mono tabular-nums">
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4 text-[#D4AF37]" />
@@ -193,7 +204,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            {navItems.map((item) => {
+            {allItems.map((item) => {
               const isActive = activeTab === item.id;
               return (
                 <button
