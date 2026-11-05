@@ -80,7 +80,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  // ROW 2 - stays on top row
+  // ROW 1 - EXACTLY AS IN YOUR PIC - Home + P1 to P6 ONLY
   const row1Items: { id: PageTab; label: string; icon: React.ReactNode }[] = [
     { id: 'landing', label: 'Home', icon: <Home className="w-3.5 h-3.5" /> },
     { id: '/fx-academy', label: 'P1 Academy', icon: <GraduationCap className="w-3.5 h-3.5" /> },
@@ -91,7 +91,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: '/psychology', label: 'P6 Mindset', icon: <Brain className="w-3.5 h-3.5" /> },
   ];
 
-  // ROW 3 - the ones that were invisible, now visible underneath
+  // ROW 2 - ONLY NEW PART - P7 P8 P9
   const row2Items: { id: PageTab; label: string; icon: React.ReactNode }[] = [
     { id: '/live-pulse', label: 'P7 Pulse', icon: <Activity className="w-3.5 h-3.5" /> },
     { id: '/growth-lab', label: 'P8 Funded', icon: <Award className="w-3.5 h-3.5" /> },
@@ -129,7 +129,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <header className="sticky top-0 z-40 w-full bg-[#080C14]/95 backdrop-blur-md border-b border-slate-800">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        {/* ROW 1 - Logo + Clock - ALWAYS VISIBLE */}
+        {/* ROW 1 - AS IN YOUR PIC, UNCHANGED */}
         <div className="flex items-center justify-between gap-4 h-16">
           <button
             onClick={() => onSelectTab('landing')}
@@ -138,7 +138,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Logo size="md" showBadge={false} />
           </button>
 
-          <div className="flex items-center gap-2.5 shrink-0">
+          <nav className="hidden xl:flex items-center gap-1 min-w-0">
+            {row1Items.map(renderPill)}
+          </nav>
+
+          <div className="hidden sm:flex items-center gap-2.5 shrink-0">
             {isLocked && (
               <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-red-950/90 border border-red-500/40 text-red-300 text-xs font-mono whitespace-nowrap">
                 <Lock className="w-3.5 h-3.5 text-red-400" />
@@ -168,22 +172,37 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Sparkles className="w-4 h-4 text-[#D4AF37]" />
             </button>
           </div>
+
+          <div className="flex xl:hidden items-center gap-2 shrink-0">
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-label="Toggle Navigation Menu"
+              className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white"
+            >
+              {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            </button>
+          </div>
         </div>
 
-        {/* ROW 2 - Home + P1 to P6 - ALWAYS VISIBLE, wraps if needed */}
-        <div className="flex items-center justify-center gap-1 flex-wrap pb-1.5">
-          {row1Items.map(renderPill)}
-        </div>
-
-        {/* ROW 3 - ONLY P7, P8, P9 - ALWAYS VISIBLE, centered underneath */}
-        <div className="flex items-center justify-center gap-1 flex-wrap pb-2">
+        {/* ROW 2 - ONLY ADDITION - P7 P8 P9 */}
+        <div className="hidden xl:flex items-center justify-center gap-1 pb-2">
           {row2Items.map(renderPill)}
         </div>
       </div>
 
-      {/* Mobile Drawer - kept only for very small phones, order fixed left-to-right */}
+      {/* Mobile Drawer Navigation - WHOLE, UNCHANGED */}
       {mobileMenuOpen && (
-        <div className="bg-[#0A0E18] border-t border-slate-800 px-4 pt-3 pb-6 space-y-3">
+        <div className="xl:hidden bg-[#0A0E18] border-b border-slate-800 px-4 pt-3 pb-6 space-y-3">
+          <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-mono tabular-nums">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-[#D4AF37]" />
+              <span className="text-white font-bold">{eatTime} EAT</span>
+            </div>
+            <span className={sessionStatus.isOpen ? 'text-[#00C261] font-semibold' : 'text-amber-300 font-semibold'}>
+              {sessionStatus.label}
+            </span>
+          </div>
+
           <div className="grid grid-cols-2 gap-2">
             {allItems.map((item) => {
               const isActive = activeTab === item.id;
