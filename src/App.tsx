@@ -3,14 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { PageTab } from './types';
 import { PILLARS_MASTERCLASS_DATA } from './data/pillarsMasterclassData';
 import { Navbar } from './components/common/Navbar';
 import { Footer } from './components/common/Footer';
-import { DownloadLogoModal } from './components/common/DownloadLogoModal';
 import { LandingPage } from './pages/LandingPage';
-import { PillarMasterclassPage } from './pages/PillarMasterclassPage';
+
+const PillarMasterclassPage = lazy(() =>
+  import('./pages/PillarMasterclassPage').then((m) => ({ default: m.PillarMasterclassPage }))
+);
+const DownloadLogoModal = lazy(() =>
+  import('./components/common/DownloadLogoModal').then((m) => ({ default: m.DownloadLogoModal }))
+);
 
 export default function App() {
   // Initialize route from URL hash, defaulting to 'landing'
@@ -101,15 +106,29 @@ export default function App() {
         {activeTab === 'landing' || !activePillar ? (
           <LandingPage onSelectPillar={handleSelectTab} />
         ) : (
-          <PillarMasterclassPage
-            pillar={activePillar}
-            onBackToLanding={() => handleSelectTab('landing')}
-            onNavigatePillar={handleSelectTab}
-          />
+          <Suspense
+            fallback={
+              <div className="min-h-[55vh] flex items-center justify-center">
+                <div className="px-6 py-4 rounded-2xl bg-[#0C1220] border border-[#D4AF37]/40 text-xs font-mono text-[#D4AF37] animate-pulse">
+                  Loading Pillar Workstation...
+                </div>
+              </div>
+            }
+          >
+            <PillarMasterclassPage
+              pillar={activePillar}
+              onBackToLanding={() => handleSelectTab('landing')}
+              onNavigatePillar={handleSelectTab}
+            />
+          </Suspense>
         )}
       </main>
       <Footer onSelectTab={handleSelectTab} onOpenLogoModal={() => setShowLogoModal(true)} />
-      <DownloadLogoModal isOpen={showLogoModal} onClose={() => setShowLogoModal(false)} />
+      {showLogoModal && (
+        <Suspense fallback={null}>
+          <DownloadLogoModal isOpen={showLogoModal} onClose={() => setShowLogoModal(false)} />
+        </Suspense>
+      )}
     </div>
   );
 }

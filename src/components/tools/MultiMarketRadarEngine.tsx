@@ -59,6 +59,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
   const [filterBias, setFilterBias] = useState<'ALL' | 'PCT_MOVERS' | 'BUY' | 'SELL' | 'FLIPPED'>('ALL');
   // Independent card selection: null = uncongested 8-card grid; CurrencyPair = isolated single-market Chart & Analysis screen
   const [selectedPair, setSelectedPair] = useState<CurrencyPair | null>(null);
+  const [inspectedSideByPair, setInspectedSideByPair] = useState<Partial<Record<CurrencyPair, 'AUTO' | 'BUY' | 'SELL'>>>({});
   const [scanBanner, setScanBanner] = useState<string | null>(null);
   const [copiedCardPair, setCopiedCardPair] = useState<string | null>(null);
   const [copiedEa, setCopiedEa] = useState(false);
@@ -111,10 +112,13 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
     if (leader) {
       const dirWord = leader.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
       const pctStr = leader.change24hPct >= 0 ? `+${leader.change24hPct}%` : `${leader.change24hPct}%`;
+      const netUsd = leader.netProfitUsd ?? Number((leader.projectedPips * 0.1).toFixed(2));
+      const netKes = leader.netProfitKes ?? Math.round(netUsd * 130);
+      const verdictPrefix = leader.orderVerdictLabel || `FAVOURABLE ${dirWord} ORDER`;
       setScanBanner(
-        `${modeLabel} COMPLETE (${updatedState.syncedAt}) · #1 Leader: ${leader.pair} [${leader.recommendedTf}] @ ${leader.price} (${pctStr}) · ${dirWord} BY MARKET · SL ${leader.suggestedSL} · TP ${leader.suggestedTP2}`
+        `${modeLabel} (${updatedState.syncedAt}) · ${verdictPrefix}: ${leader.pair} [${leader.recommendedTf}] @ ${leader.price} (${pctStr}) · Trend: ${leader.trendDirection} · Est. Net Profit: +$${netUsd.toFixed(2)} (+${netKes} KES) · SL ${leader.suggestedSL} · TP ${leader.suggestedTP2}`
       );
-      setTimeout(() => setScanBanner(null), 5000);
+      setTimeout(() => setScanBanner(null), 6500);
     }
 
     playRadarBeep(mode === 'deep_ai' ? 1220 : mode === 'rescan' ? 1120 : 1020);
@@ -154,7 +158,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
           <div className="flex items-center gap-2 text-xs font-mono font-bold flex-wrap tabular-nums">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#00C261]/15 text-[#00C261] border border-[#00C261]/40">
               <Activity className="w-3.5 h-3.5 animate-pulse" />
-              <span>24/7 AUTO-SYNC LIVE (1s)</span>
+              <span>24/7 AUTO-SYNC LIVE (0.5s)</span>
             </span>
             <span className="text-[#D4AF37]">
               {feedConnected ? 'Interbank & Crypto Stream Active' : 'Real-Time Calibrated Feed'}
@@ -164,10 +168,10 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
           </div>
 
           <h3 className="text-xl sm:text-2xl font-black text-white">
-            AI Market Scanner · Independent Result Cards & Live Candles
+            AI Market Scanner · Trend, Open Window &amp; Independent Cards
           </h3>
           <p className="text-xs text-slate-300 font-mono max-w-3xl">
-            Updates automatically every second 24/7 and re-ranks <strong>#1, #2, #3</strong> live as candle prices move or flip between <strong>BUY</strong> and <strong>SELL</strong>. Click any card below to inspect its live candlestick chart.
+            Updates automatically every 0.5s 24/7 with live trend projection, BUY/SELL verdict, and Market Open/Opens-In countdown. Click any card to inspect chart candles or flip between BUY &amp; SELL sides.
           </p>
         </div>
 
@@ -231,6 +235,11 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
       {focusedMarket ? (
         (() => {
           const activeTf = customTfs[focusedMarket.pair] || focusedMarket.recommendedTf;
+          const aiRecommendedSide: 'BUY' | 'SELL' = focusedMarket.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
+          const selectedSideMode = inspectedSideByPair[focusedMarket.pair] || 'AUTO';
+          const effectiveBias: 'BUY' | 'SELL' =
+            selectedSideMode === 'AUTO' ? aiRecommendedSide : selectedSideMode;
+
           const computed = computeRealChartTradeParams({
             targetPair: focusedMarket.pair,
             targetTf: activeTf,
@@ -242,7 +251,25 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
             rsi: focusedMarket.rsi,
             atrPips: focusedMarket.atrPips,
             macro: macroContext,
-            biasOverride: focusedMarket.bias === 'STRONG_SELL' ? 'SELL' : 'BUY'
+            biasOverride: effectiveBias,
+            previousDirection: aiRecommendedSide,
+            previousTrendDirection: focusedMarket.trendDirection,
+            h1TrendDirection: focusedMarket.h1TrendDirection
+          });
+          const oppositeSide: 'BUY' | 'SELL' = computed.direction === 'BUY' ? 'SELL' : 'BUY';
+          const oppositeComputed = computeRealChartTradeParams({
+            targetPair: focusedMarket.pair,
+            targetTf: activeTf,
+            targetBroker: selectedBroker,
+            price: focusedMarket.price,
+            keyLevel: focusedMarket.keyLevel,
+            ema20: focusedMarket.ema20,
+            ema50: focusedMarket.ema50,
+            rsi: focusedMarket.rsi,
+            atrPips: focusedMarket.atrPips,
+            macro: macroContext,
+            biasOverride: oppositeSide,
+            h1TrendDirection: focusedMarket.h1TrendDirection
           });
           const kenyaTiming = evaluatePairKenyaTiming(focusedMarket.pair);
           const isBuy = computed.direction === 'BUY';
@@ -252,15 +279,16 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
           const eaMqlCode = `// --- PIVOTFX LIVE AUTO-SYNC EA CONFIG ---
 // Broker: ${selectedBroker.toUpperCase()} | Synced: ${lastScannedTime} | Rank #${rankNum}
 // Symbol: ${computed.brokerSymbol} (${focusedMarket.pair} · ${activeTf})
-// Direction: ${computed.orderType} | 24h Move: ${pctPositive ? '+' : ''}${focusedMarket.change24hPct}%
+// Direction: ${computed.orderType} | Trend: ${computed.trendProjectionText} | 24h Move: ${pctPositive ? '+' : ''}${focusedMarket.change24hPct}%
 // Live Indicators: 20 EMA = ${focusedMarket.ema20} | 50 EMA = ${focusedMarket.ema50} | RSI = ${focusedMarket.rsi}
 // Gilgil Shield: 0.01 Micro Lot ($2.00 / 260 KES Max Risk Cap)
 
 input double   LotSize             = 0.01;
 input double   EntryPrice          = ${computed.entryPrice};
 input double   StopLoss            = ${computed.stopLoss}; // -${computed.slPips} pips ($${computed.actualRiskUsd.toFixed(2)} max risk)
-input double   TakeProfit_1        = ${computed.tp1}; // Close 50% & Move SL to BE
-input double   TakeProfit_2        = ${computed.tp2}; // Final Target (+${computed.tpPips} pips)
+input double   TakeProfit_1        = ${computed.tp1}; // 1H-4H: Close 50% & Move SL to BE
+input double   TakeProfit_2        = ${computed.tp2}; // 4H-12H Session Target (+${computed.tpPips} pips)
+input double   TakeProfit_3_48H    = ${computed.tp3}; // 12H-48H Extended Swing (+${computed.tp3Pips} pips / +$${computed.netProfit48hUsd.toFixed(2)})
 input double   MaxRiskUsdPerTrade  = 2.00;`;
 
           return (
@@ -337,23 +365,132 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                     </div>
                   </div>
 
-                  {/* Timeframe Selector Bar */}
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[11px] text-slate-400 mr-1">Timeframe:</span>
-                    {TIMEFRAME_CHOICES.map((tf) => (
-                      <button
-                        key={tf}
-                        type="button"
-                        onClick={() => globalLiveStream.setPairTimeframe(focusedMarket.pair, tf)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                          activeTf === tf
-                            ? 'bg-[#D4AF37] text-black font-black'
-                            : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                  {/* Timeframe Selector Bar + Inspect Other Side (BUY vs SELL) */}
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
+                      {(['AUTO', 'BUY', 'SELL'] as const).map((sideOpt) => (
+                        <button
+                          key={sideOpt}
+                          type="button"
+                          onClick={() =>
+                            setInspectedSideByPair((prev) => ({
+                              ...prev,
+                              [focusedMarket.pair]: sideOpt
+                            }))
+                          }
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-black transition ${
+                            selectedSideMode === sideOpt
+                              ? sideOpt === 'BUY'
+                                ? 'bg-[#00C261] text-black'
+                                : sideOpt === 'SELL'
+                                ? 'bg-red-500 text-white'
+                                : 'bg-[#D4AF37] text-black'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {sideOpt === 'AUTO' ? `AI (${aiRecommendedSide})` : `Inspect ${sideOpt}`}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {TIMEFRAME_CHOICES.map((tf) => (
+                        <button
+                          key={tf}
+                          type="button"
+                          onClick={() => globalLiveStream.setPairTimeframe(focusedMarket.pair, tf)}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition ${
+                            activeTf === tf
+                              ? 'bg-[#D4AF37] text-black font-black'
+                              : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                          }`}
+                        >
+                          {tf}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* COLOR-CODED MARKET OPEN / COUNTDOWN & TREND PROJECTION BANNER */}
+                <div
+                  className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs ${
+                    kenyaTiming.windowStatusCode === 'OPEN'
+                      ? 'bg-emerald-950/45 border-[#00C261]/70 text-emerald-100'
+                      : kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                      ? 'bg-amber-950/45 border-amber-400/70 text-amber-100'
+                      : 'bg-red-950/55 border-red-500/80 text-red-100'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Clock className="w-4 h-4 shrink-0" />
+                    <strong className="text-white">{kenyaTiming.bannerHeadline}</strong>
+                    <span className="text-slate-300">· Timeframe: {activeTf}</span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap font-black">
+                    <span
+                      className={
+                        computed.trendDirection === 'UPTREND'
+                          ? 'text-[#00C261]'
+                          : computed.trendDirection === 'DOWNTREND'
+                          ? 'text-red-300'
+                          : 'text-amber-300'
+                      }
+                    >
+                      {computed.trendProjectionText}
+                    </span>
+                  </div>
+                </div>
+
+                {/* WHAT TO ORDER & NET TRAJECTORY PROFIT EXPECTANCY CARD */}
+                <div
+                  className={`p-4 rounded-2xl border flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs ${
+                    computed.direction === 'BUY'
+                      ? 'bg-emerald-950/25 border-[#00C261]/50'
+                      : 'bg-red-950/25 border-red-500/50'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className={`px-2.5 py-0.5 rounded-lg font-black text-[11px] ${
+                          computed.direction === 'BUY'
+                            ? 'bg-[#00C261] text-black'
+                            : 'bg-red-500 text-white'
                         }`}
                       >
-                        {tf}
-                      </button>
-                    ))}
+                        {selectedSideMode === 'AUTO'
+                          ? `AI PRIMARY ORDER: PLACE ${computed.direction} (${computed.orderType})`
+                          : `CHOSEN SIDE ANALYSIS (${selectedSideMode}): ${computed.orderType}`}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700 text-[#D4AF37] font-bold text-[10px]">
+                        H1 MACRO LOCK: {computed.h1TrendDirection} · Anti-Whipsaw Active
+                      </span>
+                    </div>
+                    <p className="text-slate-200 font-bold leading-snug">
+                      {computed.profitOutlookText}
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 shrink-0 text-center">
+                    <div className="px-3 py-2 rounded-xl bg-slate-950/90 border border-emerald-500/35">
+                      <span className="text-[10px] text-emerald-300 block">12H TP2 Net Profit</span>
+                      <strong className="text-sm text-[#00C261]">
+                        +${computed.netProfitUsd.toFixed(2)} (+{computed.netProfitKes} KES)
+                      </strong>
+                    </div>
+                    <div className="px-3 py-2 rounded-xl bg-slate-950/90 border border-cyan-500/35">
+                      <span className="text-[10px] text-cyan-300 block">48H Extended TP3</span>
+                      <strong className="text-sm text-cyan-300">
+                        +${computed.netProfit48hUsd.toFixed(2)} (+{computed.netProfit48hKes} KES)
+                      </strong>
+                    </div>
+                    <div className="px-3 py-2 rounded-xl bg-slate-950/90 border border-[#D4AF37]/35">
+                      <span className="text-[10px] text-[#D4AF37] block">0.05 Lot 48H Target</span>
+                      <strong className="text-sm text-[#D4AF37]">
+                        +${(computed.netProfit48hUsd * 5).toFixed(2)}
+                      </strong>
+                    </div>
                   </div>
                 </div>
 
@@ -400,30 +537,107 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                     <strong className="text-base text-[#00C261]">{computed.tp2}</strong>
                     <span className="text-[10px] text-emerald-300 block">R:R {computed.riskReward}</span>
                   </div>
-                  <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800">
-                    <span className="text-[10px] text-amber-300 block">Kenya EAT Window</span>
+                  <div
+                    className={`p-3.5 rounded-2xl border ${
+                      kenyaTiming.windowStatusCode === 'OPEN'
+                        ? 'bg-emerald-950/30 border-[#00C261]/50'
+                        : kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                        ? 'bg-amber-950/30 border-amber-400/50'
+                        : 'bg-red-950/30 border-red-500/50'
+                    }`}
+                  >
+                    <span
+                      className={`text-[10px] block font-bold ${
+                        kenyaTiming.windowStatusCode === 'OPEN'
+                          ? 'text-[#00C261]'
+                          : kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                          ? 'text-amber-300'
+                          : 'text-red-300'
+                      }`}
+                    >
+                      {kenyaTiming.windowStatusCode === 'OPEN'
+                        ? 'MARKET OPEN · CLOSES IN'
+                        : kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                        ? 'TO OPEN · OPENS IN'
+                        : 'CLOSED · OPENS IN'}
+                    </span>
                     <strong className="text-sm text-white block">{kenyaTiming.countdownFormatted}</strong>
-                    <span className="text-[10px] text-cyan-300 block truncate">{kenyaTiming.currentWindowName}</span>
+                    <span className="text-[10px] text-slate-300 block truncate">{kenyaTiming.currentWindowName}</span>
                   </div>
                 </div>
 
-                {/* Institutional Trajectory + Technical Indicators + Kenya Entry Guidance */}
+                {/* Opposite Side Quick Comparison + Human Co-Pilot Verification */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 text-xs">
+                  <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-3">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">
+                        Opposite Side Reference ({oppositeSide} BY MARKET):
+                      </span>
+                      <span className="text-slate-200 font-bold">
+                        Entry {oppositeComputed.entryPrice} · SL{' '}
+                        <strong className="text-red-400">{oppositeComputed.stopLoss}</strong> · TP2{' '}
+                        <strong className="text-[#00C261]">{oppositeComputed.tp2}</strong>
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setInspectedSideByPair((prev) => ({
+                          ...prev,
+                          [focusedMarket.pair]: oppositeSide
+                        }))
+                      }
+                      className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/40 text-[11px] font-black shrink-0 transition"
+                    >
+                      Switch to {oppositeSide}
+                    </button>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-[#D4AF37]/30 flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-[#00C261] shrink-0 mt-0.5" />
+                    <span className="text-slate-200 leading-snug">{computed.humanCheckNote}</span>
+                  </div>
+                </div>
+
+                {/* Multi-Horizon Longer Institutional Trajectory + Technical Indicators */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 text-xs">
-                  <div className="lg:col-span-7 p-4 rounded-2xl bg-slate-900/70 border border-slate-800 space-y-2">
-                    <div className="flex items-center justify-between text-[#D4AF37] font-bold">
+                  <div className="lg:col-span-8 p-4 rounded-2xl bg-slate-900/75 border border-[#D4AF37]/40 space-y-3">
+                    <div className="flex items-center justify-between text-[#D4AF37] font-bold flex-wrap gap-1">
                       <span className="flex items-center gap-1.5">
                         <Target className="w-4 h-4" />
-                        <span>AI Institutional Trajectory & Liquidity Projection</span>
+                        <span>Longer 1H–48H {computed.direction} Trajectory &amp; Factor Projection</span>
                       </span>
-                      <span className="text-emerald-400">Spread ~{computed.brokerSpread}p</span>
+                      <span className="text-emerald-400">Spread ~{computed.brokerSpread}p · 48H TP3: {computed.tp3}</span>
                     </div>
                     <p className="text-slate-200 leading-relaxed">{computed.trajectory}</p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-1">
+                      {computed.trajectoryHorizons.map((step) => (
+                        <div
+                          key={step.horizon}
+                          className="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1"
+                        >
+                          <span className="text-[10px] text-[#D4AF37] font-black block">{step.horizon}</span>
+                          <div className="text-sm font-black text-white">
+                            @ {step.targetPrice}{' '}
+                            <span className="text-[#00C261] text-xs">
+                              ({isBuy ? `+${step.targetPips}p` : `-${step.targetPips}p`})
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-cyan-300 font-bold">
+                            Est. Net: +${step.netProfitUsd.toFixed(2)} (+{step.netProfitKes} KES)
+                          </div>
+                          <p className="text-[10px] text-slate-300 leading-snug">{step.driverSummary}</p>
+                        </div>
+                      ))}
+                    </div>
+
                     <p className="text-[11px] text-cyan-300">
                       {kenyaTiming.statusLabel}: {kenyaTiming.reasonText}
                     </p>
                   </div>
 
-                  <div className="lg:col-span-5 p-4 rounded-2xl bg-slate-900/70 border border-slate-800 grid grid-cols-2 gap-2.5">
+                  <div className="lg:col-span-4 p-4 rounded-2xl bg-slate-900/70 border border-slate-800 grid grid-cols-2 gap-2.5 content-start">
                     <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
                       <span className="text-[10px] text-slate-400 block">20 EMA (Cyan)</span>
                       <strong className="text-cyan-300">{focusedMarket.ema20}</strong>
@@ -437,8 +651,8 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                       <strong className="text-white">{focusedMarket.rsi}</strong>
                     </div>
                     <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
-                      <span className="text-[10px] text-slate-400 block">Liquidity Sweep Pool</span>
-                      <strong className="text-[#D4AF37]">{focusedMarket.keyLevel}</strong>
+                      <span className="text-[10px] text-slate-400 block">H1 Macro Structure</span>
+                      <strong className="text-[#D4AF37]">{computed.h1TrendDirection}</strong>
                     </div>
                   </div>
                 </div>
@@ -597,7 +811,10 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
               ema50: topLeader.ema50,
               rsi: topLeader.rsi,
               atrPips: topLeader.atrPips,
-              biasOverride: topLeader.bias === 'STRONG_SELL' ? 'SELL' : 'BUY'
+              biasOverride: topLeader.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+              previousDirection: topLeader.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+              previousTrendDirection: topLeader.trendDirection,
+              h1TrendDirection: topLeader.h1TrendDirection
             });
             const topPctPos = topLeader.change24hPct >= 0;
 
@@ -618,10 +835,10 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                   <div className="flex items-center gap-2 flex-wrap text-xs">
                     <span className="px-3 py-1 rounded-lg bg-[#D4AF37] text-black font-black flex items-center gap-1">
                       <Award className="w-3.5 h-3.5" />
-                      <span>#1 LEADING MARKET SETUP</span>
+                      <span>#1 LEADING SETUP · {topComputed.orderVerdictLabel}</span>
                     </span>
                     <span className="text-cyan-300 font-bold">
-                      Best TF: {customTfs[topLeader.pair] || topLeader.recommendedTf}
+                      TF: {customTfs[topLeader.pair] || topLeader.recommendedTf} · {topComputed.trendDirection}
                     </span>
                     <span className="text-[#00C261] font-black">{topComputed.confidence}% AI</span>
                   </div>
@@ -646,6 +863,9 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                     >
                       {topComputed.orderType}
                     </span>
+                    <span className="text-xs font-black text-emerald-300">
+                      Est. Profit: +${topComputed.netProfitUsd.toFixed(2)} (+{topComputed.netProfitKes} KES) · {topComputed.riskReward}
+                    </span>
                   </div>
                 </div>
 
@@ -656,11 +876,11 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                       <strong className="text-white">{topComputed.entryPrice}</strong>
                     </div>
                     <div>
-                      <span className="text-[10px] text-red-400 block">SL</span>
+                      <span className="text-[10px] text-red-400 block">SL (-${topComputed.actualRiskUsd.toFixed(2)})</span>
                       <strong className="text-red-300">{topComputed.stopLoss}</strong>
                     </div>
                     <div>
-                      <span className="text-[10px] text-emerald-400 block">TP2</span>
+                      <span className="text-[10px] text-emerald-400 block">TP2 (+${topComputed.netProfitUsd.toFixed(2)})</span>
                       <strong className="text-[#00C261]">{topComputed.tp2}</strong>
                     </div>
                   </div>
@@ -701,7 +921,7 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
             </div>
 
             <div className="text-xs font-mono text-slate-400">
-              Click any card below to inspect live candles, indicators & EA settings
+              Click any card below to inspect live candles, net profit trajectory &amp; BUY/SELL sides
             </div>
           </div>
 
@@ -720,7 +940,10 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                 rsi: m.rsi,
                 atrPips: m.atrPips,
                 macro: macroContext,
-                biasOverride: m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY'
+                biasOverride: m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+                previousDirection: m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+                previousTrendDirection: m.trendDirection,
+                h1TrendDirection: m.h1TrendDirection
               });
               const isBuy = computed.direction === 'BUY';
               const pctPositive = m.change24hPct >= 0;
@@ -780,7 +1003,12 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                             : 'bg-red-500/20 text-red-300 border border-red-500/35'
                         }`}
                       >
-                        {computed.direction} ({isBuy ? computed.bullScorePct : computed.bearScorePct}%)
+                        {computed.trendDirection === 'UPTREND'
+                          ? 'UPTREND'
+                          : computed.trendDirection === 'DOWNTREND'
+                          ? 'DOWNTREND'
+                          : 'RANGE'}{' '}
+                        · {computed.direction} ({isBuy ? computed.bullScorePct : computed.bearScorePct}%)
                       </span>
                     </div>
 
@@ -826,27 +1054,39 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                     )}
                   </div>
 
-                  {/* Clean SL & TP Summary Box */}
-                  <div className="grid grid-cols-2 gap-2 p-3 rounded-xl bg-slate-900/90 border border-slate-800/80 text-xs">
-                    <div>
-                      <span className="text-[10px] text-red-400 block">Stop Loss (-{computed.slPips}p)</span>
-                      <strong className="text-red-300">{computed.stopLoss}</strong>
+                  {/* Clean SL & TP Summary Box + Net Trajectory Profit */}
+                  <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800/80 text-xs space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[10px] text-red-400 block">Stop Loss (-{computed.slPips}p)</span>
+                        <strong className="text-red-300">{computed.stopLoss}</strong>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-emerald-400 block">Take Profit (+{computed.tpPips}p)</span>
+                        <strong className="text-[#00C261]">{computed.tp2}</strong>
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-[10px] text-emerald-400 block">Take Profit (+{computed.tpPips}p)</span>
-                      <strong className="text-[#00C261]">{computed.tp2}</strong>
+                    <div className="pt-1.5 border-t border-slate-800 flex items-center justify-between text-[10px]">
+                      <span className="text-slate-400">Risk -${computed.actualRiskUsd.toFixed(2)}</span>
+                      <span className="text-[#00C261] font-black">
+                        Profit +${computed.netProfitUsd.toFixed(2)} ({computed.riskReward})
+                      </span>
                     </div>
                   </div>
 
-                  {/* Card Footer: Kenya Timing Pill + Open Chart CTA */}
-                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/80 text-[11px]">
+                  {/* Card Footer: Explicit Color-Coded Market Open / Opens In Guidance + Open Chart */}
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/80 text-[10px]">
                     <span
-                      className={`inline-flex items-center gap-1 truncate ${
-                        kenyaTiming.isFavorableTime ? 'text-[#00C261]' : 'text-amber-300'
+                      className={`inline-flex items-center gap-1 font-bold truncate ${
+                        kenyaTiming.windowStatusCode === 'OPEN'
+                          ? 'text-[#00C261]'
+                          : kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                          ? 'text-amber-300'
+                          : 'text-red-300'
                       }`}
                     >
                       <Clock className="w-3 h-3 shrink-0" />
-                      <span>{kenyaTiming.isFavorableTime ? 'EAT Good' : kenyaTiming.countdownFormatted}</span>
+                      <span className="truncate">{kenyaTiming.windowBadgeShort}</span>
                     </span>
 
                     <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>

@@ -39,6 +39,7 @@ import {
   fetchLiveMarketSnapshot,
   fetchPairLiveCandleSnapshot,
   evaluateCandleSeriesAndTick,
+  evaluatePairKenyaTiming,
   computeRealChartTradeParams,
   getPairSpecs,
   getCurrentMacroContext,
@@ -81,6 +82,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [copiedTicket, setCopiedTicket] = useState(false);
   const [isCustomCandleLocked, setIsCustomCandleLocked] = useState(false);
+  const [inspectedSide, setInspectedSide] = useState<'AUTO' | 'BUY' | 'SELL'>('AUTO');
 
   const syncLiveRates = async (applyToSelectedPair = false) => {
     setSyncingFeed(true);
@@ -108,6 +110,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
   const pairRef = React.useRef<CurrencyPair>(pair);
   const tfRef = React.useRef<Timeframe>(timeframe);
   const brokerRef = React.useRef<BrokerId>(broker);
+  const inspectedSideRef = React.useRef<'AUTO' | 'BUY' | 'SELL'>(inspectedSide);
 
   useEffect(() => {
     lockedRef.current = isCustomCandleLocked;
@@ -121,6 +124,9 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
   useEffect(() => {
     brokerRef.current = broker;
   }, [broker]);
+  useEffect(() => {
+    inspectedSideRef.current = inspectedSide;
+  }, [inspectedSide]);
 
   useEffect(() => {
     const unsubscribe = globalLiveStream.subscribe((streamState) => {
@@ -137,7 +143,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
           setEma50(match.ema50.toFixed(decimals));
           setRsi(match.rsi.toFixed(1));
 
-          // Auto-recompute active ticket live on every 1-second tick if an analysis result is open
+          // Auto-recompute active ticket live on every tick if an analysis result is open
           const pctMap: Partial<Record<CurrencyPair, number>> = {};
           streamState.markets.forEach((m) => {
             pctMap[m.pair] = m.change24hPct;
@@ -146,6 +152,8 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
 
           setComputedTicket((prevTicket) => {
             if (!prevTicket) return prevTicket;
+            const forcedSide =
+              inspectedSideRef.current !== 'AUTO' ? inspectedSideRef.current : undefined;
             return computeRealChartTradeParams({
               targetPair: match.pair,
               targetTf: tfRef.current,
@@ -156,7 +164,11 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
               ema50: match.ema50,
               rsi: match.rsi,
               atrPips: match.atrPips,
-              macro: liveMacro
+              macro: liveMacro,
+              h1TrendDirection: match.h1TrendDirection,
+              biasOverride: forcedSide,
+              previousDirection: prevTicket.direction,
+              previousTrendDirection: match.trendDirection
             });
           });
         }
@@ -335,82 +347,88 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
     const overextendedThresholdPips = pair.includes('XAU') ? 220 : pair.includes('BTC') ? 1400 : 28;
     const isOverextended = distanceEma20Pips > overextendedThresholdPips;
 
-    let score = 50;
-    let verdict: AnalysisResult['verdict'] = 'WAIT_CHOP';
-    let title = 'Neutral Zone — Low Edge Setup';
-    let recommendation = 'Wait for clear market reaction at 20 EMA.';
-    let biasOverride: 'BUY' | 'SELL' | undefined = undefined;
-    const reasons: string[] = [];
-
-    if (numRsi >= 75 && isOverextended) {
-      score = 22;
-      verdict = 'RISKY_EXTENDED';
-      title = 'DANGER: Parabolic Tower Top Overextension';
-      recommendation = 'DO NOT BUY! Extreme FOMO territory. Wait for candle close below 20 EMA before shorting.';
-      biasOverride = 'SELL';
-      reasons.push(`Price (${numPrice.toFixed(decimals)}) is overextended by ${distanceEma20Pips.toFixed(1)} pips above EMA 20 (${numEma20.toFixed(decimals)}).`);
-      reasons.push(`RSI is at ${numRsi.toFixed(1)} (Severe Overbought). High risk of liquidity hunt reversal.`);
-      reasons.push('Direct correlation with the Gilgil 1.35450 Tower Top trap where chasing caused heavy drawdown.');
-    } else if (numRsi <= 25 && isOverextended) {
-      score = 28;
-      verdict = 'RISKY_EXTENDED';
-      title = 'DANGER: Parabolic Dump Exhaustion';
-      recommendation = 'DO NOT SELL into the hole! Wait for candle reclaim above 20 EMA before buying.';
-      biasOverride = 'BUY';
-      reasons.push(`RSI is pinned down at ${numRsi.toFixed(1)} (${distanceEma20Pips.toFixed(1)} pips below EMA 20).`);
-      reasons.push('Price extended far below dynamic moving averages — high snapback risk.');
-    } else if (isEmaBearish && numPrice <= numEma20 && numRsi >= 38 && numRsi <= 56) {
-      score = 92;
-      verdict = 'HIGH_PROBABILITY_SELL';
-      title = 'HIGH PROBABILITY SHORT: Gilgil Tower Exhaustion Breakdown';
-      recommendation = `Prime SELL setup anchored to live price ${numPrice.toFixed(decimals)}. Use the exact MT4 S/L & T/P below.`;
-      biasOverride = 'SELL';
-      reasons.push(`EMA 20 (${numEma20.toFixed(decimals)}) is sloped downward below EMA 50 (${numEma50.toFixed(decimals)}).`);
-      reasons.push(`Price (${numPrice.toFixed(decimals)}) closed below the 20 EMA after retesting.`);
-      reasons.push(`RSI at ${numRsi.toFixed(1)} has reset from overbought with healthy bearish momentum.`);
-    } else if (isEmaBullish && numPrice >= numEma20 && numRsi >= 46 && numRsi <= 65) {
-      score = 90;
-      verdict = 'HIGH_PROBABILITY_BUY';
-      title = 'HIGH PROBABILITY LONG: Dynamic 20/50 EMA Pullback Bounce';
-      recommendation = `Prime BUY setup anchored to live price ${numPrice.toFixed(decimals)}. Use the exact MT4 S/L & T/P below.`;
-      biasOverride = 'BUY';
-      reasons.push(`EMA 20 (${numEma20.toFixed(decimals)}) is cleanly stacked above EMA 50 (${numEma50.toFixed(decimals)}).`);
-      reasons.push(`Price (${numPrice.toFixed(decimals)}) respected the 20/50 Value Zone without overextending.`);
-      reasons.push(`RSI at ${numRsi.toFixed(1)} confirms clean institutional continuation momentum.`);
-    } else {
-      score = 62;
-      const trendUp = numPrice >= numEma20;
-      verdict = trendUp ? 'HIGH_PROBABILITY_BUY' : 'HIGH_PROBABILITY_SELL';
-      biasOverride = trendUp ? 'BUY' : 'SELL';
-      title = trendUp ? 'MODERATE BULLISH CONTINUATION: Tight Value Zone' : 'MODERATE BEARISH PULLBACK: Dynamic Resistance';
-      recommendation = `Chart price ${numPrice.toFixed(decimals)} is near dynamic structure; risk strictly 0.01 lot ($2.00 max).`;
-      reasons.push(`Distance to 20 EMA is ${distanceEma20Pips.toFixed(1)} pips on ${timeframe}.`);
-      reasons.push(`RSI at ${numRsi.toFixed(1)} indicates measured intraday order flow.`);
-    }
-
     const pctMap: Partial<Record<CurrencyPair, number>> = {};
     liveMarkets.forEach((m) => {
       pctMap[m.pair] = m.change24hPct;
     });
     const currentMacro = getCurrentMacroContext(pctMap);
+    const activeMarketMatch = liveMarkets.find((m) => m.pair === pair);
+    const manualSideOverride = inspectedSide !== 'AUTO' ? inspectedSide : undefined;
 
     const ticket = computeRealChartTradeParams({
       targetPair: pair,
       targetTf: timeframe,
       targetBroker: broker,
       price: numPrice,
+      keyLevel: activeMarketMatch?.keyLevel,
       ema20: numEma20,
       ema50: numEma50,
       rsi: numRsi,
+      atrPips: activeMarketMatch?.atrPips,
       macro: currentMacro,
-      biasOverride,
+      h1TrendDirection: activeMarketMatch?.h1TrendDirection,
+      biasOverride: manualSideOverride,
+      previousDirection: computedTicket?.direction || (activeMarketMatch?.bias === 'STRONG_SELL' ? 'SELL' : 'BUY'),
+      previousTrendDirection: activeMarketMatch?.trendDirection,
     });
     setComputedTicket(ticket);
 
-    const isWinMatch = score >= 80;
+    let score = Math.round(ticket.confidence);
+    let verdict: AnalysisResult['verdict'] =
+      ticket.direction === 'BUY' ? 'HIGH_PROBABILITY_BUY' : 'HIGH_PROBABILITY_SELL';
+    let title =
+      ticket.direction === 'BUY'
+        ? 'HIGH PROBABILITY LONG: Multi-Factor Aligned Continuation'
+        : 'HIGH PROBABILITY SHORT: Multi-Factor Aligned Setup';
+    let recommendation = `Prime ${ticket.orderType} setup anchored to live price ${numPrice.toFixed(decimals)}. Use the exact MT4/MT5 S/L & Multi-Horizon T/P levels below.`;
+    const reasons: string[] = [];
+
+    if (inspectedSide === 'AUTO' && numRsi >= 76 && isOverextended) {
+      score = Math.min(score, 44);
+      verdict = 'RISKY_EXTENDED';
+      title = `CAUTION: Extended Above 20 EMA (${ticket.orderType} Plan Locked)`;
+      recommendation = `Price is ${distanceEma20Pips.toFixed(1)} pips from 20 EMA — wait for minor pullback or keep strict 0.01 micro lot on ${ticket.orderType}.`;
+      reasons.push(`Price (${numPrice.toFixed(decimals)}) is stretched ${distanceEma20Pips.toFixed(1)} pips from EMA 20 (${numEma20.toFixed(decimals)}) while RSI is ${numRsi.toFixed(1)}.`);
+      reasons.push(ticket.mt4SafetyProof);
+      reasons.push(ticket.trendProjectionText);
+    } else if (inspectedSide === 'AUTO' && numRsi <= 24 && isOverextended) {
+      score = Math.min(score, 46);
+      verdict = 'RISKY_EXTENDED';
+      title = `CAUTION: Deep Dump Extension (${ticket.orderType} Plan Locked)`;
+      recommendation = `RSI pinned at ${numRsi.toFixed(1)} — let candle stabilize near 20 EMA before entering ${ticket.orderType}.`;
+      reasons.push(`RSI is at ${numRsi.toFixed(1)} (${distanceEma20Pips.toFixed(1)} pips from EMA 20).`);
+      reasons.push(ticket.mt4SafetyProof);
+      reasons.push(ticket.trendProjectionText);
+    } else if (ticket.direction === 'SELL') {
+      verdict = 'HIGH_PROBABILITY_SELL';
+      title =
+        inspectedSide === 'SELL'
+          ? 'CHOSEN SIDE ANALYSIS (SELL): Bearish Execution & 48H Projection'
+          : isEmaBearish
+          ? 'HIGH PROBABILITY SHORT: H1/M15 Bearish Stack & Macro Alignment'
+          : 'TACTICAL SHORT PLAN: Structured Resistive Pullback';
+      reasons.push(ticket.mt4SafetyProof);
+      reasons.push(ticket.trendProjectionText);
+      reasons.push(`EMA 20 (${numEma20.toFixed(decimals)}) vs EMA 50 (${numEma50.toFixed(decimals)}) · RSI ${numRsi.toFixed(1)} on ${timeframe}.`);
+      reasons.push(ticket.humanCheckNote);
+    } else {
+      verdict = 'HIGH_PROBABILITY_BUY';
+      title =
+        inspectedSide === 'BUY'
+          ? 'CHOSEN SIDE ANALYSIS (BUY): Bullish Execution & 48H Projection'
+          : isEmaBullish
+          ? 'HIGH PROBABILITY LONG: H1/M15 Bullish Stack & Macro Alignment'
+          : 'TACTICAL LONG PLAN: Structured Support Pullback';
+      reasons.push(ticket.mt4SafetyProof);
+      reasons.push(ticket.trendProjectionText);
+      reasons.push(`EMA 20 (${numEma20.toFixed(decimals)}) vs EMA 50 (${numEma50.toFixed(decimals)}) · RSI ${numRsi.toFixed(1)} on ${timeframe}.`);
+      reasons.push(ticket.humanCheckNote);
+    }
+
+    const isWinMatch = score >= 72;
     const historicalRef = isWinMatch
       ? {
-          title: 'Validated Disciplined Setup (MT4 S/L & T/P Side Verified)',
+          title: `Validated ${ticket.direction} Execution Structure (MT4 S/L & T/P Verified)`,
           description: HISTORICAL_GILGIL_CASES.towerWin.description,
           caseType: 'validated_win' as const,
         }
@@ -423,8 +441,8 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
     const aiSynthesis = {
       sentimentSummary:
         ticket.direction === 'SELL'
-          ? `Bearish institutional order flow detected around ${numPrice.toFixed(decimals)} on ${timeframe}. Stop Loss (${ticket.stopLoss.toFixed(decimals)}) sits cleanly ABOVE Entry so MT4 executes with zero rejection.`
-          : `Bullish institutional accumulation detected around ${numPrice.toFixed(decimals)} on ${timeframe}. Stop Loss (${ticket.stopLoss.toFixed(decimals)}) sits cleanly BELOW Entry so MT4 executes with zero rejection.`,
+          ? `Bearish ${pair} execution plan anchored around ${numPrice.toFixed(decimals)} on ${timeframe}. Stop Loss (${ticket.stopLoss.toFixed(decimals)}) sits cleanly ABOVE Entry so MT4/MT5 executes with zero rejection.`
+          : `Bullish ${pair} execution plan anchored around ${numPrice.toFixed(decimals)} on ${timeframe}. Stop Loss (${ticket.stopLoss.toFixed(decimals)}) sits cleanly BELOW Entry so MT4/MT5 executes with zero rejection.`,
       keyRiskFactor:
         verdict === 'RISKY_EXTENDED'
           ? 'Candle is stretched far from 20 EMA — wait for a minor pullback or keep strict 0.01 micro lot.'
@@ -434,7 +452,8 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
         `1. Order Type: ${ticket.orderType} on ${ticket.brokerSymbol} (${timeframe})`,
         `2. Entry & Volume: ${ticket.entryPrice.toFixed(decimals)} @ 0.01 micro lot ($${ticket.actualRiskUsd.toFixed(2)} risk)`,
         `3. Stop Loss (Invalidation): ${ticket.stopLoss.toFixed(decimals)} (${ticket.slPips} pips)`,
-        `4. TP1 / Final Target: ${ticket.tp1.toFixed(decimals)} / ${ticket.tp2.toFixed(decimals)} (${ticket.riskReward})`,
+        `4. 1H–12H TP1 / TP2: ${ticket.tp1.toFixed(decimals)} / ${ticket.tp2.toFixed(decimals)} (+$${ticket.netProfitUsd.toFixed(2)})`,
+        `5. 12H–48H Extended TP3: ${ticket.tp3.toFixed(decimals)} (+${ticket.tp3Pips}p / +$${ticket.netProfit48hUsd.toFixed(2)})`,
       ],
     };
 
@@ -466,28 +485,58 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
     }
   };
 
+  const pctMapForDisplay: Partial<Record<CurrencyPair, number>> = {};
+  liveMarkets.forEach((m) => {
+    pctMapForDisplay[m.pair] = m.change24hPct;
+  });
+  const displayMacro = getCurrentMacroContext(pctMapForDisplay);
+  const activePairMarket = liveMarkets.find((m) => m.pair === pair);
+  const displayedTicket =
+    computedTicket && inspectedSide !== 'AUTO'
+      ? computeRealChartTradeParams({
+          targetPair: pair,
+          targetTf: timeframe,
+          targetBroker: broker,
+          price: parseFloat(price) || computedTicket.entryPrice,
+          keyLevel: activePairMarket?.keyLevel,
+          ema20: parseFloat(ema20) || computedTicket.entryPrice,
+          ema50: parseFloat(ema50) || computedTicket.entryPrice,
+          rsi: parseFloat(rsi) || 50,
+          atrPips: activePairMarket?.atrPips,
+          macro: displayMacro,
+          h1TrendDirection: activePairMarket?.h1TrendDirection,
+          biasOverride: inspectedSide,
+          previousDirection: computedTicket.direction,
+          previousTrendDirection: activePairMarket?.trendDirection,
+        })
+      : computedTicket;
+
   const handleCopyTicket = () => {
-    if (!computedTicket) return;
-    const dec = computedTicket.decimals;
-    const summary = `${pair} (${timeframe}) • ${computedTicket.orderType}\nEntry: ${computedTicket.entryPrice.toFixed(dec)}\nStop Loss: ${computedTicket.stopLoss.toFixed(dec)}\nTP1: ${computedTicket.tp1.toFixed(dec)}\nFinal Target: ${computedTicket.tp2.toFixed(dec)}\nLot Size: 0.01 ($${computedTicket.actualRiskUsd.toFixed(2)} Risk)`;
+    if (!displayedTicket) return;
+    const dec = displayedTicket.decimals;
+    const summary = `${pair} (${timeframe}) • ${displayedTicket.orderType}\nEntry: ${displayedTicket.entryPrice.toFixed(dec)}\nStop Loss: ${displayedTicket.stopLoss.toFixed(dec)}\nTP1 (1H–4H): ${displayedTicket.tp1.toFixed(dec)}\nTP2 (4H–12H): ${displayedTicket.tp2.toFixed(dec)}\nTP3 (12H–48H): ${displayedTicket.tp3.toFixed(dec)}\nLot Size: 0.01 ($${displayedTicket.actualRiskUsd.toFixed(2)} Risk)`;
     navigator.clipboard?.writeText(summary);
     setCopiedTicket(true);
     setTimeout(() => setCopiedTicket(false), 2000);
   };
 
   const handleLogToJournal = () => {
-    if (!result || !computedTicket) return;
+    if (!result || !displayedTicket) return;
+    const sideTitle =
+      inspectedSide !== 'AUTO'
+        ? `CHOSEN SIDE ANALYSIS (${displayedTicket.direction}): ${displayedTicket.orderType} Plan`
+        : result.title;
 
     onLogTrade({
       pair,
       broker,
-      type: computedTicket.direction,
-      entryPrice: computedTicket.entryPrice,
-      score: result.score,
-      mode: result.title,
-      riskUsd: computedTicket.actualRiskUsd,
+      type: displayedTicket.direction,
+      entryPrice: displayedTicket.entryPrice,
+      score: Math.round(displayedTicket.confidence),
+      mode: sideTitle,
+      riskUsd: displayedTicket.actualRiskUsd,
       status: 'OPEN',
-      notes: `${computedTicket.orderType} @ ${computedTicket.entryPrice.toFixed(computedTicket.decimals)} | SL: ${computedTicket.stopLoss.toFixed(computedTicket.decimals)} | TP2: ${computedTicket.tp2.toFixed(computedTicket.decimals)} | Score ${result.score}/100 (${timeframe}).`,
+      notes: `${displayedTicket.orderType} @ ${displayedTicket.entryPrice.toFixed(displayedTicket.decimals)} | SL: ${displayedTicket.stopLoss.toFixed(displayedTicket.decimals)} | TP2: ${displayedTicket.tp2.toFixed(displayedTicket.decimals)} | 48H TP3: ${displayedTicket.tp3.toFixed(displayedTicket.decimals)} | Score ${Math.round(displayedTicket.confidence)}/100 (${timeframe}).`,
     });
 
     setLoggedToJournal(true);
@@ -596,46 +645,87 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
         const parsedE20 = parseFloat(ema20) || activeMarketItem.ema20;
         const parsedE50 = parseFloat(ema50) || activeMarketItem.ema50;
         const parsedRsi = parseFloat(rsi) || activeMarketItem.rsi;
-        const previewTicket =
-          computedTicket ||
-          computeRealChartTradeParams({
-            targetPair: pair,
-            targetTf: timeframe,
-            targetBroker: broker,
-            price: parsedLiveP,
-            keyLevel: activeMarketItem.keyLevel,
-            ema20: parsedE20,
-            ema50: parsedE50,
-            rsi: parsedRsi,
-            atrPips: activeMarketItem.atrPips,
-          });
+        const activeTiming = evaluatePairKenyaTiming(pair);
+        const previewTicket = computeRealChartTradeParams({
+          targetPair: pair,
+          targetTf: timeframe,
+          targetBroker: broker,
+          price: parsedLiveP,
+          keyLevel: activeMarketItem.keyLevel,
+          ema20: parsedE20,
+          ema50: parsedE50,
+          rsi: parsedRsi,
+          atrPips: activeMarketItem.atrPips,
+          h1TrendDirection: activeMarketItem.h1TrendDirection,
+          biasOverride: inspectedSide === 'AUTO' ? computedTicket?.direction : inspectedSide,
+          previousDirection: activeMarketItem.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+          previousTrendDirection: activeMarketItem.trendDirection
+        });
 
         return (
-          <LiveInteractiveCandleChart
-            pair={pair}
-            timeframe={timeframe}
-            candles={activeMarketItem.candles || []}
-            livePrice={parsedLiveP}
-            ema20={parsedE20}
-            ema50={parsedE50}
-            entryPrice={previewTicket.entryPrice}
-            stopLoss={previewTicket.stopLoss}
-            tp1={previewTicket.tp1}
-            tp2={previewTicket.tp2}
-            direction={previewTicket.direction}
-            change24hPct={activeMarketItem.change24hPct}
-            isLockedToCustom={isCustomCandleLocked}
-            onCandlePriceChange={(newP) => {
-              const { decimals } = getPairSpecs(pair);
-              handlePriceInputChange(newP.toFixed(decimals));
-              globalLiveStream.setCustomCandlePrice(pair, newP, timeframe);
-            }}
-            onResetToLiveStream={() => {
-              setIsCustomCandleLocked(false);
-              globalLiveStream.unlockPairToLiveStream(pair);
-              syncLiveRates(true);
-            }}
-          />
+          <div className="space-y-4">
+            <div
+              className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono ${
+                activeTiming.windowStatusCode === 'OPEN'
+                  ? 'bg-emerald-950/45 border-[#00C261]/70 text-emerald-100'
+                  : activeTiming.windowStatusCode === 'OPENING_SOON'
+                  ? 'bg-amber-950/45 border-amber-400/70 text-amber-100'
+                  : 'bg-red-950/55 border-red-500/80 text-red-100'
+              }`}
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                <Clock className="w-4 h-4 shrink-0" />
+                <strong className="text-white">{activeTiming.bannerHeadline}</strong>
+                <span className="text-slate-300">· {pair} [{timeframe}]</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {(['AUTO', 'BUY', 'SELL'] as const).map((sOpt) => (
+                  <button
+                    key={sOpt}
+                    type="button"
+                    onClick={() => setInspectedSide(sOpt)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-black transition ${
+                      inspectedSide === sOpt
+                        ? sOpt === 'BUY'
+                          ? 'bg-[#00C261] text-black'
+                          : sOpt === 'SELL'
+                          ? 'bg-red-500 text-white'
+                          : 'bg-[#D4AF37] text-black'
+                        : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-700'
+                    }`}
+                  >
+                    {sOpt === 'AUTO' ? 'AI Auto' : `Inspect ${sOpt}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <LiveInteractiveCandleChart
+              pair={pair}
+              timeframe={timeframe}
+              candles={activeMarketItem.candles || []}
+              livePrice={parsedLiveP}
+              ema20={parsedE20}
+              ema50={parsedE50}
+              entryPrice={previewTicket.entryPrice}
+              stopLoss={previewTicket.stopLoss}
+              tp1={previewTicket.tp1}
+              tp2={previewTicket.tp2}
+              direction={previewTicket.direction}
+              change24hPct={activeMarketItem.change24hPct}
+              isLockedToCustom={isCustomCandleLocked}
+              onCandlePriceChange={(newP) => {
+                const { decimals } = getPairSpecs(pair);
+                handlePriceInputChange(newP.toFixed(decimals));
+                globalLiveStream.setCustomCandlePrice(pair, newP, timeframe);
+              }}
+              onResetToLiveStream={() => {
+                setIsCustomCandleLocked(false);
+                globalLiveStream.unlockPairToLiveStream(pair);
+                syncLiveRates(true);
+              }}
+            />
+          </div>
         );
       })()}
 
@@ -783,35 +873,96 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
 
         {/* Right Column: Intelligence Output & Score Meter (6 Cols) */}
         <div className="lg:col-span-6 space-y-6">
-          {result && computedTicket ? (
+          {result && displayedTicket ? (() => {
+            const dec = displayedTicket.decimals;
+            const isSideOverridden = inspectedSide !== 'AUTO';
+            const effectiveScore = isSideOverridden
+              ? Math.round(displayedTicket.confidence)
+              : result.score;
+            const effectiveTitle = isSideOverridden
+              ? `CHOSEN SIDE ANALYSIS (${displayedTicket.direction}): ${displayedTicket.orderVerdictLabel}`
+              : result.title;
+            const effectiveReasons = isSideOverridden
+              ? [
+                  displayedTicket.mt4SafetyProof,
+                  displayedTicket.trendProjectionText,
+                  displayedTicket.humanCheckNote,
+                  `Anchored to live ${pair} candle @ ${displayedTicket.entryPrice.toFixed(dec)} (${timeframe}) · 20 EMA: ${ema20} · 50 EMA: ${ema50} · RSI: ${rsi}`,
+                  `Multi-Horizon Targets: 1H–4H TP1 ${displayedTicket.tp1.toFixed(dec)} (+$${displayedTicket.tp1NetProfitUsd.toFixed(2)}) → 4H–12H TP2 ${displayedTicket.tp2.toFixed(dec)} (+$${displayedTicket.netProfitUsd.toFixed(2)}) → 12H–48H TP3 ${displayedTicket.tp3.toFixed(dec)} (+$${displayedTicket.netProfit48hUsd.toFixed(2)})`,
+                ]
+              : result.reasons;
+            const effectiveSentimentSummary =
+              displayedTicket.direction === 'SELL'
+                ? `Bearish ${pair} execution plan anchored around ${displayedTicket.entryPrice.toFixed(dec)} on ${timeframe}. Stop Loss (${displayedTicket.stopLoss.toFixed(dec)}) sits cleanly ABOVE Entry so MT4/MT5 executes with zero rejection.`
+                : `Bullish ${pair} execution plan anchored around ${displayedTicket.entryPrice.toFixed(dec)} on ${timeframe}. Stop Loss (${displayedTicket.stopLoss.toFixed(dec)}) sits cleanly BELOW Entry so MT4/MT5 executes with zero rejection.`;
+            const effectiveTradePlanSteps = [
+              `1. Order Type: ${displayedTicket.orderType} on ${displayedTicket.brokerSymbol} (${timeframe})`,
+              `2. Entry & Volume: ${displayedTicket.entryPrice.toFixed(dec)} @ 0.01 micro lot ($${displayedTicket.actualRiskUsd.toFixed(2)} risk)`,
+              `3. Stop Loss (Invalidation): ${displayedTicket.stopLoss.toFixed(dec)} (${displayedTicket.slPips} pips)`,
+              `4. 1H–12H TP1 / TP2: ${displayedTicket.tp1.toFixed(dec)} / ${displayedTicket.tp2.toFixed(dec)} (+$${displayedTicket.netProfitUsd.toFixed(2)})`,
+              `5. 12H–48H Extended TP3: ${displayedTicket.tp3.toFixed(dec)} (+${displayedTicket.tp3Pips}p / +$${displayedTicket.netProfit48hUsd.toFixed(2)})`,
+            ];
+
+            return (
             <div className="glass-panel-glow rounded-3xl p-6 sm:p-8 border border-slate-800 space-y-5 animate-in zoom-in-95 duration-200">
               {/* Header: Score + Verdict */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800 pb-5">
                 <div className="flex items-center gap-4">
                   <div
-                    className={`w-16 h-16 rounded-2xl flex flex-col items-center justify-center font-mono font-black border-2 ${
-                      result.score >= 80
+                    className={`w-16 h-16 rounded-2xl flex flex-col items-center justify-center font-mono font-black border-2 shrink-0 ${
+                      effectiveScore >= 80
                         ? 'bg-[#00C261]/20 border-[#00C261] text-[#00C261] shadow-[0_0_20px_rgba(0,194,97,0.3)]'
-                        : result.score >= 50
+                        : effectiveScore >= 50
                         ? 'bg-amber-500/20 border-amber-500 text-amber-400'
                         : 'bg-red-500/20 border-red-500 text-red-400'
                     }`}
                   >
-                    <span className="text-2xl leading-none">{result.score}</span>
+                    <span className="text-2xl leading-none">{effectiveScore}</span>
                     <span className="text-[9px] uppercase tracking-wider opacity-80">/ 100</span>
                   </div>
 
                   <div>
-                    <span
-                      className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
-                        computedTicket.direction === 'BUY'
-                          ? 'bg-[#00C261]/20 text-[#00C261]'
-                          : 'bg-red-500/20 text-red-400'
-                      }`}
-                    >
-                      {computedTicket.orderType} • {pair} ({timeframe})
-                    </span>
-                    <h4 className="text-lg font-bold text-white mt-1">{result.title}</h4>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span
+                        className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
+                          displayedTicket.direction === 'BUY'
+                            ? 'bg-[#00C261]/20 text-[#00C261]'
+                            : 'bg-red-500/20 text-red-400'
+                        }`}
+                      >
+                        {displayedTicket.orderType} • {pair} ({timeframe})
+                      </span>
+                      <span
+                        className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded uppercase ${
+                          isSideOverridden
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                            : 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/25'
+                        }`}
+                      >
+                        {isSideOverridden
+                          ? `CHOSEN SIDE: ${displayedTicket.direction}`
+                          : displayedTicket.trendDirection}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setInspectedSide(displayedTicket.direction === 'BUY' ? 'SELL' : 'BUY')
+                        }
+                        className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 transition"
+                      >
+                        See {displayedTicket.direction === 'BUY' ? 'SELL' : 'BUY'} Side
+                      </button>
+                      {inspectedSide !== 'AUTO' && (
+                        <button
+                          type="button"
+                          onClick={() => setInspectedSide('AUTO')}
+                          className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-[#00C261]/15 text-[#00C261] border border-[#00C261]/30"
+                        >
+                          AI Auto
+                        </button>
+                      )}
+                    </div>
+                    <h4 className="text-lg font-bold text-white mt-1">{effectiveTitle}</h4>
                   </div>
                 </div>
               </div>
@@ -821,7 +972,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
                   <span className="text-[#00C261] font-bold flex items-center gap-1.5">
                     <ShieldCheck className="w-4 h-4" />
-                    Exact MT4 / MT5 Parameter Ticket ({computedTicket.brokerSymbol})
+                    Exact MT4 / MT5 Parameter Ticket ({displayedTicket.brokerSymbol})
                   </span>
                   <button
                     onClick={handleCopyTicket}
@@ -832,35 +983,96 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
                   <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
                     <span className="text-[10px] text-slate-400 block font-mono">Entry Price</span>
-                    <strong className="text-sm sm:text-base font-mono text-white font-black">
-                      {computedTicket.entryPrice.toFixed(computedTicket.decimals)}
+                    <strong className="text-xs sm:text-sm font-mono text-white font-black">
+                      {displayedTicket.entryPrice.toFixed(dec)}
                     </strong>
                   </div>
                   <div className="p-2.5 rounded-xl bg-red-950/30 border border-red-500/30">
-                    <span className="text-[10px] text-red-300 block font-mono">Stop Loss ({computedTicket.slPips}p)</span>
-                    <strong className="text-sm sm:text-base font-mono text-red-400 font-black">
-                      {computedTicket.stopLoss.toFixed(computedTicket.decimals)}
+                    <span className="text-[10px] text-red-300 block font-mono">Stop Loss ({displayedTicket.slPips}p)</span>
+                    <strong className="text-xs sm:text-sm font-mono text-red-400 font-black">
+                      {displayedTicket.stopLoss.toFixed(dec)}
                     </strong>
                   </div>
                   <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-[#00C261]/30">
-                    <span className="text-[10px] text-emerald-300 block font-mono">TP1 (50%)</span>
-                    <strong className="text-sm sm:text-base font-mono text-[#00C261] font-black">
-                      {computedTicket.tp1.toFixed(computedTicket.decimals)}
+                    <span className="text-[10px] text-emerald-300 block font-mono">TP1 (1H–4H)</span>
+                    <strong className="text-xs sm:text-sm font-mono text-[#00C261] font-black">
+                      {displayedTicket.tp1.toFixed(dec)}
                     </strong>
                   </div>
                   <div className="p-2.5 rounded-xl bg-cyan-950/30 border border-cyan-500/30">
-                    <span className="text-[10px] text-cyan-300 block font-mono">Final Target ({computedTicket.tpPips}p)</span>
-                    <strong className="text-sm sm:text-base font-mono text-cyan-300 font-black">
-                      {computedTicket.tp2.toFixed(computedTicket.decimals)}
+                    <span className="text-[10px] text-cyan-300 block font-mono">TP2 ({displayedTicket.tpPips}p)</span>
+                    <strong className="text-xs sm:text-sm font-mono text-cyan-300 font-black">
+                      {displayedTicket.tp2.toFixed(dec)}
+                    </strong>
+                  </div>
+                  <div className="col-span-2 sm:col-span-1 p-2.5 rounded-xl bg-amber-950/30 border border-[#D4AF37]/40">
+                    <span className="text-[10px] text-[#D4AF37] block font-mono">48H TP3 ({displayedTicket.tp3Pips}p)</span>
+                    <strong className="text-xs sm:text-sm font-mono text-[#D4AF37] font-black">
+                      {displayedTicket.tp3.toFixed(dec)}
                     </strong>
                   </div>
                 </div>
 
-                <div className="text-[11px] font-mono text-emerald-300 bg-emerald-950/30 border border-emerald-500/20 px-3 py-1.5 rounded-lg">
-                  {computedTicket.mt4SafetyProof}
+                {/* 3-Stage Multi-Horizon Trajectory Projection Cards (1H–48H) */}
+                <div className="pt-1 space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
+                    <span className="uppercase font-bold text-cyan-300">
+                      Multi-Horizon {displayedTicket.direction} Projection (1H → 48H)
+                    </span>
+                    <span>
+                      48H Extended Est:{' '}
+                      <strong className="text-[#00C261]">
+                        +${displayedTicket.netProfit48hUsd.toFixed(2)} (
+                        {displayedTicket.netProfit48hKes.toLocaleString()} KES)
+                      </strong>
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 font-mono">
+                    {displayedTicket.trajectoryHorizons.map((step) => (
+                      <div
+                        key={step.horizon}
+                        className={`p-2.5 rounded-xl border space-y-1 ${
+                          displayedTicket.direction === 'BUY'
+                            ? 'bg-emerald-950/20 border-[#00C261]/30'
+                            : 'bg-red-950/20 border-red-500/30'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1 text-[10px]">
+                          <span className="font-bold text-white">{step.horizon}</span>
+                          <span
+                            className={`font-black ${
+                              displayedTicket.direction === 'BUY' ? 'text-[#00C261]' : 'text-red-400'
+                            }`}
+                          >
+                            +${step.netProfitUsd.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs font-black text-cyan-300">
+                          <span>{step.targetPrice.toFixed(dec)}</span>
+                          <span className="text-[10px] text-slate-400">
+                            {displayedTicket.direction === 'BUY' ? '+' : '-'}
+                            {step.targetPips}p
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-300 leading-snug">{step.driverSummary}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 text-[11px] font-mono">
+                  <div className="text-[#D4AF37] bg-[#D4AF37]/10 border border-[#D4AF37]/30 px-3 py-1.5 rounded-lg font-bold">
+                    {displayedTicket.profitOutlookText}
+                  </div>
+                  <div className="text-emerald-300 bg-emerald-950/30 border border-emerald-500/20 px-3 py-1.5 rounded-lg">
+                    {displayedTicket.mt4SafetyProof} · {displayedTicket.trendProjectionText}
+                  </div>
+                  <div className="text-amber-200 bg-amber-950/20 border border-amber-500/20 px-3 py-1.5 rounded-lg">
+                    {displayedTicket.humanCheckNote}
+                  </div>
                 </div>
               </div>
 
@@ -869,16 +1081,16 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
                   <span className="text-[#D4AF37] font-bold flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>All-Factor AI BUY/SELL Judgment ({computedTicket.orderType})</span>
+                    <span>All-Factor AI BUY/SELL Judgment ({displayedTicket.orderType})</span>
                   </span>
                   <span className="font-black">
-                    <span className="text-[#00C261]">BULL {computedTicket.bullScorePct}%</span>
+                    <span className="text-[#00C261]">BULL {displayedTicket.bullScorePct}%</span>
                     <span className="text-slate-600 mx-1.5">vs</span>
-                    <span className="text-red-400">BEAR {computedTicket.bearScorePct}%</span>
+                    <span className="text-red-400">BEAR {displayedTicket.bearScorePct}%</span>
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {computedTicket.factorVerdicts.map((fv) => (
+                  {displayedTicket.factorVerdicts.map((fv) => (
                     <div
                       key={fv.name}
                       className={`p-2.5 rounded-xl border space-y-1 ${
@@ -921,7 +1133,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                   <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
                     <span className="text-[10px] text-slate-400 block">Max Monetary Risk</span>
                     <strong className="text-base font-mono text-[#00C261] font-bold">
-                      ${computedTicket.actualRiskUsd.toFixed(2)} ({Math.round(computedTicket.actualRiskUsd * 130)} KES)
+                      ${displayedTicket.actualRiskUsd.toFixed(2)} ({Math.round(displayedTicket.actualRiskUsd * 130)} KES)
                     </strong>
                   </div>
                   <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
@@ -929,9 +1141,9 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                     <strong className="text-base font-mono text-white font-bold">0.01</strong>
                   </div>
                   <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
-                    <span className="text-[10px] text-slate-400 block">Projected Gain</span>
-                    <strong className="text-base font-mono text-cyan-400 font-bold">
-                      +${computedTicket.potentialGainUsd.toFixed(2)} ({computedTicket.riskReward})
+                    <span className="text-[10px] text-slate-400 block">Session / 48H Gain</span>
+                    <strong className="text-sm sm:text-base font-mono text-cyan-400 font-bold">
+                      +${displayedTicket.netProfitUsd.toFixed(2)} / +${displayedTicket.netProfit48hUsd.toFixed(2)}
                     </strong>
                   </div>
                 </div>
@@ -940,10 +1152,10 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
               {/* Technical Reasoning Checklist */}
               <div className="space-y-2">
                 <h5 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">
-                  Technical Checklist
+                  Technical Checklist ({displayedTicket.direction} Side)
                 </h5>
                 <ul className="space-y-1.5 text-xs text-slate-300">
-                  {result.reasons.map((reason, idx) => (
+                  {effectiveReasons.map((reason, idx) => (
                     <li key={idx} className="flex items-start gap-2 p-2 rounded-lg bg-slate-900/60 border border-slate-800">
                       <CheckCircle2 className="w-3.5 h-3.5 text-[#00C261] shrink-0 mt-0.5" />
                       <span>{reason}</span>
@@ -955,13 +1167,13 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
               {/* Historical Gilgil Lore Reference */}
               <div
                 className={`p-4 rounded-2xl border text-xs space-y-2 ${
-                  result.historicalReference.caseType === 'validated_win'
+                  effectiveScore >= 72
                     ? 'bg-emerald-950/30 border-[#00C261]/30 text-emerald-200'
                     : 'bg-red-950/30 border-red-500/30 text-red-200'
                 }`}
               >
                 <div className="flex items-center gap-1.5 font-bold font-mono">
-                  {result.historicalReference.caseType === 'validated_win' ? (
+                  {effectiveScore >= 72 ? (
                     <TrendingUp className="w-4 h-4 text-[#00C261]" />
                   ) : (
                     <TrendingDown className="w-4 h-4 text-red-400" />
@@ -978,28 +1190,28 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                 <div className="p-4 rounded-2xl bg-gradient-to-br from-[#0c1322] to-[#070b14] border border-cyan-500/30 space-y-3 text-xs">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                     <span className="font-mono text-[11px] font-bold text-cyan-400 flex items-center gap-1.5 uppercase">
-                      <BrainCircuit className="w-3.5 h-3.5" /> Institutional AI Synthesis ({computedTicket.confidence}% Confidence)
+                      <BrainCircuit className="w-3.5 h-3.5" /> Institutional AI Synthesis ({displayedTicket.confidence}% Confidence · {displayedTicket.direction})
                     </span>
                     <span className="px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 font-mono text-[10px]">
-                      Spread ~{computedTicket.brokerSpread}p
+                      Spread ~{displayedTicket.brokerSpread}p
                     </span>
                   </div>
 
                   <div className="space-y-2 text-slate-300">
                     <p className="leading-relaxed">
-                      <strong className="text-white">Order Side Proof:</strong> {result.aiSynthesis.sentimentSummary}
+                      <strong className="text-white">Order Side Proof:</strong> {effectiveSentimentSummary}
                     </p>
                     <p className="leading-relaxed text-slate-400">
-                      <strong className="text-cyan-300">Trajectory:</strong> {result.aiSynthesis.institutionalFootprint}
+                      <strong className="text-cyan-300">Trajectory:</strong> {displayedTicket.trajectory}
                     </p>
                   </div>
 
                   <div className="pt-2 border-t border-slate-800 space-y-1">
                     <span className="text-[10px] font-mono text-slate-400 uppercase font-bold block">
-                      Executable Trade Plan:
+                      Executable Trade Plan ({displayedTicket.orderType}):
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] font-mono text-slate-300">
-                      {result.aiSynthesis.tradePlanSteps.map((step, i) => (
+                      {effectiveTradePlanSteps.map((step, i) => (
                         <div key={i} className="p-1.5 rounded bg-slate-900 border border-slate-800">
                           {step}
                         </div>
@@ -1032,7 +1244,8 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                 </button>
               </div>
             </div>
-          ) : (
+            );
+          })() : (
             <div className="glass-panel rounded-3xl p-8 border border-slate-800 flex flex-col items-center justify-center text-center space-y-4 min-h-[420px]">
               <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 text-slate-500">
                 <SlidersHorizontal className="w-10 h-10" />

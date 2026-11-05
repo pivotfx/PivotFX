@@ -54,8 +54,8 @@ export const DownloadLogoModal: React.FC<DownloadLogoModalProps> = ({ isOpen, on
             <ImageIcon className="w-6 h-6" />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-white">PivotFx Brand Asset Kit</h3>
-            <p className="text-xs text-slate-400">Official Gold #D4AF37 Candlestick P + Breakout Arrow Vector</p>
+            <h3 className="text-xl font-bold text-white">PivotFx Institutional Brand Kit</h3>
+            <p className="text-xs text-slate-400">Official Precision Crest — Twin Candlesticks, Fibonacci Reticle &amp; Breakout Vector</p>
           </div>
         </div>
 

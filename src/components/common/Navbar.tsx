@@ -53,16 +53,18 @@ export const Navbar: React.FC<NavbarProps> = ({
         10
       );
 
-      if (eatHour >= 11 && eatHour < 15) {
-        setSessionLabel('London Open (High Vol)');
-      } else if (eatHour >= 15 && eatHour < 20) {
-        setSessionLabel('London/NY Overlap (Peak)');
-      } else if (eatHour >= 20 && eatHour < 23) {
-        setSessionLabel('NY Afternoon');
-      } else if (eatHour === 23 || eatHour === 0) {
-        setSessionLabel('Rollover (Caution)');
+      if (eatHour >= 10 && eatHour < 13) {
+        setSessionLabel('London Open · Window Open');
+      } else if (eatHour >= 15 && eatHour < 19) {
+        setSessionLabel('London/NY Peak · Window Open');
+      } else if (eatHour >= 13 && eatHour < 15) {
+        setSessionLabel('Pre-NY Lull · Opens 15:30 EAT');
+      } else if (eatHour >= 19 && eatHour < 22) {
+        setSessionLabel('NY Afternoon · Wait 03:00 EAT');
+      } else if (eatHour >= 22 || eatHour < 3) {
+        setSessionLabel('Rollover Closed · Opens 03:00 EAT');
       } else {
-        setSessionLabel('Tokyo Asian Range');
+        setSessionLabel('Tokyo Session · Window Open');
       }
     };
 

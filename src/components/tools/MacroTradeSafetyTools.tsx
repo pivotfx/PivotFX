@@ -48,6 +48,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
   const [selectedBroker, setSelectedBroker] = useState<BrokerId>('fxpesa');
   const [selectedPairFilter, setSelectedPairFilter] = useState<CurrencyPair | 'ALL'>('ALL');
   const [focusedPair, setFocusedPair] = useState<CurrencyPair | null>(null);
+  const [inspectedSide, setInspectedSide] = useState<'AUTO' | 'BUY' | 'SELL'>('AUTO');
   const [showManualOverrides, setShowManualOverrides] = useState<boolean>(false);
   const [manualFlags, setManualFlags] = useState<Partial<MacroFactorFlags>>({});
 
@@ -156,7 +157,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
             <span aria-hidden="true">·</span>
             <span className="text-[#00C261] inline-flex items-center gap-1">
               <Activity className="w-3.5 h-3.5 animate-pulse" />
-              <span>{liveConnected ? 'Live Interbank 1s Sync' : 'Live 1s Clock Sync'} ({syncedAt})</span>
+              <span>{liveConnected ? 'Live Interbank 0.5s Sync' : 'Live 0.5s Clock Sync'} ({syncedAt})</span>
             </span>
           </div>
           <h3 className="text-xl sm:text-2xl font-black text-white">
@@ -322,7 +323,8 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
           ===================================================================== */}
       {focusedCard && focusedMarket ? (
         (() => {
-          const preferredSide: 'BUY' | 'SELL' = focusedCard.buyScore >= focusedCard.sellScore ? 'BUY' : 'SELL';
+          const aiBestSide: 'BUY' | 'SELL' = focusedCard.buyScore >= focusedCard.sellScore ? 'BUY' : 'SELL';
+          const effectiveSide: 'BUY' | 'SELL' = inspectedSide === 'AUTO' ? aiBestSide : inspectedSide;
           const computed = computeRealChartTradeParams({
             targetPair: focusedCard.pair,
             targetTf: focusedMarket.recommendedTf || 'M15',
@@ -333,13 +335,15 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
             ema50: focusedCard.ema50,
             rsi: focusedCard.rsi,
             atrPips: focusedMarket.atrPips,
-            biasOverride: preferredSide
+            biasOverride: effectiveSide,
+            previousDirection: aiBestSide,
+            previousTrendDirection: focusedMarket.trendDirection,
+            h1TrendDirection: focusedMarket.h1TrendDirection
           });
-          const pctPos = focusedCard.change24hPct >= 0;
 
           return (
             <div className="space-y-5 animate-in fade-in duration-300 font-mono tabular-nums">
-              {/* Top Return Bar */}
+              {/* Top Return Bar + Check Other Side (BUY vs SELL) */}
               <div className="p-4 rounded-2xl bg-slate-900 border border-[#D4AF37]/50 flex flex-wrap items-center justify-between gap-3">
                 <button
                   type="button"
@@ -350,16 +354,31 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                   <span>← Return to All 8 Markets Safety Cards</span>
                 </button>
 
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="text-slate-400">Focused Market:</span>
-                  <strong className="text-white">{focusedCard.pair} ({computed.brokerSymbol})</strong>
-                  <span className="text-[#00C261] font-bold">· Live @ {focusedCard.livePrice}</span>
+                <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+                  {(['AUTO', 'BUY', 'SELL'] as const).map((sOpt) => (
+                    <button
+                      key={sOpt}
+                      type="button"
+                      onClick={() => setInspectedSide(sOpt)}
+                      className={`px-3 py-1.5 rounded-lg font-black transition ${
+                        inspectedSide === sOpt
+                          ? sOpt === 'BUY'
+                            ? 'bg-[#00C261] text-black'
+                            : sOpt === 'SELL'
+                            ? 'bg-red-500 text-white'
+                            : 'bg-[#D4AF37] text-black'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {sOpt === 'AUTO' ? `AI Primary (${aiBestSide})` : `Inspect ${sOpt} Side`}
+                    </button>
+                  ))}
                 </div>
               </div>
 
               {/* Focused Market Master Card */}
               <div className="p-6 rounded-3xl bg-slate-950 border-2 border-[#D4AF37] shadow-2xl space-y-5">
-                {/* Global Planned Entry Safety Banner for this Pair */}
+                {/* Global Planned Entry Safety Banner + Trend Projection */}
                 <div
                   className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
                     focusedCard.isEntryBlockedGlobally
@@ -375,41 +394,63 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                     )}
                     <div className="space-y-0.5">
                       <span className="font-black block text-white">
-                        {focusedCard.isEntryBlockedGlobally
-                          ? 'NOT SAFE FOR PLANNED ENTRY RIGHT NOW'
-                          : 'GLOBAL & SESSION FILTER CLEAR FOR PLANNED ENTRY'}
+                        {focusedCard.pair} @ {focusedCard.livePrice} · {computed.trendProjectionText}
                       </span>
                       <p>{focusedCard.globalEntryBannerText}</p>
+                      <p className="text-[11px] text-[#00C261] font-bold">{computed.profitOutlookText}</p>
+                      <p className="text-[11px] text-amber-200">{computed.humanCheckNote}</p>
                     </div>
                   </div>
                 </div>
 
-                {/* Kenya EAT Entry Window & Live Countdown Timer Box */}
-                <div className="p-5 rounded-2xl bg-[#0A1120] border border-cyan-500/40 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                {/* Color-Coded Kenya EAT Entry Window & Live Countdown Timer Box */}
+                <div
+                  className={`p-5 rounded-2xl border-2 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 ${
+                    focusedCard.kenyaTiming.windowStatusCode === 'OPEN'
+                      ? 'bg-emerald-950/35 border-[#00C261]/70'
+                      : focusedCard.kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                      ? 'bg-amber-950/35 border-amber-400/70'
+                      : 'bg-red-950/45 border-red-500/80'
+                  }`}
+                >
                   <div className="space-y-1">
                     <div className="flex items-center gap-2 text-xs font-black">
                       <Clock className="w-4 h-4 text-cyan-400" />
                       <span
                         className={
-                          focusedCard.kenyaTiming.isFavorableTime ? 'text-[#00C261]' : 'text-amber-300'
+                          focusedCard.kenyaTiming.windowStatusCode === 'OPEN'
+                            ? 'text-[#00C261]'
+                            : focusedCard.kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                            ? 'text-amber-300'
+                            : 'text-red-300'
                         }
                       >
-                        {focusedCard.kenyaTiming.statusLabel}
+                        {focusedCard.kenyaTiming.bannerHeadline}
                       </span>
                     </div>
                     <div className="text-sm font-black text-white">
-                      Kenya Session Window: {focusedCard.kenyaTiming.currentWindowName} → Next: {focusedCard.kenyaTiming.nextWindowName}
+                      Kenya Window: {focusedCard.kenyaTiming.currentWindowName} → Next: {focusedCard.kenyaTiming.nextWindowName}
                     </div>
                     <p className="text-xs text-slate-300 leading-relaxed">
                       {focusedCard.kenyaTiming.reasonText}
                     </p>
                   </div>
 
-                  <div className="px-4 py-3 rounded-xl bg-black/70 border border-cyan-500/40 text-right shrink-0">
-                    <span className="text-[10px] text-cyan-300 uppercase block font-bold">
-                      {focusedCard.kenyaTiming.isFavorableTime
-                        ? 'Favorable Window Remaining'
-                        : 'Countdown Until Favorable Entry'}
+                  <div className="px-4 py-3 rounded-xl bg-black/75 border border-white/15 text-right shrink-0">
+                    <span
+                      className={`text-[10px] uppercase block font-black ${
+                        focusedCard.kenyaTiming.windowStatusCode === 'OPEN'
+                          ? 'text-[#00C261]'
+                          : focusedCard.kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                          ? 'text-amber-300'
+                          : 'text-red-300'
+                      }`}
+                    >
+                      {focusedCard.kenyaTiming.windowStatusCode === 'OPEN'
+                        ? '● MARKET OPEN · CLOSES IN'
+                        : focusedCard.kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                        ? '⏳ TO OPEN · OPENS IN'
+                        : '✕ MARKET CLOSED · OPENS IN'}
                     </span>
                     <strong className="text-lg sm:text-xl font-black text-white tracking-wider">
                       {focusedCard.kenyaTiming.countdownFormatted}
@@ -442,18 +483,20 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                   onResetToLiveStream={() => globalLiveStream.unlockPairToLiveStream(focusedMarket.pair)}
                 />
 
-                {/* Protected MT4 Order Parameters */}
+                {/* Protected MT4 Order Parameters & Longer 1H–48H Multi-Horizon Projection */}
                 <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3 text-xs">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-[#D4AF37] font-bold">
-                      Auto-Synced MT4 Execution Levels ({computed.orderType} · {computed.brokerSymbol})
+                      {inspectedSide === 'AUTO'
+                        ? `Auto-Synced MT4 Execution Levels (${computed.orderType} · ${computed.brokerSymbol})`
+                        : `Chosen ${inspectedSide} Side Plan (${computed.orderType} · ${computed.brokerSymbol})`}
                     </span>
                     <span className="text-emerald-400 font-bold">
-                      0.01 Micro Lot (${computed.actualRiskUsd.toFixed(2)} / 260 KES Cap)
+                      0.01 Micro Lot (${computed.actualRiskUsd.toFixed(2)} / 260 KES Cap · H1 {computed.h1TrendDirection})
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
                     <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
                       <span className="text-[10px] text-slate-400 block">Live Entry</span>
                       <strong className="text-sm text-white">{computed.entryPrice}</strong>
@@ -463,13 +506,33 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                       <strong className="text-sm text-red-300">{computed.stopLoss}</strong>
                     </div>
                     <div className="p-2.5 rounded-xl bg-cyan-950/30 border border-cyan-500/30">
-                      <span className="text-[10px] text-cyan-400 block">TP1 (50% & BE)</span>
+                      <span className="text-[10px] text-cyan-400 block">1H–4H TP1 (50% BE)</span>
                       <strong className="text-sm text-cyan-300">{computed.tp1}</strong>
                     </div>
                     <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30">
-                      <span className="text-[10px] text-emerald-400 block">Final TP2 (+{computed.tpPips}p)</span>
+                      <span className="text-[10px] text-emerald-400 block">4H–12H TP2 (+{computed.tpPips}p)</span>
                       <strong className="text-sm text-emerald-300">{computed.tp2}</strong>
                     </div>
+                    <div className="p-2.5 rounded-xl bg-amber-950/25 border border-[#D4AF37]/40 col-span-2 sm:col-span-1">
+                      <span className="text-[10px] text-[#D4AF37] block">12H–48H TP3 (+${computed.netProfit48hUsd.toFixed(2)})</span>
+                      <strong className="text-sm text-[#D4AF37]">{computed.tp3}</strong>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-1">
+                    {computed.trajectoryHorizons.map((step) => (
+                      <div
+                        key={step.horizon}
+                        className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1 text-left"
+                      >
+                        <span className="text-[10px] text-[#D4AF37] font-black block">{step.horizon}</span>
+                        <div className="text-xs font-black text-white">
+                          @ {step.targetPrice}{' '}
+                          <span className="text-[#00C261]">(+${step.netProfitUsd.toFixed(2)} / +{step.netProfitKes} KES)</span>
+                        </div>
+                        <p className="text-[10px] text-slate-300 leading-snug">{step.driverSummary}</p>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
@@ -538,16 +601,21 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {visibleScorecards.map((card) => {
+              const rawMkt = markets.find((x) => x.pair === card.pair);
               const preferredSide: 'BUY' | 'SELL' = card.buyScore >= card.sellScore ? 'BUY' : 'SELL';
               const computed = computeRealChartTradeParams({
                 targetPair: card.pair,
-                targetTf: 'M15',
+                targetTf: rawMkt?.recommendedTf || 'M15',
                 targetBroker: selectedBroker,
                 price: card.livePrice,
                 ema20: card.ema20,
                 ema50: card.ema50,
                 rsi: card.rsi,
-                biasOverride: preferredSide
+                atrPips: rawMkt?.atrPips,
+                biasOverride: preferredSide,
+                previousDirection: preferredSide,
+                previousTrendDirection: rawMkt?.trendDirection,
+                h1TrendDirection: rawMkt?.h1TrendDirection
               });
               const pctPos = card.change24hPct >= 0;
 
@@ -599,33 +667,59 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                     </span>
                   </div>
 
-                  {/* Kenya EAT Entry Window Live Countdown */}
-                  <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1 text-[11px]">
+                  {/* Color-Coded Kenya EAT Entry Window Status + Live Countdown */}
+                  <div
+                    className={`p-2.5 rounded-xl border space-y-1 text-[11px] ${
+                      card.kenyaTiming.windowStatusCode === 'OPEN'
+                        ? 'bg-emerald-950/30 border-[#00C261]/45'
+                        : card.kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                        ? 'bg-amber-950/30 border-amber-400/45'
+                        : 'bg-red-950/35 border-red-500/45'
+                    }`}
+                  >
                     <div className="flex items-center justify-between gap-1">
                       <span
-                        className={`font-bold flex items-center gap-1 ${
-                          card.kenyaTiming.isFavorableTime ? 'text-[#00C261]' : 'text-amber-300'
+                        className={`font-black flex items-center gap-1 ${
+                          card.kenyaTiming.windowStatusCode === 'OPEN'
+                            ? 'text-[#00C261]'
+                            : card.kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                            ? 'text-amber-300'
+                            : 'text-red-300'
                         }`}
                       >
                         <Clock className="w-3 h-3 shrink-0" />
-                        <span>{card.kenyaTiming.isFavorableTime ? 'EAT Entry Good' : 'EAT Countdown'}</span>
+                        <span>
+                          {card.kenyaTiming.windowStatusCode === 'OPEN'
+                            ? '● MARKET OPEN'
+                            : card.kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                            ? '⏳ OPENS IN'
+                            : '✕ CLOSED · OPENS IN'}
+                        </span>
                       </span>
                       <strong className="text-white font-black">{card.kenyaTiming.countdownFormatted}</strong>
                     </div>
-                    <div className="text-[10px] text-slate-400 truncate">
-                      {card.kenyaTiming.currentWindowName}
+                    <div className="text-[10px] text-slate-300 truncate">
+                      {computed.trendDirection} → {computed.direction} · {card.kenyaTiming.currentWindowName}
                     </div>
                   </div>
 
-                  {/* Compact Protected SL / TP Preview */}
-                  <div className="grid grid-cols-2 gap-2 text-[11px] p-2.5 rounded-xl bg-black/60 border border-slate-800/80">
-                    <div>
-                      <span className="text-[10px] text-red-400 block">SL ({computed.orderType})</span>
-                      <strong className="text-red-300">{computed.stopLoss}</strong>
+                  {/* Compact Protected SL / TP Preview + Net Profit Expectancy */}
+                  <div className="p-2.5 rounded-xl bg-black/60 border border-slate-800/80 space-y-1.5 text-[11px]">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[10px] text-red-400 block">SL ({computed.orderType})</span>
+                        <strong className="text-red-300">{computed.stopLoss}</strong>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-emerald-400 block">TP Target</span>
+                        <strong className="text-emerald-300">{computed.tp2}</strong>
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-[10px] text-emerald-400 block">TP Target</span>
-                      <strong className="text-emerald-300">{computed.tp2}</strong>
+                    <div className="pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px]">
+                      <span className="text-slate-400">Risk -${computed.actualRiskUsd.toFixed(2)}</span>
+                      <span className="text-[#00C261] font-black">
+                        Profit +${computed.netProfitUsd.toFixed(2)} ({computed.riskReward})
+                      </span>
                     </div>
                   </div>
 

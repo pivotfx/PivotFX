@@ -1,14 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { PillarData, PageTab } from '../types';
-import { FxAcademyInteractiveTools } from '../components/tools/FxAcademyInteractiveTools';
-import { ChartMasteryInteractiveTools } from '../components/tools/ChartMasteryInteractiveTools';
-import { StrategyVaultInteractiveTools } from '../components/tools/StrategyVaultInteractiveTools';
-import { ScannerInteractiveTools } from '../components/tools/ScannerInteractiveTools';
-import { RiskInteractiveTools } from '../components/tools/RiskInteractiveTools';
-import { PsychologyInteractiveTools } from '../components/tools/PsychologyInteractiveTools';
-import { LivePulseInteractiveTools } from '../components/tools/LivePulseInteractiveTools';
-import { GrowthLabInteractiveTools } from '../components/tools/GrowthLabInteractiveTools';
-import { MacroTradeSafetyTools } from '../components/tools/MacroTradeSafetyTools';
+
+const FxAcademyInteractiveTools = lazy(() =>
+  import('../components/tools/FxAcademyInteractiveTools').then((m) => ({ default: m.FxAcademyInteractiveTools }))
+);
+const ChartMasteryInteractiveTools = lazy(() =>
+  import('../components/tools/ChartMasteryInteractiveTools').then((m) => ({ default: m.ChartMasteryInteractiveTools }))
+);
+const StrategyVaultInteractiveTools = lazy(() =>
+  import('../components/tools/StrategyVaultInteractiveTools').then((m) => ({ default: m.StrategyVaultInteractiveTools }))
+);
+const ScannerInteractiveTools = lazy(() =>
+  import('../components/tools/ScannerInteractiveTools').then((m) => ({ default: m.ScannerInteractiveTools }))
+);
+const RiskInteractiveTools = lazy(() =>
+  import('../components/tools/RiskInteractiveTools').then((m) => ({ default: m.RiskInteractiveTools }))
+);
+const PsychologyInteractiveTools = lazy(() =>
+  import('../components/tools/PsychologyInteractiveTools').then((m) => ({ default: m.PsychologyInteractiveTools }))
+);
+const LivePulseInteractiveTools = lazy(() =>
+  import('../components/tools/LivePulseInteractiveTools').then((m) => ({ default: m.LivePulseInteractiveTools }))
+);
+const GrowthLabInteractiveTools = lazy(() =>
+  import('../components/tools/GrowthLabInteractiveTools').then((m) => ({ default: m.GrowthLabInteractiveTools }))
+);
+const MacroTradeSafetyTools = lazy(() =>
+  import('../components/tools/MacroTradeSafetyTools').then((m) => ({ default: m.MacroTradeSafetyTools }))
+);
 import { PILLARS_MASTERCLASS_DATA } from '../data/pillarsMasterclassData';
 import { LessonCandleIllustration } from '../components/common/LessonCandleIllustration';
 import { LessonExpoundedMastery } from '../components/masterclass/LessonExpoundedMastery';
@@ -478,16 +497,24 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
              2. Single Clickable Masterclass Curriculum Card (01–10 housed inside)
              ========================================================================= */
           <div className="space-y-8">
-            {/* Specific Interactive Tool Injection per Pillar */}
-            {pillar.id === '/fx-academy' && <FxAcademyInteractiveTools />}
-            {pillar.id === '/chart-mastery' && <ChartMasteryInteractiveTools />}
-            {pillar.id === '/strategy-vault' && <StrategyVaultInteractiveTools />}
-            {pillar.id === '/ai-scanner' && <ScannerInteractiveTools />}
-            {pillar.id === '/risk-management' && <RiskInteractiveTools />}
-            {pillar.id === '/psychology' && <PsychologyInteractiveTools />}
-            {pillar.id === '/live-pulse' && <LivePulseInteractiveTools />}
-            {pillar.id === '/growth-lab' && <GrowthLabInteractiveTools />}
-            {pillar.id === '/macro-safety' && <MacroTradeSafetyTools onNavigatePillar={onNavigatePillar} />}
+            {/* Specific Interactive Tool Injection per Pillar (Lazy-loaded for high speed) */}
+            <Suspense
+              fallback={
+                <div className="p-8 rounded-3xl bg-[#0C1220] border border-[#D4AF37]/30 text-center text-xs font-mono text-[#D4AF37]">
+                  Initializing Live Interactive Market Workstation...
+                </div>
+              }
+            >
+              {pillar.id === '/fx-academy' && <FxAcademyInteractiveTools />}
+              {pillar.id === '/chart-mastery' && <ChartMasteryInteractiveTools />}
+              {pillar.id === '/strategy-vault' && <StrategyVaultInteractiveTools />}
+              {pillar.id === '/ai-scanner' && <ScannerInteractiveTools />}
+              {pillar.id === '/risk-management' && <RiskInteractiveTools />}
+              {pillar.id === '/psychology' && <PsychologyInteractiveTools />}
+              {pillar.id === '/live-pulse' && <LivePulseInteractiveTools />}
+              {pillar.id === '/growth-lab' && <GrowthLabInteractiveTools />}
+              {pillar.id === '/macro-safety' && <MacroTradeSafetyTools onNavigatePillar={onNavigatePillar} />}
+            </Suspense>
 
             {/* Single Clean Clickable Masterclass Curriculum Card (Eliminates 01-10 overcrowding) */}
             <div

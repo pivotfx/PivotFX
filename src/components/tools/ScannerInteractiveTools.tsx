@@ -11,7 +11,9 @@ import {
   fetchLiveMarketSnapshot,
   fetchPairLiveCandleSnapshot,
   evaluateCandleSeriesAndTick,
-  getCurrentMacroContext
+  evaluatePairKenyaTiming,
+  getCurrentMacroContext,
+  TrajectoryHorizonStep
 } from '../../utils/liveMarketEngine';
 import {
   SlidersHorizontal,
@@ -70,15 +72,22 @@ export interface AdvisorTradeCard {
   stopLoss: number;
   tp1: number;
   tp2: number;
+  tp3?: number;
   slPips: number;
   tpPips: number;
+  tp3Pips?: number;
   riskReward: string;
   lotSize: number;
   actualRiskUsd: number;
   potentialGainUsd: number;
+  netProfit48hUsd?: number;
   confidence: number;
   pattern: string;
   trend: string;
+  trendProjectionText?: string;
+  humanCheckNote?: string;
+  trajectory?: string;
+  trajectoryHorizons?: TrajectoryHorizonStep[];
   brokerSymbol: string;
   brokerSpread: number;
   cmaProtection?: string;
@@ -151,6 +160,7 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
   const [loggedSuccess, setLoggedSuccess] = useState<string | null>(null);
   const [chatSyncedNotification, setChatSyncedNotification] = useState<string | null>(null);
   const [expandedChartMsgId, setExpandedChartMsgId] = useState<string | null>(null);
+  const [advisorSideByMsgId, setAdvisorSideByMsgId] = useState<Record<string, 'AUTO' | 'BUY' | 'SELL'>>({});
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const [activeEaModalCard, setActiveEaModalCard] = useState<AdvisorTradeCard | null>(null);
@@ -1569,6 +1579,9 @@ InpMagicNumber=777129
           atrPips: activeMarketObj.atrPips,
           macro: liveMacro,
           biasOverride: biasOverride === 'AUTO' ? undefined : biasOverride,
+          previousDirection: activeMarketObj.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+          previousTrendDirection: activeMarketObj.trendDirection,
+          h1TrendDirection: activeMarketObj.h1TrendDirection
         });
 
         return (
@@ -1666,6 +1679,39 @@ InpMagicNumber=777129
               </div>
             </div>
 
+            {/* COLOR-CODED MARKET OPEN / COUNTDOWN & TREND PROJECTION BANNER */}
+            {(() => {
+              const view2Timing = evaluatePairKenyaTiming(pair);
+              return (
+                <div
+                  className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono ${
+                    view2Timing.windowStatusCode === 'OPEN'
+                      ? 'bg-emerald-950/45 border-[#00C261]/70 text-emerald-100'
+                      : view2Timing.windowStatusCode === 'OPENING_SOON'
+                      ? 'bg-amber-950/45 border-amber-400/70 text-amber-100'
+                      : 'bg-red-950/55 border-red-500/80 text-red-100'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Activity className="w-4 h-4 text-[#00C261] shrink-0" />
+                    <strong className="text-white">{view2Timing.bannerHeadline}</strong>
+                    <span className="text-slate-300">· {pair} [{timeframe}]</span>
+                  </div>
+                  <span
+                    className={`font-black ${
+                      favorableComputed.trendDirection === 'UPTREND'
+                        ? 'text-[#00C261]'
+                        : favorableComputed.trendDirection === 'DOWNTREND'
+                        ? 'text-red-300'
+                        : 'text-amber-300'
+                    }`}
+                  >
+                    {favorableComputed.trendProjectionText}
+                  </span>
+                </div>
+              );
+            })()}
+
             {chatSyncedNotification && (
               <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/50 text-emerald-200 text-xs font-mono flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-[#00C261] shrink-0" />
@@ -1706,7 +1752,7 @@ InpMagicNumber=777129
                     <BarChart3 className="w-4 h-4 text-[#D4AF37]" />
                     <span className="font-bold text-white">External TradingView Feed: {pair} [{timeframe}]</span>
                   </div>
-                  <span className="text-[11px] text-[#D4AF37] font-bold">24/7 1-Second Auto-Sync Active ({feedSyncedAt})</span>
+                  <span className="text-[11px] text-[#D4AF37] font-bold">24/7 0.5s Auto-Sync Active ({feedSyncedAt})</span>
                 </div>
                 <TradingViewEmbedWidget
                   pair={pair}
@@ -1858,14 +1904,57 @@ InpMagicNumber=777129
                 </div>
               </div>
 
-              {/* Dynamic Institutional Trajectory & Projection */}
-              <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2">
-                <span className="text-[11px] font-mono font-bold text-[#D4AF37] uppercase flex items-center gap-1.5">
-                  <TrendingUp className="w-3.5 h-3.5" />
-                  <span>Institutional Trajectory & Projection:</span>
-                </span>
+              {/* Dynamic Institutional Trajectory, Multi-Horizon Projection & Chosen-Side Verification */}
+              <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-mono font-bold text-[#D4AF37] uppercase flex items-center gap-1.5">
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    <span>Longer 1H–48H {favorableComputed.direction} Trajectory &amp; Factor Projection:</span>
+                  </span>
+                  <span className="text-[11px] font-mono font-black text-cyan-300">
+                    {favorableComputed.trendProjectionText}
+                  </span>
+                </div>
+                <div
+                  className={`p-2.5 rounded-xl border text-xs font-mono font-bold flex flex-wrap items-center justify-between gap-2 ${
+                    favorableComputed.direction === 'BUY'
+                      ? 'bg-emerald-950/35 border-[#00C261]/50 text-emerald-200'
+                      : 'bg-red-950/35 border-red-500/50 text-red-200'
+                  }`}
+                >
+                  <span>{favorableComputed.profitOutlookText}</span>
+                  <span className="text-[#00C261] font-black">
+                    12H TP2: +${favorableComputed.netProfitUsd.toFixed(2)} · 48H TP3: +${favorableComputed.netProfit48hUsd.toFixed(2)} (+{favorableComputed.netProfit48hKes} KES)
+                  </span>
+                </div>
                 <p className="text-xs sm:text-sm text-slate-200 font-mono leading-relaxed">
                   {favorableComputed.trajectory}
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-1 font-mono">
+                  {favorableComputed.trajectoryHorizons.map((step) => (
+                    <div
+                      key={step.horizon}
+                      className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1"
+                    >
+                      <span className="text-[10px] text-[#D4AF37] font-black block">{step.horizon}</span>
+                      <div className="text-xs sm:text-sm font-black text-white">
+                        @ {step.targetPrice}{' '}
+                        <span className="text-[#00C261] text-xs">
+                          ({favorableComputed.direction === 'BUY' ? `+${step.targetPips}p` : `-${step.targetPips}p`})
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-cyan-300 font-bold">
+                        Est. Net: +${step.netProfitUsd.toFixed(2)} (+{step.netProfitKes} KES)
+                      </div>
+                      <p className="text-[10px] text-slate-300 leading-snug">{step.driverSummary}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <p className="text-xs font-mono text-emerald-300 flex items-center gap-1.5 pt-1">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[#00C261] shrink-0" />
+                  <span>{favorableComputed.humanCheckNote}</span>
                 </p>
               </div>
 
@@ -2822,6 +2911,7 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
 
               {/* Dynamic Live Parameter Preview */}
               {(() => {
+                const activeManualMkt = liveMarkets.find((m) => m.pair === pair);
                 const preview = computeRealChartTradeParams({
                   targetPair: pair,
                   targetTf: timeframe,
@@ -2831,12 +2921,15 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
                   ema20,
                   ema50,
                   rsi,
-                  biasOverride: biasOverride === 'AUTO' ? undefined : biasOverride
+                  atrPips: activeManualMkt?.atrPips,
+                  biasOverride: biasOverride === 'AUTO' ? undefined : biasOverride,
+                  previousDirection: activeManualMkt ? (activeManualMkt.bias === 'STRONG_SELL' ? 'SELL' : 'BUY') : undefined,
+                  previousTrendDirection: activeManualMkt?.trendDirection
                 });
                 return (
                   <div className="p-2.5 rounded-xl bg-black/60 border border-slate-800 text-xs font-mono flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 tabular-nums">
                     <div className="text-slate-300">
-                      Live Entry: <strong className="text-white">@{preview.entryPrice}</strong> · Order: <strong className="text-[#D4AF37]">{preview.orderType}</strong> · SL: <strong className="text-red-300">{preview.stopLoss}</strong> (-{preview.slPips}p) · TP2: <strong className="text-emerald-300">{preview.tp2}</strong> (+{preview.tpPips}p)
+                      Live Entry: <strong className="text-white">@{preview.entryPrice}</strong> · Order: <strong className="text-[#D4AF37]">{preview.orderType}</strong> ({preview.trendDirection}) · SL: <strong className="text-red-300">{preview.stopLoss}</strong> (-{preview.slPips}p) · TP2: <strong className="text-emerald-300">{preview.tp2}</strong> (+{preview.tpPips}p · <strong className="text-[#00C261]">+${preview.netProfitUsd.toFixed(2)}</strong>)
                     </div>
                     <span className="text-[11px] text-emerald-400 font-bold shrink-0">
                       {preview.mt4SafetyProof}
@@ -3517,7 +3610,10 @@ Broker: ${broker.toUpperCase()}`;
                       ema20: m.ema20,
                       ema50: m.ema50,
                       rsi: m.rsi,
-                      biasOverride: m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY'
+                      biasOverride: m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+                      previousDirection: m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+                      previousTrendDirection: m.trendDirection,
+                      h1TrendDirection: m.h1TrendDirection
                     });
                     const isBuy = computedRow.direction === 'BUY';
                     const brokerSpec = m.spreadByBroker[broker];
@@ -3619,9 +3715,165 @@ Broker: ${broker.toUpperCase()}`;
             </div>
           </div>
 
-          {/* AI Advisor Chat Feed */}
+          {/* LIVE AUTO-UPDATED CHAT MARKET TELEMETRY DECK FOR CURRENT ACTIVE PAIR */}
+          {(() => {
+            const activeChatMarket =
+              liveMarkets.find((x) => x.pair === pair) || INITIAL_MARKETS_DATA[0];
+            const chatTiming = evaluatePairKenyaTiming(pair);
+            const activePctMap: Partial<Record<CurrencyPair, number>> = {};
+            liveMarkets.forEach((m) => {
+              activePctMap[m.pair] = m.change24hPct;
+            });
+            const chatComputed = computeRealChartTradeParams({
+              targetPair: pair,
+              targetTf: timeframe,
+              targetBroker: broker,
+              price: activeChatMarket.price,
+              keyLevel: activeChatMarket.keyLevel,
+              ema20: activeChatMarket.ema20,
+              ema50: activeChatMarket.ema50,
+              rsi: activeChatMarket.rsi,
+              atrPips: activeChatMarket.atrPips,
+              macro: getCurrentMacroContext(activePctMap),
+              biasOverride: biasOverride === 'AUTO' ? undefined : biasOverride,
+              previousDirection: activeChatMarket.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+              previousTrendDirection: activeChatMarket.trendDirection,
+              h1TrendDirection: activeChatMarket.h1TrendDirection
+            });
+
+            return (
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-[#0B1222] to-[#070B14] border-2 border-[#D4AF37]/60 space-y-3 font-mono tabular-nums shadow-lg">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2.5 py-0.5 rounded-lg bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/50 text-[11px] font-black">
+                      LIVE CHAT AUTO-SYNC ({feedSyncedAt})
+                    </span>
+                    <strong className="text-sm sm:text-base text-white">
+                      {pair} [{timeframe}] @ {activeChatMarket.price}
+                    </strong>
+                    <span
+                      className={`text-xs font-black ${
+                        chatComputed.trendDirection === 'UPTREND'
+                          ? 'text-[#00C261]'
+                          : chatComputed.trendDirection === 'DOWNTREND'
+                          ? 'text-red-300'
+                          : 'text-amber-300'
+                      }`}
+                    >
+                      · {chatComputed.trendProjectionText}
+                    </span>
+                  </div>
+
+                  {/* Check Other Side Switcher Right on Live Chat Card */}
+                  <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-[11px]">
+                    {(['AUTO', 'BUY', 'SELL'] as const).map((sideMode) => (
+                      <button
+                        key={sideMode}
+                        type="button"
+                        onClick={() => setBiasOverride(sideMode)}
+                        className={`px-2.5 py-1 rounded-lg font-black transition ${
+                          biasOverride === sideMode
+                            ? sideMode === 'BUY'
+                              ? 'bg-[#00C261] text-black'
+                              : sideMode === 'SELL'
+                              ? 'bg-red-500 text-white'
+                              : 'bg-[#D4AF37] text-black'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {sideMode === 'AUTO' ? 'AI Auto' : sideMode}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div
+                  className={`px-3 py-2 rounded-xl border text-[11px] flex flex-wrap items-center justify-between gap-2 ${
+                    chatTiming.windowStatusCode === 'OPEN'
+                      ? 'bg-emerald-950/40 border-[#00C261]/60 text-emerald-200'
+                      : chatTiming.windowStatusCode === 'OPENING_SOON'
+                      ? 'bg-amber-950/40 border-amber-400/60 text-amber-200'
+                      : 'bg-red-950/50 border-red-500/70 text-red-200'
+                  }`}
+                >
+                  <strong className="text-white">{chatTiming.bannerHeadline}</strong>
+                  <span>
+                    {chatComputed.orderType} · SL <strong className="text-red-300">{chatComputed.stopLoss}</strong> · TP2{' '}
+                    <strong className="text-[#00C261]">{chatComputed.tp2}</strong> · 48H TP3{' '}
+                    <strong className="text-cyan-300">{chatComputed.tp3}</strong> ·{' '}
+                    <strong className="text-[#D4AF37]">
+                      Est. Profit +${chatComputed.netProfitUsd.toFixed(2)} (+${chatComputed.netProfit48hUsd.toFixed(2)} 48H)
+                    </strong>
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-[#00C261] font-bold">{chatComputed.profitOutlookText}</p>
+                <p className="text-[11px] text-slate-300">{chatComputed.humanCheckNote}</p>
+              </div>
+            );
+          })()}
+
+          {/* AI Advisor Chat Feed (Dynamically Syncs Matching Market Cards Every Tick) */}
           <div className="rounded-2xl bg-slate-950/80 border border-slate-800 p-4 sm:p-5 space-y-4 max-h-[560px] overflow-y-auto">
-            {advisorMessages.map((m) => (
+            {advisorMessages.map((m) => {
+              let syncedCard = m.tradeCard;
+              if (syncedCard) {
+                const liveMatch = liveMarkets.find((x) => x.pair === syncedCard!.pair);
+                const msgSideOverride = advisorSideByMsgId[m.id] || 'AUTO';
+                const effectiveDir =
+                  msgSideOverride === 'AUTO'
+                    ? liveMatch && syncedCard.pair === pair
+                      ? liveMatch.bias === 'STRONG_SELL'
+                        ? 'SELL'
+                        : 'BUY'
+                      : syncedCard.direction
+                    : msgSideOverride;
+                if (liveMatch || msgSideOverride !== 'AUTO') {
+                  const pVal = liveMatch ? liveMatch.price : syncedCard.entryPrice;
+                  const recomputed = computeRealChartTradeParams({
+                    targetPair: syncedCard.pair,
+                    targetTf: syncedCard.timeframe || timeframe,
+                    targetBroker: broker,
+                    price: pVal,
+                    keyLevel: liveMatch?.keyLevel,
+                    ema20: liveMatch?.ema20 ?? pVal,
+                    ema50: liveMatch?.ema50 ?? pVal,
+                    rsi: liveMatch?.rsi ?? 52,
+                    atrPips: liveMatch?.atrPips,
+                    biasOverride: effectiveDir,
+                    previousDirection: syncedCard.direction,
+                    previousTrendDirection: liveMatch?.trendDirection,
+                    h1TrendDirection: liveMatch?.h1TrendDirection
+                  });
+                  syncedCard = {
+                    ...syncedCard,
+                    direction: recomputed.direction,
+                    orderType: recomputed.orderType,
+                    entryPrice: recomputed.entryPrice,
+                    stopLoss: recomputed.stopLoss,
+                    tp1: recomputed.tp1,
+                    tp2: recomputed.tp2,
+                    tp3: recomputed.tp3,
+                    slPips: recomputed.slPips,
+                    tpPips: recomputed.tpPips,
+                    tp3Pips: recomputed.tp3Pips,
+                    riskReward: recomputed.riskReward,
+                    actualRiskUsd: recomputed.actualRiskUsd,
+                    potentialGainUsd: recomputed.netProfitUsd,
+                    netProfit48hUsd: recomputed.netProfit48hUsd,
+                    confidence: recomputed.confidence,
+                    trend: recomputed.trendProjectionText,
+                    trendProjectionText: recomputed.trendProjectionText,
+                    humanCheckNote: recomputed.humanCheckNote,
+                    trajectory: recomputed.trajectory,
+                    trajectoryHorizons: recomputed.trajectoryHorizons,
+                    brokerSymbol: recomputed.brokerSymbol,
+                    brokerSpread: recomputed.brokerSpread
+                  };
+                }
+              }
+
+              return (
               <div
                 key={m.id}
                 className={`flex flex-col ${m.sender === 'user' ? 'items-end' : 'items-start'} space-y-1.5`}
@@ -3629,7 +3881,7 @@ Broker: ${broker.toUpperCase()}`;
                 <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500">
                   <span>{m.sender === 'user' ? 'Trader' : 'Institutional AI Advisor'}</span>
                   <span>•</span>
-                  <span>{m.timestamp}</span>
+                  <span>{syncedCard && syncedCard.pair === pair ? `Live Sync (${feedSyncedAt})` : m.timestamp}</span>
                 </div>
 
                 <div
@@ -3666,36 +3918,48 @@ Broker: ${broker.toUpperCase()}`;
                     {m.text}
                   </div>
 
-                  {/* RICH INSTITUTIONAL TRADE PLACEMENT CARD (REAL SL, TP, LOT SIZE & MT4 TICKET) */}
-                  {m.tradeCard && (
+                  {/* RICH INSTITUTIONAL TRADE PLACEMENT CARD (AUTO-SYNCED SL, TP, LOT SIZE & OPPOSITE-SIDE TOGGLE) */}
+                  {syncedCard && (
                     <div className="mt-3 p-4 rounded-xl bg-slate-950 border border-[#D4AF37]/50 space-y-3 font-mono">
                       {/* Card Header with Direction, Order Type, Timeframe, and Broker Symbol */}
                       <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 flex-wrap gap-2">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span
                             className={`px-2.5 py-1 rounded-lg text-xs font-black shadow-md ${
-                              m.tradeCard.direction === 'BUY'
+                              syncedCard.direction === 'BUY'
                                 ? 'bg-[#00C261] text-black'
                                 : 'bg-red-600 text-white'
                             }`}
                           >
-                            {m.tradeCard.direction} {m.tradeCard.pair}
+                            {syncedCard.direction} {syncedCard.pair}
                           </span>
                           <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700 text-white text-[11px] font-bold">
-                            {m.tradeCard.orderType || `${m.tradeCard.direction} BY MARKET`}
+                            {syncedCard.orderType || `${syncedCard.direction} BY MARKET`}
                           </span>
                           <span className="px-2 py-0.5 rounded-md bg-cyan-950/80 border border-cyan-500/50 text-cyan-300 text-[11px] font-bold">
-                            {m.tradeCard.timeframe || timeframe}
+                            {syncedCard.timeframe || timeframe}
                           </span>
-                          <span className="text-xs text-white font-bold">{m.tradeCard.pattern}</span>
+                          <span className="text-xs text-white font-bold">{syncedCard.pattern}</span>
                         </div>
 
-                        <div className="flex items-center gap-2 text-xs">
+                        <div className="flex items-center gap-2 text-xs flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setAdvisorSideByMsgId((prev) => ({
+                                ...prev,
+                                [m.id]: syncedCard!.direction === 'BUY' ? 'SELL' : 'BUY'
+                              }))
+                            }
+                            className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-[#D4AF37]/40 text-[#D4AF37] font-bold text-[10px] transition"
+                          >
+                            Inspect {syncedCard.direction === 'BUY' ? 'SELL' : 'BUY'} Side
+                          </button>
                           <span className="px-2 py-0.5 rounded bg-purple-950/80 border border-purple-500/40 text-purple-300 font-bold text-[10px]">
-                            {broker.toUpperCase()}: {m.tradeCard.brokerSymbol}
+                            {broker.toUpperCase()}: {syncedCard.brokerSymbol}
                           </span>
-                          <span className="text-[#00C261] font-bold">{m.tradeCard.confidence}% Confluence</span>
-                          <span className="text-[#D4AF37] font-bold">• R:R {m.tradeCard.riskReward}</span>
+                          <span className="text-[#00C261] font-bold">{syncedCard.confidence}% Confluence</span>
+                          <span className="text-[#D4AF37] font-bold">• R:R {syncedCard.riskReward}</span>
                         </div>
                       </div>
 
@@ -3704,7 +3968,7 @@ Broker: ${broker.toUpperCase()}`;
                         <button
                           type="button"
                           onClick={() => {
-                            navigator.clipboard.writeText(String(m.tradeCard!.entryPrice));
+                            navigator.clipboard.writeText(String(syncedCard!.entryPrice));
                             setCopiedField(`${m.id}-entry`);
                             setTimeout(() => setCopiedField(null), 2000);
                           }}
@@ -3715,14 +3979,14 @@ Broker: ${broker.toUpperCase()}`;
                             <span>Entry Price</span>
                             <span className="text-[#D4AF37]">{copiedField === `${m.id}-entry` ? '✓ COPIED' : '📋 COPY'}</span>
                           </div>
-                          <span className="font-bold text-white text-sm block mt-0.5">@{m.tradeCard.entryPrice}</span>
+                          <span className="font-bold text-white text-sm block mt-0.5">@{syncedCard.entryPrice}</span>
                           <span className="text-[9px] text-slate-500">Market Execution</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => {
-                            navigator.clipboard.writeText(String(m.tradeCard!.stopLoss));
+                            navigator.clipboard.writeText(String(syncedCard!.stopLoss));
                             setCopiedField(`${m.id}-sl`);
                             setTimeout(() => setCopiedField(null), 2000);
                           }}
@@ -3733,14 +3997,14 @@ Broker: ${broker.toUpperCase()}`;
                             <span>Stop Loss (SL)</span>
                             <span className="text-red-300">{copiedField === `${m.id}-sl` ? '✓ COPIED' : '📋 COPY'}</span>
                           </div>
-                          <span className="font-bold text-red-300 text-sm block mt-0.5">{m.tradeCard.stopLoss}</span>
-                          <span className="text-[9px] text-slate-400 block">(-{m.tradeCard.slPips} pips / ${m.tradeCard.actualRiskUsd})</span>
+                          <span className="font-bold text-red-300 text-sm block mt-0.5">{syncedCard.stopLoss}</span>
+                          <span className="text-[9px] text-slate-400 block">(-{syncedCard.slPips} pips / ${syncedCard.actualRiskUsd})</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => {
-                            navigator.clipboard.writeText(String(m.tradeCard!.tp1));
+                            navigator.clipboard.writeText(String(syncedCard!.tp1));
                             setCopiedField(`${m.id}-tp1`);
                             setTimeout(() => setCopiedField(null), 2000);
                           }}
@@ -3751,14 +4015,14 @@ Broker: ${broker.toUpperCase()}`;
                             <span>Take Profit 1</span>
                             <span className="text-cyan-300">{copiedField === `${m.id}-tp1` ? '✓ COPIED' : '📋 COPY'}</span>
                           </div>
-                          <span className="font-bold text-cyan-300 text-sm block mt-0.5">{m.tradeCard.tp1}</span>
+                          <span className="font-bold text-cyan-300 text-sm block mt-0.5">{syncedCard.tp1}</span>
                           <span className="text-[9px] text-slate-400 block">(50% Close & BE)</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => {
-                            navigator.clipboard.writeText(String(m.tradeCard!.tp2));
+                            navigator.clipboard.writeText(String(syncedCard!.tp2));
                             setCopiedField(`${m.id}-tp2`);
                             setTimeout(() => setCopiedField(null), 2000);
                           }}
@@ -3769,8 +4033,8 @@ Broker: ${broker.toUpperCase()}`;
                             <span>Take Profit 2</span>
                             <span className="text-emerald-300">{copiedField === `${m.id}-tp2` ? '✓ COPIED' : '📋 COPY'}</span>
                           </div>
-                          <span className="font-bold text-emerald-300 text-sm block mt-0.5">{m.tradeCard.tp2}</span>
-                          <span className="text-[9px] text-emerald-400 block">(+{m.tradeCard.tpPips} pips final)</span>
+                          <span className="font-bold text-emerald-300 text-sm block mt-0.5">{syncedCard.tp2}</span>
+                          <span className="text-[9px] text-emerald-400 block">(+{syncedCard.tpPips} pips final)</span>
                         </button>
                       </div>
 
@@ -3779,7 +4043,7 @@ Broker: ${broker.toUpperCase()}`;
                         <div className="flex items-center gap-1.5">
                           <ShieldCheck className="w-4 h-4 text-[#D4AF37] shrink-0" />
                           <span>Gilgil Shield:</span>
-                          <strong className="text-white">STRICTLY {m.tradeCard.lotSize} Micro Lot ($2.00 / 260 KES Hard Loss Cap)</strong>
+                          <strong className="text-white">STRICTLY {syncedCard.lotSize} Micro Lot ($2.00 / 260 KES Hard Loss Cap)</strong>
                         </div>
                         <span className="text-emerald-400 font-bold text-[10px]">
                           ✓ CMA Safety: Zero Negative Balance Debt Risk
@@ -3790,17 +4054,39 @@ Broker: ${broker.toUpperCase()}`;
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[10px] text-slate-400 font-mono">
                         <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
                           <span className="text-slate-500 block uppercase">Broker / Symbol</span>
-                          <span className="font-bold text-white">{broker.toUpperCase()} • {m.tradeCard.brokerSymbol}</span>
+                          <span className="font-bold text-white">{broker.toUpperCase()} • {syncedCard.brokerSymbol}</span>
                         </div>
                         <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
-                          <span className="text-slate-500 block uppercase">Live Spread</span>
-                          <span className="font-bold text-amber-300">~{m.tradeCard.brokerSpread} pips</span>
+                          <span className="text-slate-500 block uppercase">Live Spread &amp; Trend</span>
+                          <span className="font-bold text-amber-300">~{syncedCard.brokerSpread}p · {syncedCard.direction}</span>
                         </div>
                         <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800 col-span-2 sm:col-span-1">
-                          <span className="text-slate-500 block uppercase">Potential Target Gain</span>
-                          <span className="font-bold text-[#00C261]">+${m.tradeCard.potentialGainUsd} USD (~{(m.tradeCard.potentialGainUsd * 130).toFixed(0)} KES)</span>
+                          <span className="text-slate-500 block uppercase">12H / 48H Target Gain</span>
+                          <span className="font-bold text-[#00C261]">
+                            +${syncedCard.potentialGainUsd} {syncedCard.netProfit48hUsd ? `/ 48H +$${syncedCard.netProfit48hUsd}` : ''}
+                          </span>
                         </div>
                       </div>
+
+                      {syncedCard.trajectoryHorizons && syncedCard.trajectoryHorizons.length > 0 && (
+                        <div className="p-2.5 rounded-lg bg-slate-900/80 border border-cyan-500/30 space-y-1.5 text-[10px] font-mono">
+                          <div className="text-cyan-300 font-bold">
+                            Longer 1H–48H {syncedCard.direction} Trajectory Roadmap ({syncedCard.trendProjectionText}):
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                            {syncedCard.trajectoryHorizons.map((h) => (
+                              <div key={h.horizon} className="p-2 rounded bg-slate-950 border border-slate-800">
+                                <span className="text-[#D4AF37] font-bold block">{h.horizon}</span>
+                                <strong className="text-white">@ {h.targetPrice}</strong>{' '}
+                                <span className="text-[#00C261]">(+${h.netProfitUsd.toFixed(2)})</span>
+                              </div>
+                            ))}
+                          </div>
+                          {syncedCard.humanCheckNote && (
+                            <div className="text-emerald-300">{syncedCard.humanCheckNote}</div>
+                          )}
+                        </div>
+                      )}
 
                       {/* MT4 Execution Steps */}
                       <div className="space-y-1 text-xs">
@@ -3808,7 +4094,7 @@ Broker: ${broker.toUpperCase()}`;
                           MT4/MT5 F9 Execution Ticket ({broker.toUpperCase()}):
                         </span>
                         <div className="space-y-0.5 bg-slate-900 p-2.5 rounded-lg border border-slate-800 text-[11px] text-slate-300">
-                          {m.tradeCard.mt4Steps.map((step, idx) => (
+                          {syncedCard.mt4Steps.map((step, idx) => (
                             <div key={idx} className="flex items-start gap-1.5">
                               <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
                               <span>{step}</span>
@@ -3823,7 +4109,7 @@ Broker: ${broker.toUpperCase()}`;
                           <div className="flex items-center justify-between text-xs font-mono pb-1 border-b border-slate-800">
                             <div className="flex items-center gap-2 text-cyan-300 font-bold">
                               <BarChart3 className="w-4 h-4 text-cyan-400" />
-                              <span>Live Institutional Chart: {m.tradeCard.pair} ({timeframe})</span>
+                              <span>Live Institutional Chart: {syncedCard.pair} ({timeframe})</span>
                             </div>
                             <button
                               onClick={() => setExpandedChartMsgId(null)}
@@ -3833,7 +4119,7 @@ Broker: ${broker.toUpperCase()}`;
                             </button>
                           </div>
                           <TradingViewEmbedWidget
-                            pair={m.tradeCard.pair}
+                            pair={syncedCard.pair}
                             timeframe={timeframe}
                             onPairChange={(newPair) => handleSwitchPairAndSyncRealData(newPair)}
                             onTimeframeChange={(newTf) => setTimeframe(newTf)}
@@ -3855,7 +4141,7 @@ Broker: ${broker.toUpperCase()}`;
                         </button>
 
                         <button
-                          onClick={() => handleToggleSpeakAudit(m.id, m.tradeCard!)}
+                          onClick={() => handleToggleSpeakAudit(m.id, syncedCard!)}
                           className={`py-2.5 px-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 shadow-sm ${
                             speakingMsgId === m.id
                               ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 animate-pulse'
@@ -3877,7 +4163,7 @@ Broker: ${broker.toUpperCase()}`;
                         </button>
 
                         <button
-                          onClick={() => setActiveEaModalCard(m.tradeCard!)}
+                          onClick={() => setActiveEaModalCard(syncedCard!)}
                           className="py-2.5 px-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-purple-300 hover:text-white border border-purple-800/60 hover:border-purple-400 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 shadow-sm"
                           title="Generate MT4/MT5 EA script and .set file"
                         >
@@ -3886,7 +4172,7 @@ Broker: ${broker.toUpperCase()}`;
                         </button>
 
                         <button
-                          onClick={() => setActiveTelegramModalCard(m.tradeCard!)}
+                          onClick={() => setActiveTelegramModalCard(syncedCard!)}
                           className="py-2.5 px-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-sky-300 hover:text-white border border-sky-800/60 hover:border-sky-400 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 shadow-sm"
                           title="Send to Phone via Telegram / WhatsApp"
                         >
@@ -3896,9 +4182,9 @@ Broker: ${broker.toUpperCase()}`;
 
                         <button
                           onClick={() => {
-                            const ticket = `[PIVOTFX AI ORDER TICKET]\nPair: ${m.tradeCard!.pair}\nSymbol: ${m.tradeCard!.brokerSymbol}\nAction: ${m.tradeCard!.direction} BY MARKET\nVolume: 0.01 Micro Lot\nEntry: ${m.tradeCard!.entryPrice}\nStop Loss: ${m.tradeCard!.stopLoss} (-${m.tradeCard!.slPips} pips / $${m.tradeCard!.actualRiskUsd} max loss)\nTake Profit 1: ${m.tradeCard!.tp1} (Close 50% & Move SL to Breakeven)\nTake Profit 2: ${m.tradeCard!.tp2} (+${m.tradeCard!.tpPips} pips final target)\nRisk:Reward = 1 : ${m.tradeCard!.riskReward}\nBroker: ${broker.toUpperCase()} (~${m.tradeCard!.brokerSpread} pips spread)\nCapital Shield: Strict $2.00 / 260 KES (Gilgil Rule)`;
+                            const ticket = `[PIVOTFX AI ORDER TICKET]\nPair: ${syncedCard!.pair}\nSymbol: ${syncedCard!.brokerSymbol}\nAction: ${syncedCard!.direction} BY MARKET\nVolume: 0.01 Micro Lot\nEntry: ${syncedCard!.entryPrice}\nStop Loss: ${syncedCard!.stopLoss} (-${syncedCard!.slPips} pips / $${syncedCard!.actualRiskUsd} max loss)\nTake Profit 1: ${syncedCard!.tp1} (Close 50% & Move SL to Breakeven)\nTake Profit 2: ${syncedCard!.tp2} (+${syncedCard!.tpPips} pips final target)\nRisk:Reward = 1 : ${syncedCard!.riskReward}\nBroker: ${broker.toUpperCase()} (~${syncedCard!.brokerSpread} pips spread)\nCapital Shield: Strict $2.00 / 260 KES (Gilgil Rule)`;
                             navigator.clipboard.writeText(ticket);
-                            setChatSyncedNotification(`✓ Copied complete MT4/MT5 order ticket for ${m.tradeCard!.pair}!`);
+                            setChatSyncedNotification(`✓ Copied complete MT4/MT5 order ticket for ${syncedCard!.pair}!`);
                             setTimeout(() => setChatSyncedNotification(null), 2500);
                           }}
                           className="py-2.5 px-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-[#D4AF37] text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95"
@@ -3910,14 +4196,14 @@ Broker: ${broker.toUpperCase()}`;
 
                         <button
                           onClick={() => handleLogToJournal({
-                            pair: m.tradeCard!.pair,
-                            verdict: m.tradeCard!.direction,
+                            pair: syncedCard!.pair,
+                            verdict: syncedCard!.direction,
                             suggestedLot: 0.01,
-                            entryPrice: m.tradeCard!.entryPrice,
-                            suggestedTP: m.tradeCard!.tp2,
-                            potentialGainUsd: m.tradeCard!.potentialGainUsd,
-                            pattern: m.tradeCard!.pattern,
-                            score: m.tradeCard!.confidence
+                            entryPrice: syncedCard!.entryPrice,
+                            suggestedTP: syncedCard!.tp2,
+                            potentialGainUsd: syncedCard!.potentialGainUsd,
+                            pattern: syncedCard!.pattern,
+                            score: syncedCard!.confidence
                           })}
                           className="py-2.5 px-2 rounded-xl btn-gold text-black text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition active:scale-95"
                           title="Log to Pillar 8 Trade Journal"
@@ -3930,7 +4216,8 @@ Broker: ${broker.toUpperCase()}`;
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
 
             {advisorLoading && (
               <div className="flex items-center gap-2 text-xs font-mono text-[#D4AF37] p-3 rounded-xl bg-slate-900 border border-slate-800 animate-pulse">
