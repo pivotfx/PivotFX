@@ -104,7 +104,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <header className="sticky top-0 z-40 w-full bg-[#080C14]/95 backdrop-blur-md border-b border-slate-800">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        {/* ROW 1 - BACK TO ORIGINAL 64px */}
+        {/* ROW 1 - 64px - ORIGINAL */}
         <div className="flex items-center justify-between gap-4 h-16">
           <button
             onClick={() => onSelectTab('landing')}
@@ -180,8 +180,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* ROW 2 - SLIM 32px */}
-        <div className="hidden xl:flex items-center justify-center gap-1 h-8">
+        {/* ROW 2 - 32px - TIGHT, NOT WIDE */}
+        <div className="hidden xl:flex items-center justify-center gap-1 h-8 w-fit mx-auto">
           {row2Items.map((item) => {
             const isActive = activeTab === item.id;
             return (
