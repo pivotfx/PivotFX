@@ -109,7 +109,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
 
           {/* Center Zone: Single-Line Navigation */}
-          <nav className="hidden xl:flex items-center gap-1 min-w-0">
+          <nav className="hidden 2xl:flex items-center gap-1 min-w-0">
             {navItems.map((item) => {
               const isActive = activeTab === item.id;
               return (
@@ -167,7 +167,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Mobile Drawer Trigger */}
-          <div className="flex xl:hidden items-center gap-2 shrink-0">
+          <div className="flex 2xl:hidden items-center gap-2 shrink-0">
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               aria-label="Toggle Navigation Menu"
@@ -181,7 +181,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Mobile Drawer Navigation */}
       {mobileMenuOpen && (
-        <div className="xl:hidden bg-[#0A0E18] border-b border-slate-800 px-4 pt-3 pb-6 space-y-3">
+        <div className="2xl:hidden bg-[#0A0E18] border-b border-slate-800 px-4 pt-3 pb-6 space-y-3">
           <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-mono tabular-nums">
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4 text-[#D4AF37]" />
