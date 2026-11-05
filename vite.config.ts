@@ -9,7 +9,7 @@ const __dirname = path.dirname(__filename);
 
 export default defineConfig(() => {
   return {
-    base: '/PivotFX/'
+    base: '/PivotFX/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
