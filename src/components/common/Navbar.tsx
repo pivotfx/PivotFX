@@ -80,7 +80,6 @@ export const Navbar: React.FC<NavbarProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  // CHANGE 1 - SPLIT ONLY: Row 1 = Home + P1-P6, Row 2 = P7-P8-P9
   const row1Items: { id: PageTab; label: string; icon: React.ReactNode }[] = [
     { id: 'landing', label: 'Home', icon: <Home className="w-3.5 h-3.5" /> },
     { id: '/fx-academy', label: 'P1 Academy', icon: <GraduationCap className="w-3.5 h-3.5" /> },
@@ -97,7 +96,6 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: '/macro-safety', label: 'P9 Safety', icon: <Globe className="w-3.5 h-3.5" /> },
   ];
 
-  // For mobile drawer - keeps all 10, unchanged
   const navItems = [...row1Items, ...row2Items];
 
   const isLocked = killSwitchUntil && killSwitchUntil > Date.now();
@@ -106,8 +104,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <header className="sticky top-0 z-40 w-full bg-[#080C14]/95 backdrop-blur-md border-b border-slate-800">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        <div className="flex items-center justify-between gap-4 h-16">
-          {/* Left Zone: Brand Wordmark */}
+        {/* ROW 1 - 36px */}
+        <div className="flex items-center justify-between gap-4 h-9">
           <button
             onClick={() => onSelectTab('landing')}
             className="flex items-center text-left focus:outline-none shrink-0"
@@ -115,7 +113,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Logo size="md" showBadge={false} />
           </button>
 
-          {/* Center Zone: Single-Line Navigation - CHANGE 2: row1Items only */}
           <nav className="hidden xl:flex items-center gap-1 min-w-0">
             {row1Items.map((item) => {
               const isActive = activeTab === item.id;
@@ -123,7 +120,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   key={item.id}
                   onClick={() => onSelectTab(item.id)}
-                  className={`relative flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
+                  className={`relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
                     isActive
                       ? 'text-white bg-[#111A2E] border border-[#D4AF37]/50'
                       : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'
@@ -141,7 +138,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             })}
           </nav>
 
-          {/* Right Zone: Live EAT Clock + Session Status + Brand Kit */}
           <div className="hidden sm:flex items-center gap-2.5 shrink-0">
             {isLocked && (
               <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-red-950/90 border border-red-500/40 text-red-300 text-xs font-mono whitespace-nowrap">
@@ -173,7 +169,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </div>
 
-          {/* Mobile Drawer Trigger */}
           <div className="flex xl:hidden items-center gap-2 shrink-0">
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -185,15 +180,15 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* CHANGE 3 - ONLY NEW PART: ROW 2 for P7 P8 P9 */}
-        <div className="hidden xl:flex items-center justify-center gap-1 pb-2">
+        {/* ROW 2 - 28px - P7 P8 P9 ONLY */}
+        <div className="hidden xl:flex items-center justify-center gap-1 h-7">
           {row2Items.map((item) => {
             const isActive = activeTab === item.id;
             return (
               <button
                 key={item.id}
                 onClick={() => onSelectTab(item.id)}
-                className={`relative flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
+                className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
                   isActive
                     ? 'text-white bg-[#111A2E] border border-[#D4AF37]/50'
                     : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'
@@ -212,7 +207,6 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
 
-      {/* Mobile Drawer Navigation */}
       {mobileMenuOpen && (
         <div className="xl:hidden bg-[#0A0E18] border-b border-slate-800 px-4 pt-3 pb-6 space-y-3">
           <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-mono tabular-nums">
