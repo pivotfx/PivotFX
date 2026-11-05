@@ -15,13 +15,13 @@ export const Footer: React.FC<FooterProps> = ({
   return (
     <footer className="w-full bg-[#060910] border-t border-slate-800 text-slate-400 mt-16">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-10">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-10">
           {/* Col 1: Brand & Identity */}
-          <div className="space-y-4 min-w-0">
-            <div className="min-w-0 max-w-full overflow-hidden">
+          <div className="space-y-4 md:col-span-1">
+            <div className="min-w-0 max-w-[320px] [&_*]:!whitespace-normal [&_*]:!break-words [&_*]:!max-w-full [&_*]:!leading-snug">
               <Logo size="md" showBadge={true} />
             </div>
-            <p className="text-xs text-slate-400 leading-relaxed break-words">
+            <p className="text-xs text-slate-400 leading-relaxed">
               PivotFx Prop Firm & Forex Academy. Engineered to transition traders from disciplined micro-lot execution to funded prop firm accounts using real-time interbank telemetry and institutional order flow.
             </p>
             <div className="flex items-center gap-2 pt-1">
@@ -36,7 +36,7 @@ export const Footer: React.FC<FooterProps> = ({
           </div>
 
           {/* Col 2: Masterclasses 01 - 05 */}
-          <div className="space-y-3 min-w-0">
+          <div className="space-y-3">
             <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-[#D4AF37]">
               Masterclasses 01 – 05
             </h4>
@@ -85,7 +85,7 @@ export const Footer: React.FC<FooterProps> = ({
           </div>
 
           {/* Col 3: Masterclasses 06 - 09 */}
-          <div className="space-y-3 min-w-0">
+          <div className="space-y-3">
             <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-[#D4AF37]">
               Masterclasses 06 – 09
             </h4>
@@ -126,11 +126,11 @@ export const Footer: React.FC<FooterProps> = ({
           </div>
 
           {/* Col 4: Prop Firm Risk & Educational Standards */}
-          <div className="space-y-3 min-w-0">
+          <div className="space-y-3">
             <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-[#D4AF37]">
               Risk &amp; Educational Standards
             </h4>
-            <p className="text-[11px] text-slate-400 leading-relaxed break-words">
+            <p className="text-[11px] text-slate-400 leading-relaxed">
               Trading foreign exchange and derivatives carries substantial risk of capital loss. Educational analysis and telemetry are provided for structured practice and risk modeling.
             </p>
             <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-[11px] font-mono text-slate-300">
