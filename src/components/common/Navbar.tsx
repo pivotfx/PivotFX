@@ -180,30 +180,29 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* ROW 2 - 32px - TIGHT, NOT WIDE */}
-        <div className="hidden xl:flex items-center justify-center gap-1 h-8 w-fit mx-auto">
-          {row2Items.map((item) => {
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => onSelectTab(item.id)}
-                className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
-                  isActive
-                    ? 'text-white bg-[#111A2E] border border-[#D4AF37]/50'
-                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'
-                }`}
-              >
-                <span className={isActive ? 'text-[#D4AF37]' : 'text-slate-400'}>
-                  {item.icon}
-                </span>
-                <span>{item.label}</span>
-                {isActive && (
-                  <span className="absolute bottom-0 left-2.5 right-2.5 h-0.5 bg-[#D4AF37] rounded-full" />
-                )}
-              </button>
-            );
-          })}
+        {/* ROW 2 - SMALL CAPSULE, NOT WIDE BAR */}
+        <div className="hidden xl:flex justify-center pb-1.5">
+          <div className="flex items-center gap-1 px-1.5 py-1 rounded-full bg-[#0B1120] border border-slate-800">
+            {row2Items.map((item) => {
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => onSelectTab(item.id)}
+                  className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
+                    isActive
+                      ? 'text-white bg-[#111A2E] border border-[#D4AF37]/50'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'
+                  }`}
+                >
+                  <span className={isActive ? 'text-[#D4AF37]' : 'text-slate-400'}>
+                    {item.icon}
+                  </span>
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
