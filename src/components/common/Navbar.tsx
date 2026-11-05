@@ -182,7 +182,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* ROW 2 - SMALL CAPSULE, NOT WIDE BAR */}
         <div className="hidden xl:flex justify-center pb-1.5">
-          <div className="flex items-center gap-1 px-1.5 py-1 rounded-full bg-[#0B1120] border border-slate-800">
+          <div className="flex items-center gap-0 px-1 py-0.5 rounded-full bg-[#1A2333] border border-[#D4AF37]/50">
             {row2Items.map((item) => {
               const isActive = activeTab === item.id;
               return (
