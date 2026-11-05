@@ -104,8 +104,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <header className="sticky top-0 z-40 w-full bg-[#080C14]/95 backdrop-blur-md border-b border-slate-800">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        {/* ROW 1 - 64px - ORIGINAL */}
-        <div className="flex items-center justify-between gap-4 h-16">
+        {/* ROW 1 - ORIGINAL, JUST SHORTER SO ROW 2 COMES UP */}
+        <div className="flex items-center justify-between gap-4 h-12">
           <button
             onClick={() => onSelectTab('landing')}
             className="flex items-center text-left focus:outline-none shrink-0"
@@ -180,29 +180,30 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* ROW 2 - SMALL CAPSULE, NOT WIDE BAR */}
-        <div className="hidden xl:flex justify-center pb-1.5">
-          <div className="flex items-center gap-0 px-1 py-0.5 rounded-full bg-[#1A2333] border border-[#D4AF37]/50">
-            {row2Items.map((item) => {
-              const isActive = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onSelectTab(item.id)}
-                  className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
-                    isActive
-                      ? 'text-white bg-[#111A2E] border border-[#D4AF37]/50'
-                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'
-                  }`}
-                >
-                  <span className={isActive ? 'text-[#D4AF37]' : 'text-slate-400'}>
-                    {item.icon}
-                  </span>
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </div>
+        {/* ROW 2 - ORIGINAL DESIGN, NO PILL, JUST PULLED UP CLOSE TO ROW 1 */}
+        <div className="hidden xl:flex items-center justify-center gap-1 h-7 -mt-2 pb-1">
+          {row2Items.map((item) => {
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => onSelectTab(item.id)}
+                className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
+                  isActive
+                    ? 'text-white bg-[#111A2E] border border-[#D4AF37]/50'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'
+                }`}
+              >
+                <span className={isActive ? 'text-[#D4AF37]' : 'text-slate-400'}>
+                  {item.icon}
+                </span>
+                <span>{item.label}</span>
+                {isActive && (
+                  <span className="absolute bottom-0 left-2.5 right-2.5 h-0.5 bg-[#D4AF37] rounded-full" />
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
