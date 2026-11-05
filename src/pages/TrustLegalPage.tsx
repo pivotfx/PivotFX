@@ -123,10 +123,10 @@ export const TrustLegalPage: React.FC<TrustLegalPageProps> = ({ onNavigate, onOp
                 In 2024, in the quiet town of Gilgil, Kenya, our small group of traders fell into the same brutal trap that consumes thousands of young Kenyans every day: chasing massive green candlestick "towers".
               </p>
               <p>
-                We bought heavily at <strong className="text-red-400 font-mono">1296.56</strong> on MT4. We didn't know about moving average extensions or RSI divergence. We had no stop loss, risking far more than we could afford. In 15 minutes, the market formed an institutional rejection wick, crashing down 70+ pips. That single day wiped out our balance and taught us a permanent lesson in humility.
+                We bought heavily at <strong className="text-red-400 font-mono">1.35450</strong> on MT4 without checking how far price had stretched above the 20 EMA or RSI divergence. We had no stop loss, risking far more than we could afford. In 15 minutes, the market formed an institutional rejection wick, crashing down 70+ pips. That single session taught us a permanent lesson in discipline.
               </p>
               <p>
-                Instead of quitting or buying fake VIP signals from Telegram scammers, we sat down in Gilgil and spent months backtesting. We codified the <strong className="text-[#00C261]">1291.69 Reversal System</strong> and the immutable <strong className="text-white">$2 Survival Rule</strong>.
+                Instead of quitting or buying fake VIP signals from Telegram scammers, we sat down in Gilgil and backtested a clear mechanical edge. We codified the <strong className="text-[#00C261]">1.35100 Reversal System</strong> and the immutable <strong className="text-white">$2 Survival Rule</strong>.
               </p>
               <p>
                 PivotFX Lab is our free gift to the Kenyan trading community. We don't take your money. We don't sell bot subscriptions. We give you the compass (education), the net (AI scanner), and the math (risk management).
@@ -145,13 +145,13 @@ export const TrustLegalPage: React.FC<TrustLegalPageProps> = ({ onNavigate, onOp
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* 1296.56 Loss Case */}
+                {/* 1.35450 Loss Case */}
                 <div className="p-4 rounded-xl bg-red-950/20 border border-red-500/30 space-y-2">
                   <div className="flex items-center justify-between text-xs font-mono font-bold text-red-400">
                     <span className="flex items-center gap-1.5">
-                      <TrendingDown className="w-4 h-4" /> The 1296.56 Mistake
+                      <TrendingDown className="w-4 h-4" /> The 1.35450 Overextended Trap
                     </span>
-                    <span className="px-2 py-0.5 rounded bg-red-500/20">BLOWN</span>
+                    <span className="px-2 py-0.5 rounded bg-red-500/20">DRAWDOWN</span>
                   </div>
                   <p className="text-xs text-red-200/90 leading-relaxed">
                     {HISTORICAL_GILGIL_CASES.towerLoss.description}
@@ -161,19 +161,19 @@ export const TrustLegalPage: React.FC<TrustLegalPageProps> = ({ onNavigate, onOp
                   </span>
                 </div>
 
-                {/* 1291.69 Win Case */}
+                {/* 1.35100 Win Case */}
                 <div className="p-4 rounded-xl bg-emerald-950/20 border border-[#00C261]/30 space-y-2">
                   <div className="flex items-center justify-between text-xs font-mono font-bold text-[#00C261]">
                     <span className="flex items-center gap-1.5">
-                      <TrendingUp className="w-4 h-4" /> The 1291.69 Execution
+                      <TrendingUp className="w-4 h-4" /> The 1.35100 Disciplined Execution
                     </span>
-                    <span className="px-2 py-0.5 rounded bg-[#00C261]/20">+23.1 PIPS WIN</span>
+                    <span className="px-2 py-0.5 rounded bg-[#00C261]/20">+32.0 PIPS WIN</span>
                   </div>
                   <p className="text-xs text-emerald-200/90 leading-relaxed">
                     {HISTORICAL_GILGIL_CASES.towerWin.description}
                   </p>
                   <span className="text-[10px] text-emerald-300 font-mono block">
-                    Result: Reversal short with $2 stop hit target at 1289.38.
+                    Result: Reversal short with $2 stop hit target at 1.34780.
                   </span>
                 </div>
               </div>
@@ -226,7 +226,7 @@ export const TrustLegalPage: React.FC<TrustLegalPageProps> = ({ onNavigate, onOp
               <div>
                 <strong className="text-white text-base block mb-1">3. Retail Investor Loss Rate</strong>
                 <p>
-                  Between <strong>70% and 80% of retail investor accounts lose money</strong> when trading forex and CFDs. Past performance of any historical setup (including the 1291.69 case study) is never a guarantee of future returns.
+                  Between <strong>70% and 80% of retail investor accounts lose money</strong> when trading forex and CFDs. Past performance of any historical setup (including the 1.35100 case study) is never a guarantee of future returns.
                 </p>
               </div>
 

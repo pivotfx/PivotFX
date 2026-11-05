@@ -165,7 +165,7 @@ export const StartHerePage: React.FC<StartHerePageProps> = ({ onNavigate, onAwar
               )}
               {selectedPersona === 'demo_losing' && (
                 <p>
-                  <strong className="text-white">Diagnosis for Demo Losers:</strong> You are likely revenge trading or chasing parabolic tower tops like we did at 1296.56. Jump to Step 2 and Masterclass Belt 1 for the $2 Rule.
+                  <strong className="text-white">Diagnosis for Demo Losers:</strong> You are likely revenge trading or chasing parabolic tower tops like we did at 1.35456. Jump to Step 2 and Masterclass Belt 1 for the $2 Rule.
                 </p>
               )}
               {selectedPersona === 'scanner_only' && (
@@ -306,11 +306,11 @@ export const StartHerePage: React.FC<StartHerePageProps> = ({ onNavigate, onAwar
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="w-5 h-5 rounded-full bg-slate-800 text-[#00C261] font-mono text-xs flex items-center justify-center shrink-0">2</span>
-                      <span><strong>Quote Currency (USD):</strong> The price in US Dollars for 1 Euro (e.g. $1.0850).</span>
+                      <span><strong>Quote Currency (USD):</strong> The price in US Dollars for 1 Euro (e.g. $1.1267).</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="w-5 h-5 rounded-full bg-slate-800 text-[#00C261] font-mono text-xs flex items-center justify-center shrink-0">3</span>
-                      <span><strong>Pips:</strong> The smallest price change (e.g. from 1.0850 to 1.0851 is 1 pip). With a 0.01 micro lot, 1 pip is worth approx $0.10 (13 KES).</span>
+                      <span><strong>Pips:</strong> The smallest price change (e.g. from 1.1267 to 1.1268 is 1 pip). With a 0.01 micro lot, 1 pip is worth approx $0.10 (13 KES).</span>
                     </li>
                   </ul>
                 </div>
@@ -325,10 +325,10 @@ export const StartHerePage: React.FC<StartHerePageProps> = ({ onNavigate, onAwar
                   <div className="text-center py-4 bg-slate-900/80 rounded-xl border border-slate-800">
                     <span className="text-xs text-slate-400 font-mono">Simulated Exchange Rate</span>
                     <div className="text-3xl font-black font-mono text-white tracking-wider my-1">
-                      1.08<span className="text-[#00C261]">50</span>
+                      1.12<span className="text-[#00C261]">67</span>
                     </div>
                     <span className="text-[11px] text-slate-400">
-                      If price rises 20 pips to 1.0870 = <strong className="text-emerald-400">+$2.00 Profit (260 KES)</strong>
+                      If price rises 20 pips to 1.1287 = <strong className="text-emerald-400">+$2.00 Profit (260 KES)</strong>
                     </span>
                   </div>
 
@@ -487,15 +487,15 @@ export const StartHerePage: React.FC<StartHerePageProps> = ({ onNavigate, onAwar
                       Live Chart Feed: <strong className="text-white">GBP/USD M15 (The Gilgil Setup)</strong>
                     </span>
                     <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-[#00C261] font-mono font-bold">
-                      Testing 1291.69 Pattern
+                      Testing 1.35100 Pattern
                     </span>
                   </div>
 
                   {/* Visual SVG Mini Candlestick Simulation */}
                   <div className="h-44 w-full bg-[#070A10] rounded-xl p-3 relative flex items-center justify-center overflow-hidden border border-slate-800/80">
                     <div className="absolute top-3 left-4 text-[10px] font-mono text-slate-400 space-y-0.5">
-                      <div>EMA 20: 1292.80 (Cyan)</div>
-                      <div>EMA 50: 1294.50 (Orange)</div>
+                      <div>EMA 20: 1.35180 (Cyan)</div>
+                      <div>EMA 50: 1.35320 (Orange)</div>
                       <div>RSI (14): 46.2</div>
                     </div>
 
@@ -506,16 +506,16 @@ export const StartHerePage: React.FC<StartHerePageProps> = ({ onNavigate, onAwar
                       {/* 20 EMA Line (Cyan) */}
                       <path d="M 20 35 Q 250 65 480 95" stroke="#38BDF8" strokeWidth="2.5" fill="none" />
                       
-                      {/* Parabolic Tower at 1296.56 (Marked in Red) */}
+                      {/* Parabolic Tower at 1.35450 (Marked in Red) */}
                       <line x1="120" y1="10" x2="120" y2="70" stroke="#EF4444" strokeWidth="1" />
                       <rect x="114" y="15" width="12" height="35" rx="1" fill="#EF4444" />
-                      <text x="90" y="8" fill="#EF4444" fontSize="10" fontFamily="monospace">1296.56 Tower Loss</text>
+                      <text x="90" y="8" fill="#EF4444" fontSize="10" fontFamily="monospace">1.35450 Tower Loss</text>
 
-                      {/* Disciplined Reversal Entry at 1291.69 (Marked in Green) */}
+                      {/* Disciplined Reversal Entry at 1.35100 (Marked in Green) */}
                       <line x1="360" y1="50" x2="360" y2="105" stroke="#00C261" strokeWidth="1.5" />
                       <rect x="354" y="65" width="12" height="25" rx="1" fill="#00C261" />
                       <circle cx="360" cy="70" r="4" fill="#38BDF8" />
-                      <text x="310" y="118" fill="#00C261" fontSize="10" fontFamily="monospace" fontWeight="bold">1291.69 Entry Win</text>
+                      <text x="310" y="118" fill="#00C261" fontSize="10" fontFamily="monospace" fontWeight="bold">1.35100 Entry Win</text>
                     </svg>
                   </div>
 
@@ -763,7 +763,7 @@ export const StartHerePage: React.FC<StartHerePageProps> = ({ onNavigate, onAwar
                   Trust, Gilgil & Legal
                 </h4>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  The real Gilgil story of the 1296.56 loss to 1291.69 win, verified demo proof, CMA notice, and FAQs.
+                  The real Gilgil story of the 1.35450 trap to 1.35100 win, verified demo proof, CMA notice, and FAQs.
                 </p>
               </div>
               <span className="text-xs font-bold text-red-400 flex items-center gap-1 group-hover:translate-x-1 transition-transform">

@@ -124,7 +124,7 @@ export const MasterclassPage: React.FC<MasterclassPageProps> = ({ onNavigate, on
 
   const beltBadges = [
     { id: 'white', label: 'Beginner (White)', subtitle: 'Basics & $2 Rule', color: 'border-slate-300 text-white bg-slate-800' },
-    { id: 'blue', label: 'Intermediate (Blue)', subtitle: 'EMA & 1291.69 Lore', color: 'border-blue-500 text-blue-400 bg-blue-950/40' },
+    { id: 'blue', label: 'Intermediate (Blue)', subtitle: 'EMA & 1.35100 Lore', color: 'border-blue-500 text-blue-400 bg-blue-950/40' },
     { id: 'purple', label: 'Advanced (Purple)', subtitle: 'Multi-Timeframe & Spreads', color: 'border-purple-500 text-purple-400 bg-purple-950/40' },
     { id: 'black', label: 'Pro / Institutional (Black)', subtitle: 'Mechanical Edge & Ethics', color: 'border-emerald-500 text-[#00C261] bg-emerald-950/40' },
     { id: 'master', label: 'Strategy Vault (Master)', subtitle: '5 Battle Strategies', color: 'border-amber-500 text-amber-400 bg-amber-950/40' },
@@ -534,28 +534,28 @@ export const MasterclassPage: React.FC<MasterclassPageProps> = ({ onNavigate, on
                     {activeClass.chartIllustrationType === 'liquidity_pool' && (
                       <svg className="w-full h-full max-w-lg" viewBox="0 0 300 120">
                         <line x1="20" y1="50" x2="280" y2="50" stroke="#D4AF37" strokeWidth="2" strokeDasharray="4 4" />
-                        <text x="25" y="42" fill="#D4AF37" fontSize="10" fontFamily="monospace" fontWeight="bold">Buy-Side Liquidity (BSL) Pool: 1.2965</text>
+                        <text x="25" y="42" fill="#D4AF37" fontSize="10" fontFamily="monospace" fontWeight="bold">Buy-Side Liquidity (BSL) Pool: 1.35450</text>
                         <line x1="80" y1="50" x2="80" y2="90" stroke="#00C261" strokeWidth="3" />
                         <line x1="160" y1="50" x2="160" y2="90" stroke="#00C261" strokeWidth="3" />
                         <line x1="230" y1="15" x2="230" y2="105" stroke="#EF4444" strokeWidth="2.5" />
                         <rect x="222" y="65" width="16" height="30" fill="#EF4444" rx="2" />
                         <text x="140" y="20" fill="#EF4444" fontSize="10" fontFamily="monospace" fontWeight="bold">Wick Sweeps BSL</text>
-                        <text x="120" y="112" fill="#00C261" fontSize="9" fontFamily="monospace">Institutional Short Entry 1.2916</text>
+                        <text x="115" y="112" fill="#00C261" fontSize="9" fontFamily="monospace">Institutional Short Entry 1.35100</text>
                       </svg>
                     )}
                     {activeClass.chartIllustrationType === 'fvg_imbalance' && (
                       <svg className="w-full h-full max-w-lg" viewBox="0 0 300 120">
                         <line x1="50" y1="40" x2="50" y2="100" stroke="#00C261" strokeWidth="2" />
                         <rect x="44" y="55" width="12" height="35" fill="#00C261" />
-                        <text x="30" y="32" fill="#94A3B8" fontSize="8" fontFamily="monospace">C1 High: 1.0840</text>
+                        <text x="30" y="32" fill="#94A3B8" fontSize="8" fontFamily="monospace">C1 High: 1.1255</text>
                         <rect x="110" y="15" width="20" height="90" fill="#00C261" fillOpacity="0.8" />
                         <line x1="120" y1="5" x2="120" y2="115" stroke="#00C261" strokeWidth="2" />
                         <line x1="190" y1="10" x2="190" y2="70" stroke="#00C261" strokeWidth="2" />
                         <rect x="184" y="20" width="12" height="35" fill="#00C261" />
-                        <text x="170" y="85" fill="#94A3B8" fontSize="8" fontFamily="monospace">C3 Low: 1.0870</text>
+                        <text x="170" y="85" fill="#94A3B8" fontSize="8" fontFamily="monospace">C3 Low: 1.1285</text>
                         <rect x="65" y="40" width="115" height="30" fill="#D4AF37" fillOpacity="0.15" stroke="#D4AF37" strokeWidth="1.5" strokeDasharray="3 3" />
                         <line x1="65" y1="55" x2="180" y2="55" stroke="#38BDF8" strokeWidth="2" />
-                        <text x="75" y="52" fill="#38BDF8" fontSize="9" fontFamily="monospace" fontWeight="bold">50% C.E. (1.0855 Limit Buy)</text>
+                        <text x="75" y="52" fill="#38BDF8" fontSize="9" fontFamily="monospace" fontWeight="bold">50% C.E. (1.1270 Limit Buy)</text>
                       </svg>
                     )}
                     {activeClass.chartIllustrationType === 'order_block' && (

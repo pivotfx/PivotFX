@@ -12,24 +12,25 @@ import {
   Scan,
   Camera,
   Laptop,
-  CheckCircle2,
-  AlertTriangle,
   Bell,
-  Sliders,
   Sparkles,
   BookOpenCheck,
-  TrendingUp,
-  TrendingDown,
   RefreshCw,
-  Eye,
   Crosshair,
-  Volume2,
   BookmarkPlus,
-  Play,
-  RotateCcw
+  ShieldCheck,
+  CheckCircle2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { PillarHeaderBar } from '../components/common/PillarHeaderBar';
+import {
+  INITIAL_MARKETS_DATA,
+  fetchLiveMarketSnapshot,
+  computeRealChartTradeParams,
+  getPairSpecs,
+  ComputedTradeParams,
+  MarketScanData,
+} from '../utils/liveMarketEngine';
 
 interface ScannerPageProps {
   onNavigate: (tab: PageTab) => void;
@@ -46,12 +47,17 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
   initialPair = 'GBP/USD',
   initialTimeframe = 'M15',
 }) => {
+  const [liveMarkets, setLiveMarkets] = useState<MarketScanData[]>(INITIAL_MARKETS_DATA);
   const [scannerMode, setScannerMode] = useState<'chart' | 'camera'>('chart');
   const [selectedPair, setSelectedPair] = useState<CurrencyPair>(initialPair);
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>(initialTimeframe);
+  const [chartCandlePrice, setChartCandlePrice] = useState<string>(
+    PAIRS_PRESETS[initialPair]?.defaultPrice.toFixed(getPairSpecs(initialPair).decimals) || '1.34998'
+  );
 
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<ScannerScanResult | null>(null);
+  const [computedTicket, setComputedTicket] = useState<ComputedTradeParams | null>(null);
 
   // Camera / Webcam State for Option B
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -60,20 +66,54 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [colorDetectionNotes, setColorDetectionNotes] = useState<string[]>([]);
 
-  // Sound Alert & Modal States
+  // Inline Alerts & Template Controls (no window.alert/prompt)
   const [alertActive, setAlertActive] = useState(false);
+  const [scannerNotice, setScannerNotice] = useState<string | null>(null);
   const [showTrainModal, setShowTrainModal] = useState(false);
   const [customTradeNote, setCustomTradeNote] = useState('');
-  const [savedTemplates, setSavedTemplates] = useState<string[]>(['Gilgil Tower Exhaustion M15', 'EUR 50 EMA Value Zone']);
+  const [showTemplateInput, setShowTemplateInput] = useState(false);
+  const [templateDraftName, setTemplateDraftName] = useState('');
+  const [savedTemplates, setSavedTemplates] = useState<string[]>([
+    'Gilgil Tower Exhaustion M15',
+    'EUR/USD 20/50 EMA Value Zone',
+  ]);
 
-  const pairOptions: SelectOption[] = Object.keys(PAIRS_PRESETS).map((p) => ({
-    value: p,
-    label: p,
-  }));
+  const syncLiveFeed = async (pairToUpdate?: CurrencyPair) => {
+    const snap = await fetchLiveMarketSnapshot(liveMarkets);
+    setLiveMarkets(snap.markets);
+    const targetP = pairToUpdate || selectedPair;
+    const found = snap.markets.find((m) => m.pair === targetP);
+    if (found) {
+      setChartCandlePrice(found.price.toFixed(getPairSpecs(targetP).decimals));
+    }
+  };
+
+  useEffect(() => {
+    syncLiveFeed(initialPair);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handlePairSelect = (newPair: CurrencyPair) => {
+    setSelectedPair(newPair);
+    const found = liveMarkets.find((m) => m.pair === newPair);
+    const dec = getPairSpecs(newPair).decimals;
+    const base = found ? found.price : PAIRS_PRESETS[newPair].defaultPrice;
+    setChartCandlePrice(base.toFixed(dec));
+  };
+
+  const pairOptions: SelectOption[] = Object.keys(PAIRS_PRESETS).map((p) => {
+    const found = liveMarkets.find((m) => m.pair === p);
+    return {
+      value: p,
+      label: p,
+      sublabel: found ? `Live: ${found.price} (${found.change24hPct >= 0 ? '+' : ''}${found.change24hPct.toFixed(2)}%)` : undefined,
+    };
+  });
 
   const timeframeOptions: SelectOption[] = [
     { value: 'M1', label: '1 Minute (M1)' },
     { value: 'M5', label: '5 Minutes (M5)' },
+    { value: 'M10', label: '10 Minutes (M10)' },
     { value: 'M15', label: '15 Minutes (M15)', badge: 'Optimal' },
     { value: 'H1', label: '1 Hour (H1)' },
     { value: 'H4', label: '4 Hours (H4)' },
@@ -91,8 +131,7 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
         videoRef.current.play();
         setCameraActive(true);
       }
-    } catch (err: any) {
-      console.warn('Camera access denied or unsupported:', err);
+    } catch {
       setCameraError('Camera access unavailable. Using high-resolution MT4 screen analyzer simulation.');
     }
   };
@@ -116,71 +155,96 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
   }, [scannerMode]);
 
   // Run the AI Scanner (Chart or Camera)
-  const handleExecuteScan = () => {
+  const handleExecuteScan = async () => {
     setIsScanning(true);
     setColorDetectionNotes([]);
+    setScannerNotice(null);
 
-    // Simulate multi-stage visual pattern parsing
+    const snap = await fetchLiveMarketSnapshot(liveMarkets);
+    setLiveMarkets(snap.markets);
+    const liveMatch = snap.markets.find((m) => m.pair === selectedPair);
+    const parsedInput = parseFloat(chartCandlePrice);
+    const dec = getPairSpecs(selectedPair).decimals;
+    const pipMult = getPairSpecs(selectedPair).pipMultiplier;
+
+    const livePrice =
+      !isNaN(parsedInput) && parsedInput > 0
+        ? Number(parsedInput.toFixed(dec))
+        : liveMatch
+        ? liveMatch.price
+        : PAIRS_PRESETS[selectedPair].defaultPrice;
+
+    if (isNaN(parsedInput) || parsedInput <= 0) {
+      setChartCandlePrice(livePrice.toFixed(dec));
+    }
+
+    const isBull = liveMatch ? liveMatch.bias === 'STRONG_BUY' : true;
+    const ema20 = Number((isBull ? livePrice - 11 / pipMult : livePrice + 11 / pipMult).toFixed(dec));
+    const ema50 = Number((isBull ? livePrice - 26 / pipMult : livePrice + 26 / pipMult).toFixed(dec));
+    const rsi = liveMatch ? liveMatch.rsi : isBull ? 56.4 : 44.8;
+
+    const ticket = computeRealChartTradeParams({
+      targetPair: selectedPair,
+      targetTf: selectedTimeframe,
+      targetBroker: 'fxpesa',
+      price: livePrice,
+      ema20,
+      ema50,
+      rsi,
+      biasOverride: isBull ? 'BUY' : 'SELL',
+    });
+
     setTimeout(() => {
-      let detectedPrice = 1291.69;
-      let ema20 = 1292.80;
-      let ema50 = 1294.50;
-      let rsi = 46.2;
-      let pattern = 'Bearish Tower Top Reversal + EMA 20 Rejection';
-      let score = 92;
-      let conf = 94.6;
-      let winSim = 96.2;
-      let lossSim = 4.1;
-      let reco = 'EXECUTE SHORT: Setup closely resembles the 1291.69 win. Respect the $2 rule (0.01 lot).';
+      const pattern =
+        ticket.direction === 'BUY'
+          ? 'Bullish 20/50 EMA Value Zone Reclaim'
+          : 'Bearish Tower Top Reversal + EMA 20 Rejection';
+
+      const reco = `EXECUTE ${ticket.direction} BY MARKET @ ${ticket.entryPrice.toFixed(dec)} | SL: ${ticket.stopLoss.toFixed(dec)} (${ticket.slPips}p) | TP1: ${ticket.tp1.toFixed(dec)} | Final TP: ${ticket.tp2.toFixed(dec)} — Gilgil 0.01 micro lot ($${ticket.actualRiskUsd.toFixed(2)} max risk).`;
 
       if (scannerMode === 'camera') {
-        // Run Canvas color sampling if video is active
         if (canvasRef.current && videoRef.current && cameraActive) {
           const ctx = canvasRef.current.getContext('2d');
           if (ctx) {
             ctx.drawImage(videoRef.current, 0, 0, 300, 150);
             const imgData = ctx.getImageData(0, 0, 300, 150);
-            // Heuristic color scanning
             let hasCyan = false;
-            let hasOrange = false;
-            let hasRed = false;
             for (let i = 0; i < imgData.data.length; i += 40) {
               const r = imgData.data[i];
               const g = imgData.data[i + 1];
               const b = imgData.data[i + 2];
-              if (b > 180 && g > 150 && r < 100) hasCyan = true; // cyan MA
-              if (r > 200 && g > 100 && b < 50) hasOrange = true; // orange MA
-              if (r > 200 && g < 80 && b < 80) hasRed = true; // red candle
+              if (b > 180 && g > 150 && r < 100) hasCyan = true;
             }
             setColorDetectionNotes([
-              'Canvas Color Reader: Extracted high-contrast moving average vectors.',
-              hasCyan ? 'Detected Cyan Indicator Line (~EMA 20 slope)' : 'Standard MA alignment identified',
-              'OCR Digit Scanner: Read MT4 bid/ask coordinate grid.'
+              `Anchored to ${selectedPair} (${selectedTimeframe}) candle price ${livePrice.toFixed(dec)}.`,
+              hasCyan ? 'Detected Cyan EMA 20 trend slope on frame.' : 'Identified candlestick body & wick structure.',
+              ticket.mt4SafetyProof,
             ]);
           }
         } else {
           setColorDetectionNotes([
-            'Vision Processor: Reading MT4 candlestick shapes, wicks, and indicator lines.',
-            'Identified upper exhaustion wick and downward EMA 20 slant.'
+            `Calibrated to live ${selectedPair} (${selectedTimeframe}) candlestick @ ${livePrice.toFixed(dec)}.`,
+            ticket.mt4SafetyProof,
           ]);
         }
       }
 
+      setComputedTicket(ticket);
       setScanResult({
         source: scannerMode,
         pair: selectedPair,
         timeframe: selectedTimeframe,
-        price: detectedPrice,
+        price: ticket.entryPrice,
         ema20,
         ema50,
         rsi,
         detectedPattern: pattern,
-        score,
-        confidencePercent: conf,
-        similarityToWin: winSim,
-        similarityToLoss: lossSim,
+        score: Math.round(ticket.confidence),
+        confidencePercent: ticket.confidence,
+        similarityToWin: 95.4,
+        similarityToLoss: 4.6,
         recommendation: reco,
-        timestamp: new Date().toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi' }) + ' EAT',
+        timestamp: snap.syncedAt,
       });
 
       setIsScanning(false);
@@ -192,18 +256,17 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
         origin: { y: 0.6 },
         colors: ['#00C261', '#38BDF8'],
       });
-    }, 1200);
+    }, 550);
   };
 
   const handleSetAlert = () => {
     setAlertActive(true);
-    // Sound synthetic beep via Web Audio API
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, audioCtx.currentTime); // 880Hz A5
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
       gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
       osc.connect(gain);
       gain.connect(audioCtx.destination);
@@ -212,32 +275,32 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
     } catch {
       // Audio fallback
     }
-    alert('🔔 Alert Activated: You will be alerted when price crosses below 1291.69 on M15.');
+    setScannerNotice(`Price alert armed for ${selectedPair} (${selectedTimeframe}) @ ${chartCandlePrice}.`);
   };
 
-  const handleSaveTemplate = () => {
-    const name = prompt('Name this chart scanner template:', `${selectedPair} ${selectedTimeframe} Custom Setup`);
-    if (name) {
-      setSavedTemplates([...savedTemplates, name]);
-      alert(`Saved template "${name}" to your scanner library!`);
-      onAwardXp(15, 'Saved Scanner Template');
-    }
+  const handleSaveTemplateConfirm = () => {
+    const finalName = templateDraftName.trim() || `${selectedPair} ${selectedTimeframe} Custom Setup`;
+    setSavedTemplates((prev) => [...prev, finalName]);
+    setShowTemplateInput(false);
+    setTemplateDraftName('');
+    setScannerNotice(`Saved template "${finalName}" to your scanner library.`);
+    onAwardXp(15, 'Saved Scanner Template');
   };
 
   const handleLogScannedTrade = () => {
-    if (!scanResult) return;
+    if (!scanResult || !computedTicket) return;
     onLogTrade({
       pair: scanResult.pair,
       broker: 'fxpesa',
-      type: 'SELL',
-      entryPrice: scanResult.price,
+      type: computedTicket.direction,
+      entryPrice: computedTicket.entryPrice,
       score: scanResult.score,
       mode: `AI Scanner: ${scanResult.detectedPattern}`,
-      riskUsd: 2.00,
+      riskUsd: computedTicket.actualRiskUsd,
       status: 'OPEN',
-      notes: `AI Scanner detected ${scanResult.detectedPattern} with ${scanResult.confidencePercent}% confidence. Distance from 20 EMA: 1.11 pts.`,
+      notes: `${computedTicket.orderType} @ ${computedTicket.entryPrice.toFixed(computedTicket.decimals)} | SL: ${computedTicket.stopLoss.toFixed(computedTicket.decimals)} | TP: ${computedTicket.tp2.toFixed(computedTicket.decimals)} (${computedTicket.confidence}% confidence).`,
     });
-    alert('Logged scanned setup into your Trading Journal!');
+    setScannerNotice(`Logged ${computedTicket.direction} setup on ${scanResult.pair} (${scanResult.timeframe}) to your Journal.`);
     onAwardXp(20, 'Logged Scanned Trade');
   };
 
@@ -251,13 +314,13 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
         <div>
           <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#00C261] uppercase tracking-wider">
             <Scan className="w-4 h-4" />
-            <span>Pillar 4 • Next-Gen AI Vision</span>
+            <span>Pillar 4 • Next-Gen Live AI Vision & Chart Scanner</span>
           </div>
           <h1 className="text-2xl sm:text-4xl font-black text-white mt-1">
             Advanced Dual AI Scanner
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl">
-            Choose between scanning the internal TradingView chart (Option A) or pointing your phone camera at your MT4/5 laptop screen (Option B).
+            Anchored to live market quotes with manual chart candle price support (e.g. Gold Spot 3955.00 or Futures 4041.495) so your S/L and T/P always match your MT4/MT5 screen.
           </p>
         </div>
 
@@ -284,10 +347,25 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
             }`}
           >
             <Camera className="w-4 h-4" />
-            <span>Option B: Phone Camera Scanner</span>
+            <span>Option B: Camera Scanner</span>
           </button>
         </div>
       </div>
+
+      {scannerNotice && (
+        <div className="p-3.5 rounded-2xl bg-emerald-950/50 border border-[#00C261]/40 text-xs text-emerald-200 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-[#00C261] shrink-0" />
+            <span>{scannerNotice}</span>
+          </div>
+          <button
+            onClick={() => setScannerNotice(null)}
+            className="text-[11px] font-mono text-emerald-300 hover:text-white underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Main Scanner Work Area */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -297,47 +375,47 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-mono text-slate-300 font-bold uppercase flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-[#00C261] animate-ping" />
-                {scannerMode === 'chart' ? 'Internal Web Chart Viewfinder' : 'Live Camera Lens Feed'}
+                {scannerMode === 'chart' ? 'Live Chart Viewfinder' : 'Live Camera Lens Feed'}
               </span>
               <span className="text-xs font-mono text-[#00C261] font-semibold">
-                Targeting: {selectedPair} ({selectedTimeframe})
+                {selectedPair} ({selectedTimeframe}) • {chartCandlePrice}
               </span>
             </div>
 
             {/* Option A: Chart Mode View */}
             {scannerMode === 'chart' && (
-              <div className="relative w-full h-80 rounded-2xl bg-[#070A10] border border-slate-800 overflow-hidden flex items-center justify-center">
-                {/* Crosshair Overlay */}
+              <div className="relative w-full h-72 rounded-2xl bg-[#070A10] border border-slate-800 overflow-hidden flex items-center justify-center">
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                  <div className="w-56 h-44 border-2 border-dashed border-[#00C261]/60 rounded-2xl flex items-center justify-center relative">
-                    <Crosshair className="w-8 h-8 text-[#00C261]/40 animate-spin" />
-                    <span className="absolute -top-3 left-3 bg-[#0B0F17] px-2 text-[10px] font-mono text-[#00C261]">
-                      SCAN REGION: CANDLESTICK & EMA VALUE ZONE
+                  <div className="w-60 h-44 border-2 border-dashed border-[#00C261]/60 rounded-2xl flex flex-col items-center justify-center relative">
+                    <Crosshair className="w-8 h-8 text-[#00C261]/40" />
+                    <span className="text-sm font-mono font-black text-white mt-2">
+                      {selectedPair}: {chartCandlePrice}
+                    </span>
+                    <span className="text-[10px] font-mono text-[#00C261]">
+                      Timeframe: {selectedTimeframe}
                     </span>
                   </div>
                 </div>
 
-                {/* Simulated Chart visual */}
-                <svg className="w-full h-full opacity-60" viewBox="0 0 400 180">
+                <svg className="w-full h-full opacity-50" viewBox="0 0 400 180">
                   <path d="M 0 30 Q 180 70 400 130" stroke="#F59E0B" strokeWidth="2" fill="none" />
                   <path d="M 0 50 Q 180 85 400 145" stroke="#38BDF8" strokeWidth="2.5" fill="none" />
-                  {/* Candlestick pattern */}
                   <rect x="180" y="45" width="10" height="30" fill="#EF4444" rx="1" />
                   <line x1="185" y1="30" x2="185" y2="85" stroke="#EF4444" strokeWidth="1.5" />
                   <rect x="200" y="60" width="10" height="40" fill="#00C261" rx="1" />
                   <line x1="205" y1="50" x2="205" y2="110" stroke="#00C261" strokeWidth="1.5" />
                 </svg>
 
-                <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between text-xs font-mono text-slate-400 bg-[#0B0F17]/85 p-2 rounded-xl backdrop-blur-sm border border-slate-800">
-                  <span>Pair: {selectedPair}</span>
-                  <span>Gilgil Strategy: Tower + 20 EMA</span>
+                <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-xs font-mono text-slate-300 bg-[#0B0F17]/90 px-3 py-2 rounded-xl border border-slate-800">
+                  <span>Pair: {selectedPair} ({selectedTimeframe})</span>
+                  <span className="text-[#00C261]">Live Quote: {chartCandlePrice}</span>
                 </div>
               </div>
             )}
 
             {/* Option B: Live Camera Mode View */}
             {scannerMode === 'camera' && (
-              <div className="relative w-full h-80 rounded-2xl bg-[#070A10] border border-slate-800 overflow-hidden flex items-center justify-center">
+              <div className="relative w-full h-72 rounded-2xl bg-[#070A10] border border-slate-800 overflow-hidden flex items-center justify-center">
                 {cameraActive ? (
                   <video
                     ref={videoRef}
@@ -361,40 +439,49 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
                   </div>
                 )}
 
-                {/* Targeting HUD Overlay */}
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                  <div className="w-64 h-48 border-2 border-[#00C261] rounded-2xl shadow-[0_0_25px_rgba(0,194,97,0.3)] flex flex-col justify-between p-3 relative">
+                  <div className="w-64 h-44 border-2 border-[#00C261] rounded-2xl shadow-[0_0_25px_rgba(0,194,97,0.3)] flex flex-col justify-between p-3 relative">
                     <div className="flex justify-between items-center text-[10px] font-mono text-[#00C261]">
                       <span>AI LENS: ACTIVE</span>
-                      <span>FPS: 30</span>
+                      <span>{selectedPair} {selectedTimeframe}</span>
                     </div>
-                    <div className="text-center text-[11px] font-mono text-white/90 bg-black/60 px-2 py-1 rounded">
-                      Align MT4 Price & Candles within Frame
+                    <div className="text-center text-[11px] font-mono text-white/90 bg-black/70 px-2 py-1 rounded">
+                      Candle Anchor: {chartCandlePrice}
                     </div>
                     <div className="flex justify-between items-center text-[10px] font-mono text-cyan-400">
-                      <span>EMA SCAN: COLOR SAMPLING</span>
-                      <span>OCR: ON</span>
+                      <span>EMA SCAN: ON</span>
+                      <span>MT4 SAFE S/L</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Hidden canvas for pixel analysis */}
                 <canvas ref={canvasRef} width={300} height={150} className="hidden" />
               </div>
             )}
 
             {/* Controls Bar */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
               <CustomSelect
                 options={pairOptions}
                 value={selectedPair}
-                onChange={(val) => setSelectedPair(val as CurrencyPair)}
+                onChange={(val) => handlePairSelect(val as CurrencyPair)}
               />
               <CustomSelect
                 options={timeframeOptions}
                 value={selectedTimeframe}
                 onChange={(val) => setSelectedTimeframe(val as Timeframe)}
               />
+              <div>
+                <input
+                  type="number"
+                  step="any"
+                  value={chartCandlePrice}
+                  onChange={(e) => setChartCandlePrice(e.target.value)}
+                  aria-label="Live Candlestick Price"
+                  placeholder="Chart Price"
+                  className="w-full h-full px-3 py-2.5 rounded-xl bg-[#0B0F17] border border-slate-700 text-white font-mono text-xs focus:border-[#00C261] outline-none"
+                />
+              </div>
               <button
                 onClick={handleExecuteScan}
                 disabled={isScanning}
@@ -403,16 +490,43 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
                 {isScanning ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Analyzing...</span>
+                    <span>Scanning...</span>
                   </>
                 ) : (
                   <>
                     <Scan className="w-4 h-4" />
-                    <span>Execute AI Scan</span>
+                    <span>{scanResult ? 'Reanalyse' : 'Analyse Now'}</span>
                   </>
                 )}
               </button>
             </div>
+
+            {/* Inline Template Save Bar (when opened) */}
+            {showTemplateInput && (
+              <div className="p-3 rounded-xl bg-slate-900 border border-slate-700 flex flex-col sm:flex-row items-center gap-2">
+                <input
+                  type="text"
+                  value={templateDraftName}
+                  onChange={(e) => setTemplateDraftName(e.target.value)}
+                  placeholder={`${selectedPair} ${selectedTimeframe} Custom Setup`}
+                  className="w-full sm:flex-1 px-3 py-2 rounded-lg bg-[#0B0F17] border border-slate-700 text-xs text-white outline-none focus:border-[#00C261]"
+                />
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                  <button
+                    onClick={() => setShowTemplateInput(false)}
+                    className="px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveTemplateConfirm}
+                    className="px-3 py-1.5 rounded-lg bg-[#00C261] text-black text-xs font-bold"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Vision Notes */}
             {colorDetectionNotes.length > 0 && (
@@ -432,68 +546,73 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
 
         {/* Right Column: AI Output & Diagnostics (5 Cols) */}
         <div className="lg:col-span-5 space-y-6">
-          {scanResult ? (
+          {scanResult && computedTicket ? (
             <div className="glass-panel-glow rounded-3xl p-6 sm:p-8 border border-slate-800 space-y-5 animate-in zoom-in-95 duration-200">
               {/* Header: Score & Confidence */}
               <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                 <div>
                   <span className="text-[10px] font-mono uppercase tracking-wider text-[#00C261] font-bold">
-                    Scan Result ({scanResult.timestamp})
+                    {scanResult.pair} • {scanResult.timeframe} ({scanResult.timestamp})
                   </span>
-                  <h3 className="text-xl font-black text-white mt-0.5">{scanResult.detectedPattern}</h3>
+                  <h3 className="text-lg font-black text-white mt-0.5">{scanResult.detectedPattern}</h3>
                 </div>
                 <div className="text-right">
-                  <span className="text-3xl font-black font-mono text-[#00C261]">{scanResult.score}</span>
-                  <span className="text-xs text-slate-400 block font-mono">/100 Score</span>
+                  <span className="text-3xl font-black font-mono text-[#00C261]">{scanResult.confidencePercent}%</span>
+                  <span className="text-xs text-slate-400 block font-mono">AI Confidence</span>
                 </div>
               </div>
 
-              {/* Scanned Metrics Grid */}
-              <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+              {/* Exact Order Ticket Metrics Grid */}
+              <div className="grid grid-cols-2 gap-2.5 text-xs font-mono">
                 <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
-                  <span className="text-slate-400 block text-[10px]">Scanned Price</span>
-                  <strong className="text-white text-base">{scanResult.price}</strong>
+                  <span className="text-slate-400 block text-[10px]">
+                    {computedTicket.orderType}
+                  </span>
+                  <strong className="text-white text-base">
+                    {computedTicket.entryPrice.toFixed(computedTicket.decimals)}
+                  </strong>
                 </div>
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
-                  <span className="text-slate-400 block text-[10px]">Distance from 20 EMA</span>
-                  <strong className="text-cyan-400 text-base">1.11 pips (Tight)</strong>
+                <div className="p-3 rounded-xl bg-red-950/30 border border-red-500/30">
+                  <span className="text-red-300 block text-[10px]">Stop Loss ({computedTicket.slPips}p)</span>
+                  <strong className="text-red-400 text-base">
+                    {computedTicket.stopLoss.toFixed(computedTicket.decimals)}
+                  </strong>
                 </div>
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
-                  <span className="text-slate-400 block text-[10px]">Estimated RSI (14)</span>
-                  <strong className="text-amber-400 text-base">{scanResult.rsi} (Neutral-Bearish)</strong>
+                <div className="p-3 rounded-xl bg-emerald-950/30 border border-[#00C261]/30">
+                  <span className="text-emerald-300 block text-[10px]">TP1 (50% Partial)</span>
+                  <strong className="text-[#00C261] text-base">
+                    {computedTicket.tp1.toFixed(computedTicket.decimals)}
+                  </strong>
                 </div>
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
-                  <span className="text-slate-400 block text-[10px]">Confidence Rating</span>
-                  <strong className="text-emerald-400 text-base">{scanResult.confidencePercent}%</strong>
+                <div className="p-3 rounded-xl bg-cyan-950/30 border border-cyan-500/30">
+                  <span className="text-cyan-300 block text-[10px]">Final Target ({computedTicket.tpPips}p)</span>
+                  <strong className="text-cyan-300 text-base">
+                    {computedTicket.tp2.toFixed(computedTicket.decimals)}
+                  </strong>
                 </div>
               </div>
 
-              {/* Similarity Breakdown: Win vs Loss */}
-              <div className="space-y-2 p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs">
-                <div className="flex justify-between items-center text-slate-300 font-mono">
-                  <span>Match to 1291.69 Winning Pattern:</span>
-                  <span className="text-[#00C261] font-bold">{scanResult.similarityToWin}%</span>
-                </div>
-                <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                  <div className="h-full bg-[#00C261]" style={{ width: `${scanResult.similarityToWin}%` }} />
-                </div>
-
-                <div className="flex justify-between items-center text-slate-300 font-mono pt-1">
-                  <span>Match to 1296.56 Blown Loss:</span>
-                  <span className="text-red-400 font-bold">{scanResult.similarityToLoss}%</span>
-                </div>
-                <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                  <div className="h-full bg-red-500" style={{ width: `${scanResult.similarityToLoss}%` }} />
-                </div>
+              <div className="text-[11px] font-mono text-emerald-300 bg-emerald-950/30 border border-emerald-500/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                <span>{computedTicket.mt4SafetyProof}</span>
               </div>
 
               {/* Action Recommendation */}
               <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-[#00C261]/30 text-xs text-emerald-200 leading-relaxed">
-                💡 <strong className="text-white">Directive:</strong> {scanResult.recommendation}
+                <strong className="text-white">Directive:</strong> {scanResult.recommendation}
               </div>
 
-              {/* 4 Crucial Action Buttons */}
-              <div className="grid grid-cols-2 gap-2 pt-2">
+              {/* Action Buttons */}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  onClick={handleExecuteScan}
+                  disabled={isScanning}
+                  className="p-2.5 rounded-xl bg-[#00C261]/20 hover:bg-[#00C261]/30 text-[#00C261] border border-[#00C261]/40 text-xs font-bold transition flex items-center justify-center gap-1.5"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin' : ''}`} />
+                  Reanalyse Ticket
+                </button>
+
                 <button
                   onClick={handleSetAlert}
                   className={`p-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 border ${
@@ -507,15 +626,7 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
                 </button>
 
                 <button
-                  onClick={() => setShowTrainModal(true)}
-                  className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition flex items-center justify-center gap-1.5"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                  Train Scanner
-                </button>
-
-                <button
-                  onClick={handleSaveTemplate}
+                  onClick={() => setShowTemplateInput((prev) => !prev)}
                   className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition flex items-center justify-center gap-1.5"
                 >
                   <BookmarkPlus className="w-3.5 h-3.5 text-[#00C261]" />
@@ -537,9 +648,9 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
                 <Scan className="w-10 h-10" />
               </div>
               <div className="max-w-sm space-y-1.5">
-                <h4 className="text-base font-bold text-white">Scanner Ready</h4>
+                <h4 className="text-base font-bold text-white">Live Scanner Ready</h4>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Click "Execute AI Scan" on the left. The engine will inspect candle wicks, EMA spacing, and RSI divergence against our Gilgil database.
+                  Select your pair & timeframe (including M10 or M15), confirm your live candlestick price on the left, and click "Analyse Now".
                 </p>
               </div>
             </div>
@@ -561,7 +672,7 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
             <textarea
               value={customTradeNote}
               onChange={(e) => setCustomTradeNote(e.target.value)}
-              placeholder="e.g. M15 candle closed with 12 pip upper wick at 1.0850. EMA 20 was flat. Trade won +18 pips."
+              placeholder="e.g. M15 candle closed with 12 pip upper wick at 1.35100. EMA 20 sloped down. Trade won +24 pips."
               className="w-full h-24 p-3 rounded-xl bg-[#0B0F17] border border-slate-700 text-xs text-white outline-none focus:border-[#00C261]"
             />
             <div className="flex justify-end gap-2">
@@ -573,9 +684,9 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
               </button>
               <button
                 onClick={() => {
-                  alert('Thank you! Custom trade pattern cached in your local training weights.');
                   setShowTrainModal(false);
                   setCustomTradeNote('');
+                  setScannerNotice('Custom trade pattern saved to your local scanner calibration.');
                   onAwardXp(25, 'Trained Local Scanner');
                 }}
                 className="px-4 py-2 rounded-xl bg-[#00C261] text-black text-xs font-bold hover:bg-[#00dc6e]"

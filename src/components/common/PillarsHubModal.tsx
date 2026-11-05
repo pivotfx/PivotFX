@@ -70,7 +70,7 @@ export const PillarsHubModal: React.FC<PillarsHubModalProps> = ({
             The 8 Pillars of PivotFX Lab
           </h2>
           <p className="text-xs sm:text-sm text-slate-400 max-w-2xl leading-relaxed">
-            Every pillar works in unison to protect Kenyan traders from the infamous 1296.56 blowout and enforce the 1291.69 disciplined reversal edge. Click any pillar to jump directly into action.
+            Every pillar works in unison to protect Kenyan traders from the infamous 1.35456 liquidity-sweep blowout and enforce the 1.35100 live-chart reversal edge. Click any pillar to jump directly into action.
           </p>
         </div>
 

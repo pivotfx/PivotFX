@@ -133,9 +133,10 @@ export const LivePulseInteractiveTools: React.FC = () => {
   const [htfTrend, setHtfTrend] = useState('bullish');
   const [dxyState, setDxyState] = useState('bearish_rejection');
   const [newsToday, setNewsToday] = useState('none_minor');
-  const [drawOnLiquidity, setDrawOnLiquidity] = useState('1.0885 (Yesterday High)');
-  const [invalidationFloor, setInvalidationFloor] = useState('1.0820');
+  const [drawOnLiquidity, setDrawOnLiquidity] = useState('1.1292 (Yesterday High)');
+  const [invalidationFloor, setInvalidationFloor] = useState('1.1245');
   const [generatedBriefing, setGeneratedBriefing] = useState<string | null>(null);
+  const [pulseNotice, setPulseNotice] = useState<string | null>(null);
 
   const handleGenerateBias = () => {
     const isBull = htfTrend === 'bullish' && dxyState.includes('bearish');
@@ -314,13 +315,22 @@ Primary Operational Bias: ${verdict}
                     Generated Morning Briefing:
                   </span>
                   <button
-                    onClick={() => { navigator.clipboard.writeText(generatedBriefing); alert('Briefing copied to clipboard!'); }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(generatedBriefing);
+                      setPulseNotice('Briefing copied to clipboard!');
+                      setTimeout(() => setPulseNotice(null), 2500);
+                    }}
                     className="flex items-center gap-1 text-[10px] font-mono text-slate-400 hover:text-white"
                   >
                     <Copy className="w-3.5 h-3.5" />
                     <span>Copy Text</span>
                   </button>
                 </div>
+                {pulseNotice && (
+                  <div className="px-3 py-1.5 rounded-lg bg-[#00C261]/20 border border-[#00C261]/40 text-[#00C261] text-[11px] font-mono font-bold">
+                    ✓ {pulseNotice}
+                  </div>
+                )}
 
                 <pre className="text-[11px] font-mono text-slate-300 whitespace-pre-wrap leading-relaxed overflow-x-auto max-h-[300px]">
                   {generatedBriefing}
@@ -428,45 +438,45 @@ Primary Operational Bias: ${verdict}
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 tabular-nums">
               <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
                 <div className="flex items-center justify-between">
                   <strong className="text-white">EUR/USD (Fiber)</strong>
-                  <span className="text-[10px] text-emerald-400 font-bold">31 Pips</span>
+                  <span className="text-[10px] text-emerald-400 font-bold">34 Pips</span>
                 </div>
-                <div className="text-[11px] text-slate-400">Asian High: <span className="text-white font-bold">1.08620</span></div>
-                <div className="text-[11px] text-slate-400">Asian Low: <span className="text-white font-bold">1.08310</span></div>
+                <div className="text-[11px] text-slate-400">Asian High: <span className="text-white font-bold">1.12820</span></div>
+                <div className="text-[11px] text-slate-400">Asian Low: <span className="text-white font-bold">1.12480</span></div>
                 <span className="text-[9px] text-[#00C261] block font-bold mt-1">✓ Discount Low Defended</span>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
                 <div className="flex items-center justify-between">
                   <strong className="text-white">GBP/USD (Cable)</strong>
-                  <span className="text-[10px] text-amber-400 font-bold">47 Pips</span>
+                  <span className="text-[10px] text-amber-400 font-bold">60 Pips</span>
                 </div>
-                <div className="text-[11px] text-slate-400">Asian High: <span className="text-white font-bold">1.29656</span></div>
-                <div className="text-[11px] text-slate-400">Asian Low: <span className="text-white font-bold">1.28950</span></div>
-                <span className="text-[9px] text-red-400 block font-bold mt-1">▲ 1296.56 High Swept</span>
+                <div className="text-[11px] text-slate-400">Asian High: <span className="text-white font-bold">1.35450</span></div>
+                <div className="text-[11px] text-slate-400">Asian Low: <span className="text-white font-bold">1.34850</span></div>
+                <span className="text-[9px] text-emerald-400 block font-bold mt-1">✓ Reclaimed 1.34998 Zone</span>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
                 <div className="flex items-center justify-between">
                   <strong className="text-white">XAU/USD (Gold)</strong>
-                  <span className="text-[10px] text-cyan-400 font-bold">135 Pips</span>
+                  <span className="text-[10px] text-cyan-400 font-bold">$22.50 Range</span>
                 </div>
-                <div className="text-[11px] text-slate-400">Asian High: <span className="text-white font-bold">2748.50</span></div>
-                <div className="text-[11px] text-slate-400">Asian Low: <span className="text-white font-bold">2735.00</span></div>
-                <span className="text-[9px] text-cyan-300 block font-bold mt-1">✓ SSL Swept at 2735</span>
+                <div className="text-[11px] text-slate-400">Asian High: <span className="text-white font-bold">3968.50</span></div>
+                <div className="text-[11px] text-slate-400">Asian Low: <span className="text-white font-bold">3946.00</span></div>
+                <span className="text-[9px] text-cyan-300 block font-bold mt-1">✓ Spot ~3955 (Futures ~4041)</span>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
                 <div className="flex items-center justify-between">
                   <strong className="text-white">USD/JPY (Ninja)</strong>
-                  <span className="text-[10px] text-purple-400 font-bold">65 Pips</span>
+                  <span className="text-[10px] text-purple-400 font-bold">70 Pips</span>
                 </div>
-                <div className="text-[11px] text-slate-400">Asian High: <span className="text-white font-bold">152.800</span></div>
-                <div className="text-[11px] text-slate-400">Asian Low: <span className="text-white font-bold">152.150</span></div>
-                <span className="text-[9px] text-slate-400 block font-bold mt-1">Mid-Range Consolidation</span>
+                <div className="text-[11px] text-slate-400">Asian High: <span className="text-white font-bold">158.650</span></div>
+                <div className="text-[11px] text-slate-400">Asian Low: <span className="text-white font-bold">157.950</span></div>
+                <span className="text-[9px] text-slate-400 block font-bold mt-1">Active Around 158.250</span>
               </div>
             </div>
           </div>
@@ -508,12 +518,26 @@ Primary Operational Bias: ${verdict}
             />
           </div>
 
-          <button
-            onClick={() => alert('Weekly gameplan saved to browser localStorage!')}
-            className="px-6 py-2.5 rounded-xl btn-gold text-black font-bold text-xs uppercase"
-          >
-            Save Weekly Gameplan
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => {
+                try {
+                  localStorage.setItem(
+                    'pivotfx_weekly_gameplan',
+                    JSON.stringify({ weeklyFocusPairs, weeklyKeyEvents, weeklyNotes, savedAt: new Date().toISOString() })
+                  );
+                } catch {}
+                setPulseNotice('Weekly gameplan saved locally!');
+                setTimeout(() => setPulseNotice(null), 2500);
+              }}
+              className="px-6 py-2.5 rounded-xl btn-gold text-black font-bold text-xs uppercase"
+            >
+              Save Weekly Gameplan
+            </button>
+            {pulseNotice && (
+              <span className="text-xs font-mono text-[#00C261] font-bold">✓ {pulseNotice}</span>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -23,26 +23,26 @@ import {
 const INITIAL_DEMO_TRADES: JournalTrade[] = [
   {
     id: 'tr-01',
-    timestamp: 'Oct 24, 11:18 EAT',
+    timestamp: 'Recent • 11:18 EAT',
     pair: 'GBP/USD',
     type: 'SELL',
     lotSize: 0.01,
-    entryPrice: 1.29169,
-    exitPrice: 1.28500,
+    entryPrice: 1.35100,
+    exitPrice: 1.34431,
     pnlUsd: 6.69,
     status: 'WON',
     setupName: 'Tower Top Reversal',
     mistakeTag: 'Clean Execution',
-    notes: 'Sold the 1296.56 liquidity sweep; exited at 20 EMA target.'
+    notes: 'Sold the 1.35456 liquidity sweep; exited at 20 EMA target.'
   },
   {
     id: 'tr-02',
-    timestamp: 'Oct 25, 15:42 EAT',
+    timestamp: 'Recent • 15:42 EAT',
     pair: 'EUR/USD',
     type: 'BUY',
     lotSize: 0.01,
-    entryPrice: 1.08502,
-    exitPrice: 1.09050,
+    entryPrice: 1.12670,
+    exitPrice: 1.13218,
     pnlUsd: 5.48,
     status: 'WON',
     setupName: '20/50 EMA Bounce',
@@ -51,12 +51,12 @@ const INITIAL_DEMO_TRADES: JournalTrade[] = [
   },
   {
     id: 'tr-03',
-    timestamp: 'Oct 26, 12:10 EAT',
+    timestamp: 'Recent • 12:10 EAT',
     pair: 'USD/JPY',
     type: 'BUY',
     lotSize: 0.01,
-    entryPrice: 155.200,
-    exitPrice: 155.000,
+    entryPrice: 158.250,
+    exitPrice: 158.050,
     pnlUsd: -2.00,
     status: 'LOST',
     setupName: 'Breakout Chase',
@@ -88,8 +88,8 @@ export const GrowthLabInteractiveTools: React.FC = () => {
   const [pair, setPair] = useState<CurrencyPair>('EUR/USD');
   const [type, setType] = useState<'BUY' | 'SELL'>('BUY');
   const [lotSize, setLotSize] = useState<number>(0.01);
-  const [entryPrice, setEntryPrice] = useState<number>(1.0850);
-  const [exitPrice, setExitPrice] = useState<number>(1.0910);
+  const [entryPrice, setEntryPrice] = useState<number>(1.1267);
+  const [exitPrice, setExitPrice] = useState<number>(1.1327);
   const [pnlUsd, setPnlUsd] = useState<number>(6.00);
   const [status, setStatus] = useState<'WON' | 'LOST' | 'OPEN'>('WON');
   const [setupName, setSetupName] = useState<string>('Tower Top Reversal');

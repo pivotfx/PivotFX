@@ -44,17 +44,17 @@ export const PILLARS_MASTERCLASS_DATA: PillarData[] = [
     Base         Quote
    Currency     Currency
   
-   EUR/USD = 1.08502 (Bid) / 1.08514 (Ask)
-   └── Spread = 1.08514 - 1.08502 = 0.00012 = 1.2 Pips
+   EUR/USD = 1.12670 (Bid) / 1.12682 (Ask)
+   └── Spread = 1.12682 - 1.12670 = 0.00012 = 1.2 Pips
    
-   If you BUY:  Order executes at ASK (1.08514)
-   If you SELL: Order executes at BID (1.08502)`
+   If you BUY:  Order executes at ASK (1.12682)
+   If you SELL: Order executes at BID (1.12670)`
         },
         realWorldExample: {
           pair: 'EUR/USD',
           context: 'European Central Bank signals hawkish interest rates while the US Federal Reserve hints at pausing rate hikes.',
-          setup: 'Trader enters Long 1 Standard Lot at 1.0850 expecting Euro strength against the USD.',
-          outcome: 'Price climbs to 1.0920 over the next 48 hours (+70 pips).',
+          setup: 'Trader enters Long 0.01 Micro Lot at 1.12670 ($2.00 max risk) expecting Euro strength against the USD.',
+          outcome: 'Price climbs to 1.13370 over the next 48 hours (+70 pips = +$7.00 on 0.01 micro lot).',
           keyTakeaway: 'Currency value is always relative. A rising EUR/USD can mean Euro strength, US Dollar weakness, or both.'
         },
         actionableChecklist: [
@@ -249,22 +249,22 @@ Step 6: Save Layout as 'PivotFx Master Template'`
           title: 'The 4 Pending Order Types Visualized',
           caption: 'How Limit vs Stop Orders Execute',
           content: `   BUY LIMIT (Below Price)        SELL LIMIT (Above Price)
-        Price: 1.0850                   Pending Sell: 1.0900
+        Price: 1.1267                   Pending Sell: 1.1317
           │  (Drops down)                  ▲  (Rallies up)
           ▼                                │
-   Pending Buy: 1.0820 ──► Bounces UP    Price: 1.0850 ──► Drops DOWN
+   Pending Buy: 1.1237 ──► Bounces UP    Price: 1.1267 ──► Drops DOWN
    ────────────────────────────────────────────────────────────────
    BUY STOP (Above Price)         SELL STOP (Below Price)
-   Pending Buy: 1.0900                    Price: 1.0850
+   Pending Buy: 1.1317                    Price: 1.1267
           ▲  (Breaks up)                   │  (Breaks down)
           │                                ▼
-        Price: 1.0850                  Pending Sell: 1.0800`
+        Price: 1.1267                  Pending Sell: 1.1217`
         },
         realWorldExample: {
           pair: 'XAU/USD (Gold)',
-          context: 'Trader wanted to buy Gold at $2,350 support while away at their day job in Gilgil.',
-          setup: 'Placed a Buy Limit order at $2,350.50 with a Stop Loss at $2,345.00 and Take Profit at $2,365.00.',
-          outcome: 'During the London open wick, price dipped to $2,350.20, triggered the Buy Limit, and rallied $18/oz.',
+          context: 'Trader wanted to buy Gold at $3,950.00 Spot support while away at work in Gilgil.',
+          setup: 'Placed a Buy Limit order at $3,950.50 with a Stop Loss at $3,944.00 and Take Profit at $3,968.00.',
+          outcome: 'During the London open wick, price dipped to $3,950.20, triggered the Buy Limit, and rallied $18/oz.',
           keyTakeaway: 'Limit orders eliminate emotional market chasing and ensure you enter only at planned discount levels.'
         },
         actionableChecklist: [
@@ -320,12 +320,12 @@ Metals     │ XAU/USD (Gold)           │ 1.5 - 3.5 Pips │ High Volatility S
         summary: 'Master the core mathematics of forex: calculating pip values, Standard vs Mini vs Micro lots, and purchasing power.',
         concept: 'A "Pip" (Percentage in Point) is the standard unit of measurement for price changes in forex, representing 1/100th of 1% (0.0001) for most pairs (or 0.01 for JPY pairs). A Standard Lot is 100,000 units of base currency ($10/pip on EUR/USD), a Mini Lot is 10,000 units ($1/pip), and a Micro Lot is 1,000 units ($0.10/pip). Leverage multiplies your purchasing power by allowing you to control large contract sizes with minimal collateral deposit.',
         bulletPoints: [
-          'Pip Calculation (4-digit pairs): 1.0850 to 1.0860 is a 10 pip movement.',
-          'JPY Pairs (2-digit pairs): 155.20 to 155.30 is a 10 pip movement.',
+          'Pip Calculation (4/5-digit pairs): 1.12670 to 1.12770 is a 10 pip movement.',
+          'JPY Pairs (2/3-digit pairs): 158.250 to 158.350 is a 10 pip movement.',
           'Standard Lot (1.00): 100,000 units -> ~$10.00 per pip on EUR/USD.',
           'Mini Lot (0.10): 10,000 units -> ~$1.00 per pip on EUR/USD.',
           'Micro Lot (0.01): 1,000 units -> ~$0.10 per pip on EUR/USD.',
-          'Leverage Double-Edge: 1:100 leverage requires $1,000 margin for a 1.00 lot instead of $100,000.'
+          'Leverage Double-Edge: 1:100 leverage requires $1,126.70 margin for a 1.00 lot instead of $112,670.'
         ],
         illustration: {
           type: 'formula',
@@ -337,8 +337,8 @@ Metals     │ XAU/USD (Gold)           │ 1.5 - 3.5 Pips │ High Volatility S
 
 2. Required Margin Formula:
    Required Margin = (Units * Current Price) / Leverage Ratio
-   Example: 1 Standard Lot EUR/USD at 1.0850 with 1:100 Leverage
-   Required Margin = (100,000 * 1.0850) / 100 = $1,085.00 USD
+   Example: 1 Standard Lot EUR/USD at 1.12670 with 1:100 Leverage
+   Required Margin = (100,000 * 1.12670) / 100 = $1,126.70 USD
 
 3. Risk-Based Lot Size Formula:
    Lot Size = Amount to Risk ($) / (Stop Loss in Pips * Pip Value per Standard Lot)`
@@ -472,9 +472,9 @@ Rollover / Dead   │ 23:00 - 01:00 EAT  │ Wide spreads! AVOID TRADING!`
         },
         realWorldExample: {
           pair: 'EUR/USD',
-          context: 'Asian session formed obvious Equal Highs at 1.0880.',
-          setup: 'At 11:15 AM EAT (London Open), smart money spiked price to 1.0888 (+8 pips) sweeping BSL, then formed a 5-minute bearish displacement candle closing at 1.0865.',
-          outcome: 'Retail breakout buyers were trapped; price plunged 70 pips to 1.0810.',
+          context: 'Asian session formed obvious Equal Highs at 1.12920.',
+          setup: 'At 11:15 AM EAT (London Open), smart money spiked price to 1.13000 (+8 pips) sweeping BSL, then formed a 5-minute bearish displacement candle closing at 1.12770.',
+          outcome: 'Retail breakout buyers were trapped; price plunged 70 pips to 1.12070.',
           keyTakeaway: 'Never buy breakouts of equal highs. Wait for the wick sweep and enter the reversal when market structure shifts.'
         },
         actionableChecklist: [
@@ -556,9 +556,9 @@ Rollover / Dead   │ 23:00 - 01:00 EAT  │ Wide spreads! AVOID TRADING!`
         },
         realWorldExample: {
           pair: 'XAU/USD (Gold)',
-          context: 'Gold printed an H1 bearish candle into 2028.00 before surging 250 pips up to 2053.00.',
-          setup: 'The H1 candle between 2028.00 and 2032.00 was marked as a Bullish Order Block. The 50% Mean Threshold was 2030.00.',
-          outcome: 'Two sessions later, Gold pulled back to 2030.50, absorbed liquidity, and rallied another 180 pips.',
+          context: 'Gold printed an H1 bearish candle into 3948.00 before surging 250 pips up to 3973.00.',
+          setup: 'The H1 candle between 3948.00 and 3952.00 was marked as a Bullish Order Block. The 50% Mean Threshold was 3950.00.',
+          outcome: 'Two sessions later, Gold pulled back to 3950.50, absorbed liquidity, and rallied another 180 pips.',
           keyTakeaway: 'Always place Stop Loss 3 to 5 pips below the Order Block low. If price breaches the Mean Threshold with a candle close, exit.'
         },
         actionableChecklist: [
@@ -718,7 +718,7 @@ Rollover / Dead   │ 23:00 - 01:00 EAT  │ Wide spreads! AVOID TRADING!`
         realWorldExample: {
           pair: 'GBP/USD',
           context: 'Trader needs to map a 15-minute London Judas sweep in under 30 seconds before price leaves the entry zone.',
-          setup: 'Trader presses Alt+H to drop horizontal ray on Asian high 1.29656, presses Alt+R to box the 1.2950 FVG, and uses Long/Short tool to calculate 20 pip SL and 50 pip TP.',
+          setup: 'Trader presses Alt+H to drop horizontal ray on Asian high 1.35450, presses Alt+R to box the 1.35250 FVG, and uses Long/Short tool to calculate 16 pip SL and 32 pip TP.',
           outcome: 'Order execution is flawless and unemotional with exact 0.01 lot sizing mapped out before entry.',
           keyTakeaway: 'Build your TradingView favorites bar with: Crosshair, Trendline, Horizontal Ray, Rectangle, and Long/Short Position tools.'
         },
@@ -740,7 +740,7 @@ Rollover / Dead   │ 23:00 - 01:00 EAT  │ Wide spreads! AVOID TRADING!`
           'F9 Hotkey: Opens the New Order Ticket instantly on any active chart in MT4/MT5.',
           'Market Execution vs Pending: Market Execution buys/sells instantly at Ask/Bid. Pending Orders (Buy Limit, Sell Limit, Buy Stop, Sell Stop) trigger at specified future prices.',
           'Volume Field: ALWAYS verify this says 0.01 before clicking! Never leave it at 1.00 lot.',
-          'Scale-Out Protocol: When price reaches Take Profit 1 (+25 pips), double-click the trade in the Terminal (Ctrl+T), change volume to 0.005 (or close partial) and drag SL to Entry Price (Breakeven).'
+          'Scale-Out Protocol: When price reaches Take Profit 1 (+16 pips), double-click the trade in the Terminal (Ctrl+T) and drag SL to Entry Price (Breakeven).'
         ],
         illustration: {
           type: 'diagram',
@@ -751,20 +751,20 @@ Rollover / Dead   │ 23:00 - 01:00 EAT  │ Wide spreads! AVOID TRADING!`
   ├──────────────────────────────────────────────────────────┤
   │ Symbol:      [ GBPUSD, Great Britain Pound vs US Dollar ]│
   │ Volume:      [ 0.01 ] ◄── STRICT GILGIL 0.01 MICRO LOT!  │
-  │ Stop Loss:   [ 1.29369 ] (20 Pips = $2.00 Max Risk Cap)  │
-  │ Take Profit: [ 1.28669 ] (50 Pips = $5.00 Profit Target) │
+  │ Stop Loss:   [ 1.35260 ] (16 Pips = $1.60 Max Risk Cap)  │
+  │ Take Profit: [ 1.34780 ] (32 Pips = $3.20 Profit Target) │
   │ Type:        [ Market Execution / Pending Limit ]        │
   ├──────────────────────────────────────────────────────────┤
   │       [ SELL BY MARKET ]        [ BUY BY MARKET ]        │
-  │            1.29169                   1.29181             │
+  │            1.35100                   1.35112             │
   └──────────────────────────────────────────────────────────┘`
         },
         realWorldExample: {
           pair: 'GBP/USD',
-          context: 'Trader receives a high-probability AI signal to Sell GBP/USD at 1.29169.',
-          setup: 'Trader presses F9 in MT4. Inputs Volume: 0.01. Inputs Stop Loss: 1.29369. Inputs Take Profit: 1.28669. Clicks Sell By Market.',
-          outcome: 'Trade executes with zero slippage. When price hits 1.28919 (+25 pips), trader moves SL to 1.29169 (Breakeven) making the trade completely risk-free.',
-          keyTakeaway: 'Never click Buy or Sell without entering your Stop Loss first. Pressing F9 and having your numbers prepared prevents emotional errors.'
+          context: 'Trader receives a high-probability AI signal to Sell GBP/USD at 1.35100.',
+          setup: 'Trader presses F9 in MT4. Inputs Volume: 0.01. Inputs Stop Loss: 1.35260 (SL > Entry for Sell). Inputs Take Profit: 1.34780 (TP < Entry). Clicks Sell By Market.',
+          outcome: 'Trade executes with zero [Invalid S/L or T/P] error. When price hits 1.34940 (+16 pips), trader moves SL to 1.35100 (Breakeven) making the trade completely risk-free.',
+          keyTakeaway: 'Never click Buy or Sell without entering your Stop Loss on the valid MT4 side first.'
         },
         actionableChecklist: [
           'Press F9 on your MT4/MT5 demo to open the order ticket and practice entering 0.01 lot with predefined SL and TP.',
@@ -870,9 +870,9 @@ Rollover / Dead   │ 23:00 - 01:00 EAT  │ Wide spreads! AVOID TRADING!`
         },
         realWorldExample: {
           pair: 'GBP/USD H4',
-          context: 'GBP/USD was capped under 1.2700 resistance for two consecutive weeks.',
-          setup: 'A high-volume H4 candle broke out and closed at 1.2735, followed by a slow 3-candle pullback to 1.2702.',
-          outcome: 'The previous resistance flipped into rock-solid support, rallying 120 pips.',
+          context: 'GBP/USD was capped under 1.35100 resistance for two consecutive weeks.',
+          setup: 'A high-volume H4 candle broke out and closed at 1.35450, followed by a slow 3-candle pullback to 1.35120.',
+          outcome: 'The previous resistance flipped into rock-solid support, rallying 120 pips toward 1.36320.',
           keyTakeaway: 'Wait for the retest and rejection. Never chase the initial breakout candle.'
         },
         actionableChecklist: [
@@ -917,8 +917,8 @@ Rollover / Dead   │ 23:00 - 01:00 EAT  │ Wide spreads! AVOID TRADING!`
         },
         realWorldExample: {
           pair: 'EUR/USD M15',
-          context: 'An aggressive 30-pip impulse candle at London Open left an M15 Fair Value Gap between 1.0840 and 1.0852.',
-          setup: 'Price retraced slowly over the next 45 minutes into the Rectangle zone, touching 1.0845.',
+          context: 'An aggressive 30-pip impulse candle at London Open left an M15 Fair Value Gap between 1.1255 and 1.1268.',
+          setup: 'Price retraced slowly over the next 45 minutes into the Rectangle zone, touching 1.1261.',
           outcome: 'Instant algorithmic rejection from the FVG, accelerating +38 pips to the upside.',
           keyTakeaway: 'The Rectangle tool helps you patiently wait for price to return to institutional wholesale pricing.'
         },
@@ -946,25 +946,25 @@ Rollover / Dead   │ 23:00 - 01:00 EAT  │ Wide spreads! AVOID TRADING!`
           type: 'diagram',
           title: 'Fibonacci Golden Pocket Architecture',
           caption: 'Discount vs Premium Valuation',
-          content: `   1.000 ─────── Swing High Peak (1.0900)
+          content: `   1.000 ─────── Swing High Peak (1.1320)
      │
      │   PREMIUM ZONE (Expensive - Look to Sell, NOT Buy)
      │
-   0.500 ─────── Equilibrium / Fair Value (1.0850)
+   0.500 ─────── Equilibrium / Fair Value (1.1267)
      │
      │   DISCOUNT ZONE (Cheap - High Probability Buy Area)
      │
-   0.618 ─────── Golden Ratio (1.0838) ──┐
+   0.618 ─────── Golden Ratio (1.1255) ──┐
      │                                    ├─► [ GOLDEN POCKET ENTRY ZONE ]
-   0.786 ─────── Deep Discount (1.0821) ──┘
+   0.786 ─────── Deep Discount (1.1238) ──┘
      │
-   0.000 ─────── Swing Low Origin (1.0800)`
+   0.000 ─────── Swing Low Origin (1.1215)`
         },
         realWorldExample: {
           pair: 'XAU/USD (Gold) H1',
-          context: 'Gold impulsed from $2,320 to $2,360 (+400 pips).',
-          setup: 'Retraced into the 61.8% - 78.6% pocket at $2,335 - $2,328, confluencing with an H1 Order Block.',
-          outcome: 'Gold bounced aggressively from $2,332, delivering an explosive +$45/oz rally.',
+          context: 'Gold impulsed from $3,920 to $3,965 (+450 pips).',
+          setup: 'Retraced into the 61.8% - 78.6% pocket at $3,937 - $3,930, confluencing with an H1 Order Block.',
+          outcome: 'Gold bounced aggressively from $3,934, delivering an explosive +$45/oz rally.',
           keyTakeaway: 'Fibonacci is not magic; it marks where algorithms calculate maximum mathematical reward-to-risk.'
         },
         actionableChecklist: [
@@ -1154,13 +1154,13 @@ With Magnet Mode Enabled (Ctrl/Cmd Key):
           title: 'The Top-Down Multi-Timeframe Funnel',
           caption: 'From Macro Narrative to Sniper Execution',
           content: `[ DAILY CHART ] ──► Establishes the Macro Trend & Major Liquidity Target
-       │             (e.g., Daily is Bullish; target is 1.0950 High)
+       │             (e.g., Daily is Bullish; target is 1.1380 High)
        ▼
 [ H4 / H1 CHART ] ──► Identifies the Key Pullback Zone & Structure
-       │              (e.g., H1 pulled back into a 61.8% Discount FVG at 1.0840)
+       │              (e.g., H1 pulled back into a 61.8% Discount FVG at 1.1265)
        ▼
 [ M15 / M5 CHART ] ──► Snipers the Entry Candle with Minimal Stop Loss
-                      (e.g., M5 Bullish Engulfing Candle confirms entry at 1.0842;
+                      (e.g., M5 Bullish Engulfing Candle confirms entry at 1.1267;
                        Stop Loss is only 12 pips instead of 50 pips on H4!)`
         },
         realWorldExample: {
@@ -1213,7 +1213,7 @@ With Magnet Mode Enabled (Ctrl/Cmd Key):
         realWorldExample: {
           pair: 'EUR/USD M15',
           context: 'EUR/USD was climbing steadily above both 20 and 50 EMAs.',
-          setup: 'Price made a new high at 1.0890, but RSI printed 58 (down from 72 on previous high).',
+          setup: 'Price made a new high at 1.1315, but RSI printed 58 (down from 72 on previous high).',
           outcome: 'Bearish divergence triggered; price broke below 20 EMA and plummeted 45 pips to 50 EMA baseline.',
           keyTakeaway: 'Divergence warns you when a trend is running out of gas. Never buy into bearish RSI divergence.'
         },
@@ -1265,33 +1265,33 @@ With Magnet Mode Enabled (Ctrl/Cmd Key):
           'Pre-Condition: 3+ strong green candles extended at least 25 pips above the 20 EMA on M15 or H1.',
           'RSI Confirmation: RSI 14 must be above 70 (ideally showing bearish divergence against previous high).',
           'Trigger Candle: A strong bearish engulfing candle closing below the midpoint of the prior green candle.',
-          'Stop Loss: Placed 3 to 5 pips above the highest wick of the tower formation.',
+          'Stop Loss: Placed 3 to 5 pips above the highest wick of the tower formation (SL > Entry for Sell).',
           'Take Profit: Target 1 at 20 EMA; Target 2 at 50 EMA or previous swing low (minimum 1:2.5 RRR).'
         ],
         illustration: {
           type: 'chart',
           title: 'Tower Top Reversal Anatomy',
           caption: 'Parabolic Expansion vs Exhaustion Drop',
-          content: `                     [ TOWER PEAK: 1.29656 ]
+          content: `                     [ TOWER PEAK: 1.35450 ]
                            ▲   ▲
                       ┌─┐ ┌─┐ ┌─┐ ┌─┐ <─── High Wick Sweeps Liquidity!
                       │ │ │ │ │ │ │█│
                       │ │ │ │ │ │ │█│ <─── Bearish Engulfing Candle
                       │ │ │ │ │ │ │█│      Closes BELOW green body!
                       │ │ │ │ │ │ │█│
-                      └─┘ └─┘ └─┘ └█┘ ◄─── SELL ENTRY: 1.29169
+                      └─┘ └─┘ └─┘ └█┘ ◄─── SELL ENTRY: 1.35100
                                    │
       Retail FOMO Buyers Chasing   ▼
       Parabolic Candles Extended   │  [ SHARP CASCADE DOWN ]
       Far Above 20 EMA!            │  Price crashes to 20 EMA & 50 EMA!
                                    ▼
-                               [ TAKE PROFIT: 1.28500 (+66 Pips) ]`
+                               [ TAKE PROFIT: 1.34440 (+66 Pips) ]`
         },
         realWorldExample: {
           pair: 'GBP/USD M15',
-          context: 'Price spiked aggressively to 1.29656 with RSI at 83.2 during pre-London session.',
-          setup: 'Tower top formed; giant red candle engulfed previous 2 candles, closing at 1.29169.',
-          outcome: 'Sold at 1.29169 with SL at 1.29700. Price collapsed to 1.28500 delivering +66 pips (1:3.2 RRR).',
+          context: 'Price spiked aggressively to 1.35450 with RSI at 83.2 during pre-London session.',
+          setup: 'Tower top formed; giant red candle engulfed previous 2 candles, closing at 1.35100.',
+          outcome: 'Sold at 1.35100 with SL above structure at 1.35300. Price collapsed to 1.34440 delivering +66 pips (1:3.3 RRR).',
           keyTakeaway: 'When price looks too good to be true and everyone is shouting "buy", institutions are preparing the tower trap.'
         },
         actionableChecklist: [
@@ -1336,9 +1336,9 @@ With Magnet Mode Enabled (Ctrl/Cmd Key):
         },
         realWorldExample: {
           pair: 'EUR/USD H1',
-          context: 'EUR/USD in confirmed H1 uptrend; 20 EMA at 1.0820, 50 EMA at 1.0795.',
-          setup: 'Price pulled back to 1.0805, printed an H1 bullish pinbar rejecting the 50 EMA.',
-          outcome: 'Entered at 1.0815, Stop Loss at 1.0790 (25 pips). Price surged to 1.0890 (+75 pips, 1:3 RRR).',
+          context: 'EUR/USD in confirmed H1 uptrend; 20 EMA at 1.1267, 50 EMA at 1.1242.',
+          setup: 'Price pulled back to 1.1252, printed an H1 bullish pinbar rejecting the 50 EMA.',
+          outcome: 'Entered at 1.1262, Stop Loss at 1.1237 (25 pips). Price surged to 1.1337 (+75 pips, 1:3 RRR).',
           keyTakeaway: 'Never chase an extended trend. Let the market come back to the 20/50 EMA pocket.'
         },
         actionableChecklist: [
@@ -1511,20 +1511,20 @@ Phase 4 (12:00 - 15:30 EAT): EXPANSION TO OPPOSITE LIQUIDITY
                       Candle 2 (Displacement Candle)
                             ┌───┐
                             │   │
-   Candle 3 Low: 1.0860 ────┼───┼──────┐
+   Candle 3 Low: 1.1280 ────┼───┼──────┐
                             │   │      │
-       [ FVG ZONE ]         │   │      ├─► Consequent Encroachment (50%): 1.0850
+       [ FVG ZONE ]         │   │      ├─► Consequent Encroachment (50%): 1.1267
                             │   │      │   (PRECISE LIMIT ENTRY LEVEL!)
-   Candle 1 High: 1.0840 ───┼───┼──────┘
+   Candle 1 High: 1.1254 ───┼───┼──────┘
                             │   │
                             └───┘
-   Retracement: Price gently taps 1.0850 (C.E.) and rockets upward!`
+   Retracement: Price gently taps 1.1267 (C.E.) and rockets upward!`
         },
         realWorldExample: {
           pair: 'GBP/USD M15',
-          context: 'H1 trend was bullish; M15 formed an FVG between 1.2640 and 1.2660 after UK GDP data.',
-          setup: 'Price drifted down into 1.2650 (50% midpoint). Placed Buy Limit with 12-pip stop loss at 1.2638.',
-          outcome: 'Price wicked 1.2649, filled the order, and surged 60 pips (1:5 RRR).',
+          context: 'H1 trend was bullish; M15 formed an FVG between 1.3485 and 1.3505 after UK GDP data.',
+          setup: 'Price drifted down into 1.3495 (50% midpoint). Placed Buy Limit with 12-pip stop loss at 1.3483.',
+          outcome: 'Price wicked 1.3494, filled the order, and surged 60 pips (1:5 RRR).',
           keyTakeaway: 'FVGs give you concrete price zones where institutions left unfinished business.'
         },
         actionableChecklist: [
@@ -1567,7 +1567,7 @@ Phase 4 (12:00 - 15:30 EAT): EXPANSION TO OPPOSITE LIQUIDITY
         realWorldExample: {
           pair: 'AUD/USD H1',
           context: 'AUD/USD was in a steady downtrend making lower highs and lower lows.',
-          setup: 'At 0.6520, price rallied aggressively and closed an H1 candle above the previous Lower High at 0.6550 (CHOCH).',
+          setup: 'At 0.6985, price rallied aggressively and closed an H1 candle above the previous Lower High at 0.7015 (CHOCH).',
           outcome: 'Trader waited for a pullback to the new Higher Low and entered long, catching a 90-pip rally.',
           keyTakeaway: 'Always wait for the candle body to close beyond structure to confirm a genuine CHOCH.'
         },
@@ -1598,7 +1598,7 @@ Phase 4 (12:00 - 15:30 EAT): EXPANSION TO OPPOSITE LIQUIDITY
           content: `Support Floor Tested 3 Times:
      Touch 1          Touch 2          Touch 3
        \/               \/               \/
-   ══════════════════════════════════════════════════════ [ SUPPORT: 1.0850 ]
+   ══════════════════════════════════════════════════════ [ SUPPORT: 1.1267 ]
                                           │
                                           ▼ Aggressive Institutional Breakdown!
                                           │ (Longs are now trapped at -$30/pip!)
@@ -1607,13 +1607,13 @@ Phase 4 (12:00 - 15:30 EAT): EXPANSION TO OPPOSITE LIQUIDITY
                                           ▲ Trapped buyers sell to get out at $0!
                                           │ New breakout sellers add shorts!
                                           ▼
-                                      CASCADE DOWN TO 1.0770`
+                                      CASCADE DOWN TO 1.1190`
         },
         realWorldExample: {
           pair: 'EUR/USD H4',
-          context: 'The 1.0900 level was rock-solid support for 10 trading sessions.',
-          setup: 'US Non-Farm Payrolls broke 1.0900 down to 1.0840. Three days later, price pulled back to 1.0898.',
-          outcome: 'Printed an H4 shooting star pinbar. Sold at 1.0892, dropped 140 pips over the next week.',
+          context: 'The 1.1320 level was rock-solid support for 10 trading sessions.',
+          setup: 'US Non-Farm Payrolls broke 1.1320 down to 1.1260. Three days later, price pulled back to 1.1318.',
+          outcome: 'Printed an H4 shooting star pinbar. Sold at 1.1312, dropped 140 pips over the next week.',
           keyTakeaway: 'The best trades are simple. S/R flips provide crystal clear stop loss parameters.'
         },
         actionableChecklist: [
@@ -1641,15 +1641,15 @@ Phase 4 (12:00 - 15:30 EAT): EXPANSION TO OPPOSITE LIQUIDITY
           title: 'Structural Stop Loss vs Arbitrary Stop Loss',
           caption: 'How to Prevent Getting Wicked Out',
           content: `Amateur Stop Loss (Arbitrary 15 Pips):
-   Entry: 1.0850 ──► Stop placed at 1.0835 (Random 15 pips!)
-   Market wicks down to 1.0832 (Sweeps liquidity), triggers stop, then rallies!
+   Entry: 1.1267 ──► Stop placed at 1.1252 (Random 15 pips!)
+   Market wicks down to 1.1249 (Sweeps liquidity), triggers stop, then rallies!
    Result: TRADER STOPPED OUT AT LOSS, MARKET THEN GOES TO TARGET!
    
 Professional Structural Stop Loss:
-   Entry: 1.0850
-   Structural Swing Low Wick: 1.0830
-   Liquidity Buffer (+3 pips): Stop placed at 1.0827!
-   Market wicks to 1.0832 -> Misses pro stop by 5 pips -> Rockets to 1.0920!
+   Entry: 1.1267
+   Structural Swing Low Wick: 1.1247
+   Liquidity Buffer (+3 pips): Stop placed at 1.1244!
+   Market wicks to 1.1249 -> Misses pro stop by 5 pips -> Rockets to 1.1337!
    Result: TRADE WINS FULL 3R PROFIT!`
         },
         realWorldExample: {
@@ -1690,7 +1690,7 @@ Target 2 Distance: +80 Pips (1:4 RRR)
 
 Step 1: Price reaches +40 Pips (+1:2 RRR)
    └── CLOSE 50% OF LOT (0.50 Lot closed = +$200 CASH BANKED!)
-   └── MOVE STOP LOSS TO BREAKEVEN (Entry Price: 1.0850)
+   └── MOVE STOP LOSS TO BREAKEVEN (Entry Price: 1.1267)
    └── TRADE IS NOW 100% RISK-FREE! MAXIMUM WORST OUTCOME IS +$200!
 
 Step 2: Price reaches +80 Pips (+1:4 RRR)
@@ -1731,20 +1731,20 @@ Step 3: Trail remaining 0.25 Lot behind H1 Higher Lows for ultimate runner profi
           caption: 'Smart Money Distribution & Sniper Limit Fill',
           content: `   [ BEARISH ORDER BLOCK ]
     (Last Up-Close Green Candle)
-           High Wick: 1.2965
+           High Wick: 1.3545
                ┌┴┐
-         ┌─────┤ ├─────┐  ◄── Open: 1.2940
+         ┌─────┤ ├─────┐  ◄── Open: 1.3520
          │     │ │     │
-    ─────┼─────┼─┼─────┼─────► MEAN THRESHOLD (50% Midpoint): 1.2925 (LIMIT SELL ENTRY!)
+    ─────┼─────┼─┼─────┼─────► MEAN THRESHOLD (50% Midpoint): 1.3505 (LIMIT SELL ENTRY!)
          │     │█│     │
-         └─────┤█├─────┘  ◄── Close: 1.2910
+         └─────┤█├─────┘  ◄── Close: 1.3490
                └┬┘
                 │
                 ▼
          [ AGGRESSIVE RED DISPLACEMENT CANDLE ]
          Drops 45 Pips & Breaks Previous Low!
                 │
-         Price slowly retraces to 1.2925 (Taps Mean Threshold) -> ACCELERATES DOWN!`
+         Price slowly retraces to 1.3505 (Taps Mean Threshold) -> ACCELERATES DOWN!`
         },
         realWorldExample: {
           pair: 'GBP/USD H1',
@@ -1781,20 +1781,20 @@ Step 3: Trail remaining 0.25 Lot behind H1 Higher Lows for ultimate runner profi
         High                         Large Bullish                       Low
          ┌─┐                              ┌─┐                            ┌─┐
          │ │                              │ │                            │ │
-    ─────┴─┴──────────────────────────────┤ │                            │ │  ◄── Candle 3 Low: 1.0870
+    ─────┴─┴──────────────────────────────┤ │                            │ │  ◄── Candle 3 Low: 1.1282
                                           │ │
-         ═════════════════════════════════╪═╪═══════════════════════════════  ◄── CONSEQUENT ENCROACHMENT: 1.0855 (50%)
+         ═════════════════════════════════╪═╪═══════════════════════════════  ◄── CONSEQUENT ENCROACHMENT: 1.1267 (50%)
                  [ FAIR VALUE GAP ]       │ │                                     (OPTIMAL LIMIT BUY ORDER!)
-    ──────────────────────────────────────┼─┼────────────────────────────┬─┬  ◄── Candle 1 High: 1.0840
+    ──────────────────────────────────────┼─┼────────────────────────────┬─┬  ◄── Candle 1 High: 1.1252
                                           │ │                            └─┘
                                           └─┘
-    Price returns calmly to 1.0855 (Taps C.E.) -> Fills institutional orders -> Rallies +50 Pips!`
+    Price returns calmly to 1.1267 (Taps C.E.) -> Fills institutional orders -> Rallies +50 Pips!`
         },
         realWorldExample: {
           pair: 'EUR/USD M15',
-          context: 'At 15:30 EAT US Core Retail Sales, EUR/USD surged 35 pips, leaving an M15 FVG between 1.0840 and 1.0870.',
-          setup: 'Trader set a Buy Limit order at the 50% Consequent Encroachment (1.0855) with SL at 1.0835 (20 pips).',
-          outcome: 'At 16:45 EAT, price retraced to 1.0856, wicked 1.0852, filled the order, and exploded to 1.0920 (+65 pips).',
+          context: 'At 15:30 EAT US Core Retail Sales, EUR/USD surged 35 pips, leaving an M15 FVG between 1.1252 and 1.1282.',
+          setup: 'Trader set a Buy Limit order at the 50% Consequent Encroachment (1.1267) with SL at 1.1247 (20 pips).',
+          outcome: 'At 16:45 EAT, price retraced to 1.1268, wicked 1.1264, filled the order, and exploded to 1.1325 (+58 pips).',
           keyTakeaway: 'Never chase the displacement candle. Algorithms almost always return to fill the imbalance.'
         },
         actionableChecklist: [
@@ -1825,15 +1825,15 @@ Step 3: Trail remaining 0.25 Lot behind H1 Higher Lows for ultimate runner profi
           High 1                    High 2
             /\                        /\
            /  \                      /  \
-    ══════/════\════════════════════/════\══════════════════════ [ RETAIL RESISTANCE: 1.2850 ]
+    ══════/════\════════════════════/════\══════════════════════ [ RETAIL RESISTANCE: 1.3530 ]
                                           \                        ▲
                                            \                       │ Retail Buy Stops (BSL) Accumulating Here!
                                             \                      ▼
                                              \                 [ LIQUIDITY PURGE / SWEEP ]
-                                              \                 Spikes to 1.2865! (Grabs BSL)
+                                              \                 Spikes to 1.3545! (Grabs BSL)
                                                \                ▲
                                                 \              ┌┴┐ Bearish Rejection Wick!
-                                                 \             │█│ Closes back BELOW 1.2850!
+                                                 \             │█│ Closes back BELOW 1.3530!
                                                   \____________│█│ ◄── INSTITUTIONAL SELL ENTRY!
                                                                └┬┘
                                                                 ▼
@@ -1841,10 +1841,10 @@ Step 3: Trail remaining 0.25 Lot behind H1 Higher Lows for ultimate runner profi
         },
         realWorldExample: {
           pair: 'XAU/USD (Gold) M15',
-          context: 'Gold formed equal highs at 2040.00 during Asian session, prompting retail traders to place Sell Limit orders and Buy Stops at 2043.',
-          setup: 'At 10:30 AM EAT London open, price spiked to 2043.50, sweeping the BSL, and printed an M15 shooting star pinbar closing at 2038.',
-          outcome: 'Entered Short at 2037.50 with SL at 2044.50. Price collapsed to 2020.00 (+175 pips, 1:4.8 RRR).',
-          keyTakeaway: 'When retail traders see "strong resistance", institutions see an appetizing pool of stop losses.'
+          context: 'Gold formed equal highs at $3,968.50 Spot ($4,052 Futures) during Asian session, prompting retail traders to place Buy Stops right above.',
+          setup: 'At 10:30 AM EAT London open, Spot spiked to 3,972.00, sweeping the BSL, and printed an M15 shooting star pinbar closing at 3,962.',
+          outcome: 'Entered Short at 3,961.00 with SL at 3,975.00 (strictly above live candle). Price dropped to 3,932.00 (+$29 move, 1:2.1 RRR).',
+          keyTakeaway: 'Always anchor Stop Loss directly above your active chart feed (Spot ~3955 or Futures ~4041) so your order is never rejected.'
         },
         actionableChecklist: [
           'Mark Previous Day High (PDH) and Previous Day Low (PDL) on every pair at 09:00 AM EAT.',
@@ -1871,15 +1871,15 @@ Step 3: Trail remaining 0.25 Lot behind H1 Higher Lows for ultimate runner profi
           title: 'False Wick Sweep vs Genuine MSS with Displacement',
           caption: 'Visual Identification of True Institutional Shifts',
           content: `Scenario A: FALSE BREAKOUT (Liquidity Sweep Trap)
-        Swing High: 1.2800 ───┬──────────────────┐
-                              │ Wick spikes to   │  Candle closes back at 1.2790!
-                              │ 1.2808 then wicks│  NO BODY CLOSE = NO MSS!
+        Swing High: 1.3525 ───┬──────────────────┐
+                              │ Wick spikes to   │  Candle closes back at 1.3515!
+                              │ 1.3535 then wicks│  NO BODY CLOSE = NO MSS!
                               ▼                  ▼  (Trap for retail breakout buyers)
 
 Scenario B: GENUINE MARKET STRUCTURE SHIFT (MSS)
-        Swing High: 1.2800 ───┬──────────────────┐
+        Swing High: 1.3525 ───┬──────────────────┐
                               │                  │
-                              │ Huge Green Body  │  Closes at 1.2835 with authority!
+                              │ Huge Green Body  │  Closes at 1.3560 with authority!
                               │ Displaces Market │  Leaves Fair Value Gap below!
                               ▼                  ▼  ═══════════════════════════════
                                                     GENUINE MSS CONFIRMED!
@@ -1887,9 +1887,9 @@ Scenario B: GENUINE MARKET STRUCTURE SHIFT (MSS)
         },
         realWorldExample: {
           pair: 'USD/JPY M15',
-          context: 'USD/JPY had been in a downtrend. At 156.00 key level, an M15 candle closed with a large body above 156.40, leaving an FVG.',
-          setup: 'Trader waited for price to pull back into the M15 FVG at 156.20 and entered Long with 18-pip stop loss.',
-          outcome: 'Price surged 110 pips over the next 4 hours to 157.30.',
+          context: 'USD/JPY pulled back to 158.00 key level, then an M15 candle closed with a large body above 158.45, leaving an FVG.',
+          setup: 'Trader waited for price to pull back into the M15 FVG at 158.250 and entered Long with 25-pip stop loss at 158.000.',
+          outcome: 'Price surged 110 pips over the next 4 hours to 159.350.',
           keyTakeaway: 'Displacement is the signature of institutional algorithms. Never trade structure shifts without it.'
         },
         actionableChecklist: [
@@ -1931,9 +1931,9 @@ Scenario B: GENUINE MARKET STRUCTURE SHIFT (MSS)
         },
         realWorldExample: {
           pair: 'GBP/USD M15',
-          context: 'At 10:30 AM EAT, London open pushed price to 1.29656, sweeping Asian High. M15 candle closed back at 1.29169.',
-          setup: 'Fibonacci pulled from 1.2885 (low) to 1.2965 (high). Retracement tapped 0.705 OTE at 1.2908 with 20 EMA confluence.',
-          outcome: 'Sold at 1.2915 with SL at 1.2970. Price plummeted to 1.2850 (+65 pips, 1:3.2 RRR).',
+          context: 'At 10:30 AM EAT, London open pushed price to 1.35450, sweeping Asian High. M15 candle closed back at 1.35100.',
+          setup: 'Fibonacci pulled from 1.3485 (low) to 1.3545 (high). Retracement tapped 0.705 OTE at 1.3508 with 20 EMA confluence.',
+          outcome: 'Sold at 1.35100 with SL at 1.35480. Price dropped to 1.34450 (+65 pips, 1:1.7 RRR).',
           keyTakeaway: 'Trading inside the Killzones guarantees you trade alongside institutional liquidity, never against it.'
         },
         actionableChecklist: [
@@ -1961,22 +1961,22 @@ Scenario B: GENUINE MARKET STRUCTURE SHIFT (MSS)
           title: 'The Mechanical Anatomy of a London Judas Swing',
           caption: 'How Institutions Engineer Liquidity at 10:00 AM Nairobi Time',
           content: `Asian Session Range (03:00 - 10:00 EAT):
-  ══════════════════════════════════════════════════════════ [ ASIAN HIGH: 1.2930 ]
-   ▲  Consolidation Range (25 Pips)
-  ══════════════════════════════════════════════════════════ [ ASIAN LOW: 1.2905 ]
+  ══════════════════════════════════════════════════════════ [ ASIAN HIGH: 1.3522 ]
+   ▲  Consolidation Range (32 Pips)
+  ══════════════════════════════════════════════════════════ [ ASIAN LOW: 1.3490 ]
   
   10:00 AM EAT: LONDON OPEN INJECTIONS!
-    └── 10:15 EAT: Fast parabolic spike to 1.2965! (Sweeps Asian High by +35 pips!)
-    └── Retail traders FOMO BUY thinking "It's a breakout!" (Trapped at 1.29656!)
-    └── 10:45 EAT: M15 candle prints a massive upper wick & closes at 1.2916!
+    └── 10:15 EAT: Fast parabolic spike to 1.3545! (Sweeps Asian High by +23 pips!)
+    └── Retail traders FOMO BUY thinking "It's a breakout!" (Trapped at 1.35450!)
+    └── 10:45 EAT: M15 candle prints a massive upper wick & closes at 1.3510!
     └── 11:00 EAT: Institutional SELL order filled!
-    └── 12:30 EAT: Cascades all the way through the Asian Low to 1.2860! (+56 PIPS PROFIT!)`
+    └── 12:30 EAT: Cascades all the way through the Asian Low to 1.3460! (+50 PIPS PROFIT!)`
         },
         realWorldExample: {
           pair: 'GBP/USD M15',
-          context: 'Asian High was 1.2930. At 10:15 AM EAT, price was artificially spiked to 1.29656 to trap breakout buyers.',
-          setup: 'Waited for the 10:45 AM EAT M15 close at 1.29169 (back inside Asian range). Shorted with SL at 1.2940 (23 pips).',
-          outcome: 'Targeted Asian Low at 1.2905 (+26.9 pips) and London expansion low at 1.2860 (+56.9 pips).',
+          context: 'Asian High was 1.3522. At 10:15 AM EAT, price was artificially spiked to 1.35450 to trap breakout buyers.',
+          setup: 'Waited for the 10:45 AM EAT M15 close at 1.35100 (back inside Asian range). Shorted with SL at 1.35320 (22 pips).',
+          outcome: 'Targeted Asian Low at 1.3490 (+20 pips) and London expansion low at 1.3460 (+50 pips).',
           keyTakeaway: 'The first mouse gets caught in the trap; the second mouse gets the cheese. Never buy London open breakouts.'
         },
         actionableChecklist: [
@@ -2018,9 +2018,9 @@ Step 4 (16:00 - 16:30 EAT): Algorithmic Delivery & Take Profit
         },
         realWorldExample: {
           pair: 'EUR/USD M5',
-          context: 'At 15:30 EAT US Core CPI data released. Higher Timeframe bias was Bearish toward 1.0800.',
-          setup: 'At 15:40 EAT, an M5 candle displaced down 28 pips, leaving an FVG at 1.0842-1.0854. Limit Sell placed at 1.0848 (C.E.).',
-          outcome: 'Tapped at 15:52 EAT, dropped straight to 1.0818 by 16:20 EAT (+30 pips profit, 1:2.5 RRR).',
+          context: 'At 15:30 EAT US Core CPI data released. Higher Timeframe bias was Bearish toward 1.1235.',
+          setup: 'At 15:40 EAT, an M5 candle displaced down 28 pips, leaving an FVG at 1.1261-1.1273. Limit Sell placed at 1.1267 (C.E.).',
+          outcome: 'Tapped at 15:52 EAT, dropped straight to 1.1237 by 16:20 EAT (+30 pips profit, 1:2.5 RRR).',
           keyTakeaway: 'The Silver Bullet eliminates second-guessing. You trade only 60 minutes a day with algorithmic precision.'
         },
         actionableChecklist: [
@@ -2061,9 +2061,9 @@ Step 4 (16:00 - 16:30 EAT): Algorithmic Delivery & Take Profit
         },
         realWorldExample: {
           pair: 'EUR/USD Daily',
-          context: 'Macro bias was bullish. Daily open was at 1.0820. Asian session traded tightly between 1.0815 and 1.0828.',
-          setup: 'At 10:20 AM EAT, London manipulated down to 1.0792 (28 pips below open). Printed an M15 hammer candle.',
-          outcome: 'Bought at 1.0805 (below open). Price rallied all afternoon, closing the day at 1.0885 (+80 pips).',
+          context: 'Macro bias was bullish. Daily open was at 1.1255. Asian session traded tightly between 1.1248 and 1.1265.',
+          setup: 'At 10:20 AM EAT, London manipulated down to 1.1225 (30 pips below open). Printed an M15 hammer candle.',
+          outcome: 'Bought at 1.1235 (below open) with SL at 1.1215. Price rallied all afternoon, closing the day at 1.1310 (+75 pips).',
           keyTakeaway: 'Buying below the daily open on a bullish bias day gives the absolute safest and lowest entry possible.'
         },
         actionableChecklist: [
@@ -2240,15 +2240,15 @@ TOTAL CONFLUENCE SCORE: 0 - 100
           caption: 'How the Laptop Screen Scanner Operates',
           content: `Step 1: Point phone camera or upload photo of your laptop MT4/MT5 screen
 Step 2: AI Vision isolates chart viewport and aligns vertical price scale
-Step 3: OCR extracts Currency Pair (e.g. GBP/USD) and Bid Price (e.g. 1.28540)
+Step 3: OCR extracts Currency Pair (e.g. GBP/USD) and Bid Price (e.g. 1.34998)
 Step 4: Pattern detection engine checks for Tower Top or Rejection Pinbars
 Step 5: Scanner computes 0-100 Confluence Score and outputs Trade Plan with SL & TP!`
         },
         realWorldExample: {
           pair: 'GBP/USD M15',
           context: 'Trader took a photo of MT4 chart on an HP laptop in Gilgil.',
-          setup: 'Uploaded to PivotFx Scanner: detected GBP/USD, price 1.29169, 20 EMA 1.2890, RSI 74, Tower Top pattern.',
-          outcome: 'Scanner generated 89/100 score: HIGH PROBABILITY SELL, suggested SL 1.2965, TP 1.2850.',
+          setup: 'Uploaded to PivotFx Scanner: detected GBP/USD, price 1.35450, 20 EMA 1.35100, RSI 75.8, Tower Top pattern.',
+          outcome: 'Scanner generated 89/100 score: HIGH PROBABILITY SELL, suggested SL 1.35630 (strictly above live quote), TP1 1.35150, TP2 1.34850.',
           keyTakeaway: 'Computer vision bridges the gap between desktop MT4 analysis and mobile decision discipline.'
         },
         actionableChecklist: [
@@ -2269,7 +2269,7 @@ Step 5: Scanner computes 0-100 Confluence Score and outputs Trade Plan with SL &
           'Broker Selection: Incorporates broker-specific live spreads into the calculation.',
           '0-100 Score Output: Generates unambiguous verdicts (WAIT, RISKY, HIGH_PROBABILITY_BUY, HIGH_PROBABILITY_SELL).',
           'Automated Lot Size Sizing: Suggests lot sizes based strictly on the $2.00 survival rule.',
-          'Pre-Trade Plan: Outputs exact Stop Loss and Take Profit levels with mathematical rationale.'
+          'Pre-Trade Plan: Outputs exact Stop Loss and Take Profit levels anchored to your live chart quote.'
         ],
         illustration: {
           type: 'diagram',
@@ -2277,9 +2277,9 @@ Step 5: Scanner computes 0-100 Confluence Score and outputs Trade Plan with SL &
           caption: 'Interactive Component Workflow',
           content: `[ INPUT FIELDS ] ──────────────────────────────────────────┐
   • Broker: FXPesa (CMA Licensed)                          │
-  • Pair: EUR/USD  │  Timeframe: M15                        │
-  • Price: 1.0850  │  20 EMA: 1.0832  │  50 EMA: 1.0815      │
-  • RSI: 68.4                                               │
+  • Pair: EUR/USD  │  Timeframe: M10 / M15                 │
+  • Price: 1.1267  │  20 EMA: 1.1255  │  50 EMA: 1.1239    │
+  • RSI: 59.1                                               │
                                                             ▼
 [ SCORING ENGINE ] ─────────────────────────────────────────┤
   • EMA Trend Alignment: Bullish (20 > 50)  (+25 Pts)       │
@@ -2287,22 +2287,22 @@ Step 5: Scanner computes 0-100 Confluence Score and outputs Trade Plan with SL &
   • RSI Momentum: Healthy Bullish           (+20 Pts)       │
   • Spread Filter: FXPesa 1.2 Pips (TIGHT)  (+15 Pts)       │
                                                             ▼
-[ VERDICT: 82 / 100 - HIGH PROBABILITY BUY ] ───────────────┘
-  • Action: BUY at 1.0850
-  • Stop Loss: 1.0828 (22 Pips)  │  Take Profit: 1.0910 (60 Pips)
+[ VERDICT: 84 / 100 - HIGH PROBABILITY BUY ] ───────────────┘
+  • Action: BUY at 1.1267
+  • Stop Loss: 1.1249 (18 Pips)  │  Take Profit: 1.1321 (54 Pips)
   • Suggested Lot ($2 Rule): 0.01 Micro Lot`
         },
         realWorldExample: {
           pair: 'EUR/USD',
-          context: 'Trader entered values into the manual scanner: Price 1.0850, 20 EMA 1.0832, RSI 68.4.',
-          setup: 'Scanner yielded 82/100 score with High Probability Buy verdict.',
-          outcome: 'Trader executed the 0.01 lot order with the recommended 22-pip stop; reached 1.0910 target cleanly.',
+          context: 'Trader entered values into the manual scanner: Price 1.1267, 20 EMA 1.1255, RSI 59.1.',
+          setup: 'Scanner yielded 84/100 score with High Probability Buy verdict.',
+          outcome: 'Trader executed the 0.01 lot order with the recommended 18-pip stop; reached 1.1321 target cleanly.',
           keyTakeaway: 'The scanner eliminates subjective guesswork and enforces mathematical discipline.'
         },
         actionableChecklist: [
           'Scroll down to the interactive scanner component below.',
           'Enter current market numbers from your MT4/MT5 terminal.',
-          'Click "Run Confluence Analysis" to view your instant quantitative rating.'
+          'Click "Analyse Market" or "Reanalyse" to view your instant quantitative rating.'
         ]
       },
       {
@@ -2331,9 +2331,9 @@ Step 5: Click 'Log Scanned Trade' to transfer parameters to your Trade Journal`
         },
         realWorldExample: {
           pair: 'GBP/JPY H1',
-          context: 'Trader snapped an iPhone photo of an H1 chart showing a massive shooting star at 198.50.',
+          context: 'Trader snapped a photo of an H1 chart showing a massive shooting star at 214.20.',
           setup: 'Uploaded to Camera Vision tool: recognized shooting star pattern with 88% confidence.',
-          outcome: 'Flagged 198.50 rejection. Trade dropped 135 pips.',
+          outcome: 'Flagged 214.20 rejection with SL 214.55 and TP 213.45. Trade dropped 95 pips.',
           keyTakeaway: 'Camera vision turns any physical screen into an institutional diagnostic terminal.'
         },
         actionableChecklist: [
@@ -2403,14 +2403,14 @@ Even with a LOSING win rate of 45%, YOU MAKE $1.60 NET PROFIT EVERY TRADE!`
           type: 'diagram',
           title: 'The Automated Alert Trading Architecture',
           caption: 'Eliminating Screen Addiction & Chop Fatigue',
-          content: `07:30 EAT: Mark Asian High (1.2850), Asian Low (1.2815), and 50 EMA
+          content: `07:30 EAT: Mark Asian High (1.3530), Asian Low (1.3485), and 50 EMA
    │
-   └──► SET CLOUD ALERT 1: "GBP/USD Crossing 1.2850 (Asian High Sweep)"
-   └──► SET CLOUD ALERT 2: "GBP/USD Crossing 1.2815 (Asian Low Sweep)"
+   └──► SET CLOUD ALERT 1: "GBP/USD Crossing 1.3530 (Asian High Sweep)"
+   └──► SET CLOUD ALERT 2: "GBP/USD Crossing 1.3485 (Asian Low Sweep)"
    │
    ▼ CLOSE CHART & WALK AWAY! Enjoy coffee in Gilgil or focus on your work.
    │
-11:18 EAT: BEEP! Phone Alert Triggers: "GBP/USD Crossing 1.2850"
+11:18 EAT: BEEP! Phone Alert Triggers: "GBP/USD Crossing 1.3530"
    │
    ▼ OPEN CHART -> Run AI Scanner -> Score is 86 (Tower Sweep) -> ENTER SHORT!
    │
@@ -2419,7 +2419,7 @@ Execution completed in 90 seconds without staring at screens for 4 hours!`
         realWorldExample: {
           pair: 'GBP/USD',
           context: 'Trader sat in front of the screen for 5 hours; took 4 random trades during chop and lost $18.',
-          setup: 'Switched to alert-based trading; set alert at 1.2850 key level.',
+          setup: 'Switched to alert-based trading; set alert at 1.3530 key level.',
           outcome: 'Phone chimed at 11:20 AM EAT. Took 1 clean trade and made +$36.',
           keyTakeaway: 'The best traders spend the least time staring at unmoving charts. Let alerts do the waiting.'
         },
@@ -2458,7 +2458,7 @@ Execution completed in 90 seconds without staring at screens for 4 hours!`
         realWorldExample: {
           pair: 'EUR/USD',
           context: 'Trader followed the 60-second execution checklist.',
-          setup: 'Scanner scored 84; calculated 0.01 lot; typed in SL at 1.0828 and TP at 1.0910.',
+          setup: 'Scanner scored 84; calculated 0.01 lot; typed in SL at 1.1249 and TP at 1.1321.',
           outcome: 'Order executed with zero second-guessing or hesitation. Target hit 3 hours later.',
           keyTakeaway: 'Checklists eliminate adrenaline and panic. Treat trading like piloting an aircraft.'
         },
@@ -2841,23 +2841,23 @@ EUR/USD  │ USD/JPY  │ -65% (Inverse)│ Often Inverse│ Watch DXY dollar do
           type: 'steplist',
           title: 'The De-Risking & Scaling-In Timeline',
           caption: 'From Initial Risk to Completely Free Runner',
-          content: `Phase 1 (T = 0 mins): ENTRY AT 1.0850
-   Stop Loss: 1.0830 (20 Pips = $2.00 Risk). Risk Exposure = 100%.
+          content: `Phase 1 (T = 0 mins): ENTRY AT 1.12670
+   Stop Loss: 1.12470 (20 Pips = $2.00 Risk). Risk Exposure = 100%.
 
-Phase 2 (T = 45 mins): PRICE REACHES 1.0880 (+30 Pips = +1.5R)
-   Market prints a clean M15 Higher Low at 1.0865.
-   ACTION: Move Stop Loss from 1.0830 up to 1.0850 (ENTRY PRICE / BREAKEVEN).
+Phase 2 (T = 45 mins): PRICE REACHES 1.12970 (+30 Pips = +1.5R)
+   Market prints a clean M15 Higher Low at 1.12820.
+   ACTION: Move Stop Loss from 1.12470 up to 1.12670 (ENTRY PRICE / BREAKEVEN).
    RISK EXPOSURE = $0.00! TRADE IS NOW 100% RISK-FREE!
 
-Phase 3 (T = 90 mins): PRICE BREAKS OUT TO 1.0920 (+70 Pips = +3.5R)
+Phase 3 (T = 90 mins): PRICE BREAKS OUT TO 1.13370 (+70 Pips = +3.5R)
    Take 50% partial profit (+$3.50 banked).
-   Trail remaining stop to 1.0880 (Lock in +$1.50 profit on the runner)!`
+   Trail remaining stop to 1.12970 (Lock in +$1.50 profit on the runner)!`
         },
         realWorldExample: {
           pair: 'GBP/USD',
-          context: 'Trader entered long at 1.2720; at 1.2765 (+45 pips), shifted stop to 1.2720 (BE).',
+          context: 'Trader entered long at 1.34998; at 1.35450 (+45 pips), shifted stop to 1.34998 (BE).',
           setup: 'Surprise Bank of England rate rumor caused a sudden 60-pip flash crash.',
-          outcome: 'Stopped out at 1.2720 for $0.00 loss. No capital lost. Account was 100% protected.',
+          outcome: 'Stopped out at 1.34998 for $0.00 loss. No capital lost. Account was 100% protected.',
           keyTakeaway: 'The Breakeven rule saves your trading career from unforeseen black swan market events.'
         },
         actionableChecklist: [
@@ -3056,8 +3056,8 @@ PROFESSIONAL TRADER LOOP (Prefrontal Cortex Driven):
         realWorldExample: {
           pair: 'GBP/USD',
           context: 'GBP/USD surged 60 pips in 10 minutes on an unexpected news leak.',
-          setup: 'Amateur jumped in at 1.2890; Professional let it go, noting no pullback occurred.',
-          outcome: 'Market formed a Tower Top at 1.2895 and plummeted back to 1.2820. Amateur lost $14; Pro stayed safe.',
+          setup: 'Amateur jumped in at 1.35450; Professional let it go, noting no pullback occurred.',
+          outcome: 'Market formed a Tower Top at 1.35480 and plummeted back to 1.34850. Amateur lost $14; Pro stayed safe.',
           keyTakeaway: 'Never chase a moving train. If you missed the station, wait for the next train.'
         },
         actionableChecklist: [
@@ -3202,7 +3202,7 @@ THE SNIPER (Professional Trader):
         summary: 'Deconstruct the 3 primary mental blind spots that prevent retail traders from cutting losses and flipping bias.',
         concept: 'Cognitive biases are systematic errors in human thinking that distort objective reality. In forex, three biases are particularly lethal: 1) Anchoring Bias (fixating on an outdated price or opinion and refusing to acknowledge new market facts); 2) Recency Bias (believing that because your last 3 trades were winners or losers, the next trade will be the same); and 3) Sunk Cost Fallacy (holding a losing trade because you have already lost so much capital in it).',
         bulletPoints: [
-          'Anchoring Bias: "EUR/USD was at 1.1000 yesterday, so 1.0850 is cheap!" (Price can easily drop to 1.0600).',
+          'Anchoring Bias: "EUR/USD was at 1.1400 last week, so 1.1267 is cheap!" (Price can easily drop lower if structure breaks).',
           'Recency Bias: Feeling invincible after 3 consecutive wins and increasing lot size right before a loss.',
           'Sunk Cost Fallacy: Refusing to close a -$40 loss because "it might come back," turning it into a -$100 blowout.',
           'Neutral Mindset: Every new trade has zero connection to the trade that preceded it.'
@@ -3211,18 +3211,18 @@ THE SNIPER (Professional Trader):
           type: 'diagram',
           title: 'The Sunk Cost Fallacy Trap',
           caption: 'Why Retail Traders Refuse to Cut Losses',
-          content: `Trade Enters: Long at 1.0850 (Planned Stop Loss was 1.0830)
+          content: `Trade Enters: Long at 1.1267 (Planned Stop Loss was 1.1247)
    │
-   ▼ Price drops to 1.0830 (-20 Pips = -$2.00 planned loss)
+   ▼ Price drops to 1.1247 (-20 Pips = -$2.00 planned loss)
    │
-   ├──► PROFESSIONAL ACTION: Cut trade immediately at 1.0830. Loss is -$2.00. Done!
+   ├──► PROFESSIONAL ACTION: Cut trade immediately at 1.1247. Loss is -$2.00. Done!
    │
    └──► SUNK COST TRAP: "I'm already down -$2.00, if I close now it's real! Let me hold!"
         │
-        ▼ Price drops to 1.0790 (-60 Pips = -$6.00 loss)
+        ▼ Price drops to 1.1207 (-60 Pips = -$6.00 loss)
         "I can't close now, I've lost too much! I will wait for breakeven!"
         │
-        ▼ Price collapses to 1.0720 (-130 Pips) -> ACCOUNT LIQUIDATED!`
+        ▼ Price collapses to 1.1137 (-130 Pips) -> ACCOUNT LIQUIDATED!`
         },
         realWorldExample: {
           pair: 'EUR/USD',
@@ -3439,23 +3439,23 @@ Step 5: Return after 60 minutes with a restored, calm prefrontal cortex!`
           content: `A Typical Bullish Daily Candle Forms in 3 Stages:
    
    1. The Open (Asian Session / 00:00 - 08:00 EAT):
-      Opens at 1.0850.
+      Opens at 1.1255.
       
    2. The Manipulation Wick Low (London Open / 11:00 EAT):
-      Price dips DOWN to 1.0830 to sweep sell liquidity and create the daily LOW wick!
+      Price dips DOWN to 1.1235 to sweep sell liquidity and create the daily LOW wick!
       *THIS IS WHERE WE BUY AT WHOLESALE DISCOUNT!*
       
    3. The Real Expansion (London / NY Overlap / 15:30 EAT):
-      Price expands aggressively higher to 1.0920!
+      Price expands aggressively higher to 1.1310!
       
    4. The Close (NY Close / 23:00 EAT):
-      Slight pullback to close at 1.0905, leaving a solid green daily body!`
+      Slight pullback to close at 1.1295, leaving a solid green daily body!`
         },
         realWorldExample: {
           pair: 'EUR/USD',
-          context: 'Daily chart was trending up; previous day high was 1.0880 (the Draw on Liquidity).',
+          context: 'Daily chart was trending up; previous day high was 1.1292 (the Draw on Liquidity).',
           setup: 'Established Bullish Daily Bias at 08:00 EAT. Refused to take any short scalps.',
-          outcome: 'Bought the London open dip at 1.0835; price expanded 65 pips to target the 1.0880 daily high.',
+          outcome: 'Bought the London open dip at 1.1245; price expanded 65 pips to target the 1.1310 daily high.',
           keyTakeaway: 'When your daily bias is correct, lower timeframe execution becomes effortless.'
         },
         actionableChecklist: [
@@ -3490,14 +3490,14 @@ Step 5: Return after 60 minutes with a restored, calm prefrontal cortex!`
    104.80 ───────▼
   ═══════════════════════════════════════════════════════════════════
 EUR/USD CURRENCY PAIR (INVERSE REACTION):
-   1.0920 ───────▲
-                /  EUR/USD ROCKETS HIGHER! (+70 Pips)
+   1.1310 ───────▲
+                /  EUR/USD ROCKETS HIGHER! (+65 Pips)
                /
-   1.0850 ──► Reaches Major Support -> Bounces and Expands Upward!`
+   1.1245 ──► Reaches Major Support -> Bounces and Expands Upward!`
         },
         realWorldExample: {
           pair: 'EUR/USD & DXY',
-          context: 'EUR/USD was hovering near 1.0840 support. Trader checked DXY chart.',
+          context: 'EUR/USD was hovering near 1.1250 support. Trader checked DXY chart.',
           setup: 'DXY was testing 105.80 major H4 resistance with bearish RSI divergence.',
           outcome: 'DXY dumped 40 points; EUR/USD simultaneously exploded +55 pips higher.',
           keyTakeaway: 'Always consult DXY before entering any USD-paired currency trade.'
@@ -3535,8 +3535,8 @@ US10Y Flat     │ Range / Chop     │ Range / Chop           │ Market waitin
         realWorldExample: {
           pair: 'USD/JPY & US10Y',
           context: 'US 10-Year Yield broke above 4.50% resistance on strong US labor data.',
-          setup: 'Trader bought USD/JPY at 155.20 with SL at 154.80.',
-          outcome: 'Yields climbed to 4.58%; USD/JPY surged to 156.80 (+160 pips).',
+          setup: 'Trader bought USD/JPY at 158.250 with SL at 157.850.',
+          outcome: 'Yields climbed to 4.58%; USD/JPY surged to 159.850 (+160 pips).',
           keyTakeaway: 'Bond yields are the smart money compass of global currency markets.'
         },
         actionableChecklist: [
@@ -3598,7 +3598,7 @@ US10Y Flat     │ Range / Chop     │ Range / Chop           │ Market waitin
           'The Sunday Ritual: 60 minutes of uninterrupted analysis before markets open in Sydney.',
           'Weekly Highs & Lows: Mark last week’s high and low on EUR/USD, GBP/USD, and Gold.',
           'Economic Catalyst Mapping: Note which days hold Red Folder news events to plan your high-risk days.',
-          'If/Then Scenarios: "IF price sweeps 1.2850 and rejects, THEN I look for shorts. IF price closes above, I wait."'
+          'If/Then Scenarios: "IF price sweeps 1.3545 and rejects, THEN I look for shorts. IF price closes above, I wait."'
         ],
         illustration: {
           type: 'steplist',
@@ -3612,8 +3612,8 @@ Step 5 (Write Scenarios): Draft written If/Then trade plans in your Weekly Outlo
         },
         realWorldExample: {
           pair: 'GBP/USD',
-          context: 'Sunday prep identified Last Week High at 1.2820 as key liquidity target, with UK CPI on Wednesday.',
-          setup: 'Planned: Wait for Wednesday CPI to sweep 1.2820, then look for London reversal.',
+          context: 'Sunday prep identified Last Week High at 1.3530 as key liquidity target, with UK CPI on Wednesday.',
+          setup: 'Planned: Wait for Wednesday CPI to sweep 1.3530, then look for London reversal.',
           outcome: 'Plan played out to the pip on Wednesday. Trader made +85 pips with zero stress or guesswork.',
           keyTakeaway: 'Failing to prepare is preparing to fail. A written weekly plan eliminates emotional improvisation.'
         },
@@ -3647,9 +3647,9 @@ Date: Monday Session  │  Time: 08:30 EAT
 Pair: EUR/USD         │  Operational Bias: BULLISH EXPANSION
 =====================================================
 • DXY Alignment: Bearish (Testing 105.80 H4 Resistance)
-• Macro Target (DOL): Yesterday's High at 1.0885
+• Macro Target (DOL): Yesterday's High at 1.1292
 • Planned Execution: Wait for London Open (11:00 EAT) dip into 20 EMA
-• Invalidation Floor: 1.0820 (If broken, bias turns neutral)
+• Invalidation Floor: 1.1245 (If broken, bias turns neutral)
 • Maximum Risk: $2.00 (The Gilgil Survival Rule)
 =====================================================`
         },
@@ -3657,7 +3657,7 @@ Pair: EUR/USD         │  Operational Bias: BULLISH EXPANSION
           pair: 'EUR/USD',
           context: 'Trader generated the daily briefing card above at 08:30 EAT.',
           setup: 'Kept the card open beside TradingView throughout the morning.',
-          outcome: 'Followed the exact plan; bought the London dip at 1.0838 and exited at the 1.0885 target.',
+          outcome: 'Followed the exact plan; bought the London dip at 1.1255 and exited at the 1.1295 target.',
           keyTakeaway: 'A written pre-trade briefing acts as an institutional contract between you and your discipline.'
         },
         actionableChecklist: [
@@ -3731,8 +3731,8 @@ NEUTRAL       │ Sideways / Choppy  │ Mixed                 │ Mixed`
         realWorldExample: {
           pair: 'AUD/USD & S&P 500',
           context: 'S&P 500 futures opened +1.5% higher on strong tech earnings during pre-market.',
-          setup: 'Trader bought AUD/USD at 0.6550 anticipating strong Risk-On sentiment.',
-          outcome: 'AUD/USD rallied 55 pips in tandem with global equities.',
+          setup: 'Trader bought AUD/USD at 0.70150 anticipating strong Risk-On sentiment.',
+          outcome: 'AUD/USD rallied 55 pips in tandem with global equities to 0.70700.',
           keyTakeaway: 'Understanding global sentiment confirms whether your currency pair has macro wind at its back.'
         },
         actionableChecklist: [
@@ -3806,7 +3806,7 @@ Current Time: 12:45:10 EAT  │  Session: LONDON PEAK (HIGH VOLUME)
 Volume Indicator: [ ████████████████████ ] 88% Institutional Activity
 ───────────────────────────────────────────────────────────────────────
 [ DAILY BIAS GENERATOR ]
-Pair: GBP/USD  │  Bias: BULLISH  │  Target: 1.2850  │  Invalidation: 1.2780
+Pair: GBP/USD  │  Bias: BULLISH  │  Target: 1.3565  │  Invalidation: 1.3472
 ───────────────────────────────────────────────────────────────────────
 [ WEEKLY OUTLOOK FORM ]
 Save your weekly notes directly into the application below!`
@@ -3868,10 +3868,10 @@ Save your weekly notes directly into the application below!`
           caption: 'Essential Data Points Tracked by Institutional Traders',
           content: `ID   │ Timestamp │ Pair    │ Type │ Lots │ Entry   │ SL      │ PnL ($) │ Setup Strategy │ Mistake Tag
 ─────┼───────────┼─────────┼──────┼──────┼─────────┼─────────┼─────────┼────────────────┼────────────
-#101 │ Oct 12 11h│ EUR/USD │ BUY  │ 0.01 │ 1.08502 │ 1.08300 │ +$5.20  │ 20/50 EMA Bounc│ Clean Exec
-#102 │ Oct 13 15h│ GBP/USD │ SELL │ 0.01 │ 1.29169 │ 1.29700 │ +$6.60  │ Tower Top Rev  │ Clean Exec
-#103 │ Oct 14 12h│ USD/JPY │ BUY  │ 0.02 │ 155.200 │ 155.000 │ -$4.00  │ News Chase     │ FOMO Trap!
-#104 │ Oct 15 16h│ EUR/USD │ BUY  │ 0.01 │ 1.08200 │ 1.08000 │ +$6.00  │ FVG Mitigation │ Clean Exec`
+#101 │ Oct 12 11h│ EUR/USD │ BUY  │ 0.01 │ 1.12520 │ 1.12320 │ +$5.20  │ 20/50 EMA Bounc│ Clean Exec
+#102 │ Oct 13 15h│ GBP/USD │ SELL │ 0.01 │ 1.35100 │ 1.35300 │ +$6.60  │ Tower Top Rev  │ Clean Exec
+#103 │ Oct 14 12h│ USD/JPY │ BUY  │ 0.02 │ 158.250 │ 158.050 │ -$4.00  │ News Chase     │ FOMO Trap!
+#104 │ Oct 15 16h│ EUR/USD │ BUY  │ 0.01 │ 1.12670 │ 1.12490 │ +$6.00  │ FVG Mitigation │ Clean Exec`
         },
         realWorldExample: {
           pair: 'Ledger Audit',
@@ -4189,9 +4189,9 @@ Phase 4: Qualify for automatic scaling on both accounts
         levelTag: 'Advanced',
         duration: '22 mins',
         summary: 'The exact calendar blueprint: Month 1 Foundation, Month 2 Backtesting & Demo Discipline, Month 3 Funded Challenge.',
-        concept: 'Becoming a consistently profitable, funded forex trader is not a multi-year mystery; it is a structured 90-day engineering curriculum. Month 1 is dedicated to mastering the 8 Pillars of PivotFx and internalizing the $2 survival rule. Month 2 is dedicated to 100 documented demo trades to prove positive expectancy. Month 3 is dedicated to taking your first $10K or $25K prop firm challenge and securing your first payout.',
+        concept: 'Becoming a consistently profitable, funded forex trader is not a multi-year mystery; it is a structured 90-day engineering curriculum. Month 1 is dedicated to mastering the 9 Pillars of PivotFx and internalizing the $2 survival rule. Month 2 is dedicated to 100 documented demo trades to prove positive expectancy. Month 3 is dedicated to taking your first $10K or $25K prop firm challenge and securing your first payout.',
         bulletPoints: [
-          'Month 1 (Days 1 - 30): Complete all 8 Pillars, configure TradingView and MT4, master the $2 rule.',
+          'Month 1 (Days 1 - 30): Complete all 9 Pillars, configure TradingView and MT4, master the $2 rule.',
           'Month 2 (Days 31 - 60): Execute 50 documented trades on demo; achieve a Profit Factor > 1.75.',
           'Month 3 (Days 61 - 90): Purchase and execute Phase 1 and Phase 2 of a $10K/25K challenge risking 0.5%.',
           'Month 4 (Day 90+): Receive your first verified profit payout into your Kenyan bank account or M-Pesa!'
@@ -4201,7 +4201,7 @@ Phase 4: Qualify for automatic scaling on both accounts
           title: 'The 90-Day Funded Trader Calendar',
           caption: 'Your Step-by-Step Path from Zero to Funded',
           content: `DAYS 1 - 30: THE ACADEMY & FOUNDATION PHASE
-   • Complete all 80 lessons across the 8 PivotFx Pillars
+   • Complete all 88 lessons across the 9 PivotFx Pillars
    • Set up TradingView workspace & MT4/MT5 terminal with FXPesa demo
    • Pass all lesson quizzes with 100% score
 
@@ -4250,8 +4250,8 @@ DAY 90+: FUNDED TRADER PAYOUT MILESTONE!
           title: 'Interactive Trade Logger Component Architecture',
           caption: 'Built-in Tool Embedded Directly Below',
           content: `[ ADD NEW TRADE FORM ]
-  • Pair: EUR/USD  │  Type: BUY  │  Lots: 0.01  │  Entry: 1.0850
-  • Stop Loss: 1.0830  │  Take Profit: 1.0910  │  PnL ($): +$6.00
+  • Pair: EUR/USD  │  Type: BUY  │  Lots: 0.01  │  Entry: 1.12670
+  • Stop Loss: 1.12490  │  Take Profit: 1.13210  │  PnL ($): +$5.40
   • Setup: Tower Top Reversal  │  Mistake: None (Clean Exec)
   └── [ + Add Trade to Ledger ] Button
 ────────────────────────────────────────────────────────────────────────
@@ -4272,6 +4272,327 @@ DAY 90+: FUNDED TRADER PAYOUT MILESTONE!
           'Scroll down to the Trade Logger component below.',
           'Log your last 3 live or demo trades to familiarize yourself with the interface.',
           'Commit to logging every single trade you execute throughout your trading career.'
+        ]
+      }
+    ]
+  },
+
+  // =========================================================================
+  // PILLAR 09: DAILY TRADE SAFETY & GLOBAL MACRO FACTORS
+  // =========================================================================
+  {
+    id: '/macro-safety',
+    route: '/macro-safety',
+    number: '09',
+    title: 'Daily Trade Safety & Global Macro Factors',
+    subtitle: 'Is It Safe to Buy or Sell Today? Global Factors, DXY & Macro Shield',
+    oneLineHook: 'Check today’s global USD drivers, risk sentiment, news traps, and real-time Buy/Sell safety before opening any trade.',
+    badge: 'Macro & Safety Shield',
+    category: 'Institutional',
+    overview: 'Before entering any BUY or SELL order on MT4/MT5, institutional desks check global macro factors affecting the day: US Dollar (DXY) basket direction, central bank rate differentials, risk-on vs risk-off capital rotation, high-impact economic releases, and East Africa Time (EAT) session liquidity windows. This pillar protects your hard-earned capital by filtering out unsafe days, chop zones, and counter-trend news traps across all major FX pairs, Gold, and Crypto.',
+    learningOutcomes: [
+      'Determine in 60 seconds whether it is safe to BUY, safe to SELL, or stay FLAT today',
+      'Read US Dollar Index (DXY) correlation across EUR/USD, GBP/USD, USD/CAD, USD/JPY, and Gold',
+      'Distinguish Risk-On expansion days from Risk-Off safe-haven days (Gold & Yen spikes)',
+      'Avoid red-folder economic slippage traps and midnight rollover spread widening in EAT time'
+    ],
+    lessons: [
+      {
+        id: 'ms-01',
+        number: '01',
+        title: 'The Daily Pre-Trade Safety Protocol: Should You Trade Today?',
+        levelTag: 'Beginner & Intermediate',
+        duration: '14 mins',
+        summary: 'Not every day deserves your risk. Learn the 4-filter institutional check that tells you when markets are favourable vs when to protect your capital.',
+        concept: 'Amateur traders wake up and immediately ask "Where can I click Buy or Sell?" Institutional risk managers first ask "What global factors are moving liquidity today, and is today’s environment clean or treacherous?" Even the best 20/50 EMA or liquidity sweep pattern can get stopped out on a central bank speech day, a London/US bank holiday, or a midnight rollover spread spike. Running a 60-second daily safety audit preserves your account for the highest-probability days.',
+        bulletPoints: [
+          'Filter 1 — Macro Event Check: Are US NFP, Core CPI, or FOMC / BoE / ECB rate decisions scheduled within 2 hours?',
+          'Filter 2 — US Dollar (DXY) Basket Alignment: Is the USD showing clear directional pressure or sideways choppy range?',
+          'Filter 3 — Nairobi EAT Session Window: Are we inside London Open (10:00 EAT) or NY Overlap (15:30–18:59 EAT), or trapped in the Asian/Rollover dead zone?',
+          'Filter 4 — Live Candle vs 20 EMA Structure: Is price offering a disciplined pullback or overextended beyond RSI 70 / below RSI 30?'
+        ],
+        illustration: {
+          type: 'steplist',
+          title: 'Daily 4-Step Trade Safety Filter',
+          caption: 'Run before placing any MT4 order',
+          content: `STEP 1: CHECK TODAY'S MACRO CALENDAR & DXY BASKET
+   ├── Clear Calendar + Directional DXY -> GREEN LIGHT (+35 pts)
+   └── Major Red-Folder News in < 30 mins -> HOLD ORDERS (Slippage Guard)
+
+STEP 2: CHECK RISK REGIME (GOLD XAU/USD + BTC + USD/JPY)
+   ├── Risk-On Expansion -> Favor GBP/USD, EUR/USD, GBP/JPY long pullbacks
+   └── Risk-Off Safe-Haven -> Favor Gold (XAU/USD) or JPY defense; cut risk crosses
+
+STEP 3: VERIFY EAST AFRICA TIME (EAT) LIQUIDITY WINDOW
+   ├── 10:00 - 13:00 EAT (London Open) -> HIGH LIQUIDITY / SAFE
+   ├── 15:30 - 18:59 EAT (London/NY Overlap) -> PEAK OPTIMAL WINDOW
+   └── 22:00 - 02:59 EAT (Rollover Dead Zone) -> UNSAFE (DO NOT TRADE)
+
+STEP 4: APPLY GILGIL $2.00 (260 KES) MICRO-LOT SHIELD
+   └── Fixed 0.01 Lot · Valid SL/TP strictly outside spread noise`
+        },
+        realWorldExample: {
+          pair: 'GBP/USD & USD/CAD',
+          context: 'Trader checked Pillar 09 before opening an M15 trade at 15:45 EAT during London/NY overlap.',
+          setup: 'DXY basket showed -0.28% softening while GBP/USD bounced off its 20 EMA with RSI at 56.4 (no red news within 4 hours).',
+          outcome: 'Confirmed SAFE TO BUY TODAY (84/100 score). Executed 0.01 lot with 16-pip SL ($1.60 risk) and captured +44 pips (+$4.40).',
+          keyTakeaway: 'Combining global macro alignment with real-time candlestick execution multiplies win rate and eliminates random chop losses.'
+        },
+        actionableChecklist: [
+          'Inspect the live Global Macro Banner above before placing your first trade of the day.',
+          'Check whether any high-impact economic news or holiday toggles apply today.',
+          'Verify your chosen pair shows at least 58/100 on the Daily Safety Matrix.'
+        ]
+      },
+      {
+        id: 'ms-02',
+        number: '02',
+        title: 'US Dollar (DXY) Basket Correlation Across Majors & Gold',
+        levelTag: 'Intermediate',
+        duration: '16 mins',
+        summary: 'Because the US Dollar is on one side of 88% of global forex volume, knowing DXY direction tells you which pairs are safe to BUY vs SELL today.',
+        concept: 'EUR/USD, GBP/USD, AUD/USD, and XAU/USD (Gold) quote the US Dollar as the counter currency—when the US Dollar surges globally, these pairs face heavy downward headwinds. Conversely, USD/CAD and USD/JPY quote the US Dollar as the base currency—so a strong USD pushes them upward. Checking the live USD Basket percentage change stops you from accidentally buying EUR/USD at the exact moment institutions are aggressively buying US Dollars across all desks.',
+        bulletPoints: [
+          'Inverse USD Pairs (EUR/USD, GBP/USD, AUD/USD, XAU/USD): Safe to BUY when USD Basket is weakening or flat; Safe to SELL when USD Basket surges.',
+          'Direct USD Pairs (USD/CAD, USD/JPY): Safe to BUY when USD Basket surges +0.15% or higher; Safe to SELL when USD Basket weakens.',
+          'Divergence Trap Alert: If EUR/USD is rising (+0.40%) while GBP/USD is falling (-0.30%), USD is neutral and local European/UK news is driving cross volatility.'
+        ],
+        illustration: {
+          type: 'table',
+          title: 'Global USD Basket vs FX Pair Safety Matrix',
+          caption: 'Instant direction alignment guide',
+          content: `USD BASKET STATE │ EUR/USD, GBP/USD, AUD/USD, XAU │ USD/CAD, USD/JPY
+─────────────────┼────────────────────────────────┼────────────────────────────────
+USD SURGING (+%) │ CAUTION/UNSAFE BUY · FAVOR SELL│ SAFE TO BUY ON 20 EMA PULLBACK
+USD FALLING (-%) │ SAFE TO BUY ON 20 EMA PULLBACK │ CAUTION/UNSAFE BUY · FAVOR SELL
+USD FLAT (~0.0%) │ RANGE SWEEP / LOCAL NEWS ONLY  │ RANGE SWEEP / LOCAL NEWS ONLY`
+        },
+        realWorldExample: {
+          pair: 'EUR/USD vs USD/CAD',
+          context: 'New York Open 15:30 EAT after hotter-than-expected US Treasury yield move.',
+          setup: 'USD Basket spiked +0.34%. Traders who tried buying EUR/USD got stopped out, while USD/CAD cleanly held above its 20 EMA and expanded higher.',
+          outcome: 'Pillar 09 marked EUR/USD BUY as CAUTION and USD/CAD BUY as SAFE_OPTIMAL.',
+          keyTakeaway: 'Never fight a surging US Dollar basket with counter-trend buys.'
+        },
+        actionableChecklist: [
+          'Read the US Dollar Basket (DXY) card at the top of the Macro Dashboard.',
+          'Ensure your BUY or SELL direction has a DXY tailwind or neutral equilibrium.',
+          'Use live candlestick values so Stop Losses sit outside intraday volatility.'
+        ]
+      },
+      {
+        id: 'ms-03',
+        number: '03',
+        title: 'Risk-On vs Risk-Off Sentiment: How Global Fear & Greed Moves FX & Gold',
+        levelTag: 'Intermediate',
+        duration: '15 mins',
+        summary: 'Learn when global institutions pile into Safe-Haven Gold (XAU/USD) and Japanese Yen (JPY) versus growth currencies like GBP and AUD.',
+        concept: 'Global financial markets oscillate between two dominant macro moods: Risk-On (investors feel confident, buying equities, Bitcoin, GBP/JPY, GBP/USD, and AUD/USD) and Risk-Off (geopolitical tension, banking stress, or recession fears cause funds to dump risky crosses and rush into Gold XAU/USD, Swiss Franc, and Japanese Yen).',
+        bulletPoints: [
+          'Risk-On Signature: Gold steady or soft, BTC/USD green (+%), USD/JPY climbing -> High-beta pairs like GBP/JPY and GBP/USD trend smoothly.',
+          'Risk-Off Signature: Sudden spike in XAU/USD Gold (+1.0%+) combined with sharp drop in USD/JPY & GBP/JPY -> Safe-haven panic mode.',
+          'Capital Protection Rule on Risk-Off Days: Avoid buying GBP/JPY or AUD/USD; focus on Gold safe-haven structure or wait for volatility to cool.'
+        ],
+        illustration: {
+          type: 'diagram',
+          title: 'Global Risk Appetite Flow Map',
+          caption: 'Where institutional money rotates on Risk-On vs Risk-Off days',
+          content: `[ RISK-ON EXPANSION ] ──> Capital exits Yen ──> GBP/USD ↑  GBP/JPY ↑  AUD/USD ↑
+[ RISK-OFF FLIGHT   ] ──> Capital seeks safety ──> XAU/USD (Gold) ↑  JPY ↑ (USD/JPY ↓)`
+        },
+        realWorldExample: {
+          pair: 'GBP/JPY & XAU/USD',
+          context: 'Overnight geopolitical headline caused a sudden Risk-Off wave during Asian/London transition.',
+          setup: 'XAU/USD jumped +1.4% while GBP/JPY dropped -110 pips straight through intraday support.',
+          outcome: 'Traders checking Risk Sentiment avoided catching falling knives on GBP/JPY and waited for structured Gold pullbacks.',
+          keyTakeaway: 'When Gold and Yen spike together in fear, tighten exposure on volatile JPY crosses.'
+        },
+        actionableChecklist: [
+          'Check the Global Risk Appetite telemetry card above (Risk-On vs Risk-Off).',
+          'Avoid aggressive longs on GBP/JPY during Risk-Off safe-haven spikes.',
+          'Keep position size capped at 0.01 micro lot ($2.00 / 260 KES risk).'
+        ]
+      },
+      {
+        id: 'ms-04',
+        number: '04',
+        title: 'RSI Exhaustion & Liquidity Traps: When Buying or Selling Becomes Unsafe',
+        levelTag: 'Intermediate',
+        duration: '14 mins',
+        summary: 'Why a bullish trend can still be UNSAFE to buy right now if price has already stretched parabolic above RSI 70.',
+        concept: 'A common beginner mistake is seeing a market up +1.5% on the day and clicking BUY right at the top—only for price to snap back 35 pips in 15 minutes. Even if a currency’s macro story is bullish, buying when RSI(14) exceeds 68–70 means institutions are already taking profits and preparing a liquidity sweep.',
+        bulletPoints: [
+          'Overbought Warning (RSI >= 68): Buying becomes UNSAFE / CAUTION; wait for a healthy pullback back to the dynamic 20 EMA.',
+          'Oversold Warning (RSI <= 34): Selling becomes UNSAFE / CAUTION; do not chase short orders into major support.',
+          'Sweet-Spot Execution Zone: Best trend buys happen when RSI cools to 45–62 near 20 EMA support; best trend sells happen when RSI rallies to 38–55 near 20 EMA resistance.'
+        ],
+        illustration: {
+          type: 'formula',
+          title: 'Intraday RSI Safety Boundaries',
+          caption: 'Separating healthy trend entries from FOMO liquidity traps',
+          content: `RSI 14 > 70  ──> OVERBOUGHT PARABOLIC EXTENDED (UNSAFE TO BUY — WATCH TOWER TOP SWEEP)
+RSI 46 - 64  ──> HEALTHY BULLISH VALUE ZONE     (SAFE TO BUY ON 20 EMA BOUNCE)
+RSI 36 - 54  ──> HEALTHY BEARISH VALUE ZONE     (SAFE TO SELL ON 20 EMA REJECTION)
+RSI 14 < 30  ──> OVERSOLD EXHAUSTION DUMP       (UNSAFE TO SELL — HIGH SNAPBACK RISK)`
+        },
+        realWorldExample: {
+          pair: 'GBP/USD M15',
+          context: 'GBP/USD rallied rapidly after UK session open, pushing RSI(14) to 75.8.',
+          setup: 'Pillar 09 flagged BUY TODAY as UNSAFE (score 32/100) due to parabolic overextension above 20 EMA.',
+          outcome: 'Price swept buy stops and pulled back 42 pips to retest the 20 EMA before stabilizing.',
+          keyTakeaway: 'Never buy into RSI >= 70; wait for the pullback into fair value.'
+        },
+        actionableChecklist: [
+          'Verify RSI(14) on each asset scorecard before clicking BUY or SELL.',
+          'If RSI is >= 68, wait for price to pull back toward 20 EMA before buying.',
+          'Keep your Stop Loss strictly protected beyond recent swing structure.'
+        ]
+      },
+      {
+        id: 'ms-05',
+        number: '05',
+        title: 'East Africa Time (EAT) Session Clock: The 4 Trading Windows of the Day',
+        levelTag: 'Beginner',
+        duration: '12 mins',
+        summary: 'Master when Kenyan traders enjoy tight 0.6–1.2 pip spreads and clean moves versus when brokers widen spreads at midnight rollover.',
+        concept: 'Liquidity in global forex is not uniform 24 hours a day. In Nairobi (UTC+3 / EAT), institutional order flow concentrates heavily between 10:00 EAT (London Open) and 19:00 EAT (London/New York Overlap close). Conversely, between 22:00 EAT and 02:59 EAT, New York closes and Sydney/Tokyo opens—causing daily swap rollover where spreads temporarily balloon from 1.1 pips to 6–12 pips.',
+        bulletPoints: [
+          '10:00 – 13:00 EAT (London Killzone): Highest probability breakout & Asian-sweep reversal window.',
+          '15:30 – 18:59 EAT (London / New York Overlap): Maximum global volume, fastest fills, tightest spreads.',
+          '22:00 – 02:59 EAT (Midnight Swap Rollover): UNSAFE window — DO NOT open new trades due to spread widening.',
+          '03:00 – 09:00 EAT (Tokyo Asian Session): Range-bound; use only for marking Asian High & Asian Low liquidity pools.'
+        ],
+        illustration: {
+          type: 'table',
+          title: 'Nairobi EAT 24-Hour Safety Schedule',
+          caption: 'Align your execution with institutional desk hours',
+          content: `NAIROBI TIME (EAT) │ SESSION NAME           │ SAFETY STATUS  │ RECOMMENDED ACTION
+───────────────────┼────────────────────────┼────────────────┼──────────────────────────────────
+03:00 – 09:30 EAT  │ Tokyo / Asian Range    │ SELECTIVE      │ Mark Asian High & Low boundaries
+10:00 – 13:00 EAT  │ London Killzone Open   │ SAFE OPTIMAL ✓ │ Execute Judas Sweep & EMA setups
+15:30 – 18:59 EAT  │ London / NY Overlap    │ PEAK OPTIMAL ✓ │ Best daily liquidity & momentum
+22:00 – 02:59 EAT  │ Swap Rollover Hazard   │ UNSAFE / FLAT✕ │ Stay out — spreads widen 3x–8x`
+        },
+        realWorldExample: {
+          pair: 'USD/CAD & EUR/USD',
+          context: 'Beginner placed a tight 10-pip SL order at 23:55 EAT (midnight rollover).',
+          setup: 'Market price barely moved 3 pips, but midnight spread widened to 8.5 pips, triggering Stop Loss instantly.',
+          outcome: 'Switching execution to 10:15 EAT & 15:45 EAT eliminated rollover stop-outs completely.',
+          keyTakeaway: 'Clock discipline saves more money than almost any indicator.'
+        },
+        actionableChecklist: [
+          'Check the Nairobi EAT Session Guard card above before opening MT4/MT5.',
+          'Never place new trades between 22:00 EAT and 02:59 EAT.',
+          'Focus 80% of your trading inside 10:00–13:00 EAT and 15:30–18:30 EAT.'
+        ]
+      },
+      {
+        id: 'ms-06',
+        number: '06',
+        title: 'Navigating Central Bank Rate Decisions, CPI Inflation & US NFP Days',
+        levelTag: 'Advanced',
+        duration: '17 mins',
+        summary: 'How to protect your $100–$500 capital when Powell, the Bank of England, ECB, or US Non-Farm Payrolls hit the tape.',
+        concept: 'High-impact economic releases reprice bond yields and currency values in milliseconds. Because liquidity providers pull resting orders seconds before NFP or CPI drops, both Buy Stops and Sell Stops frequently suffer severe slippage or whipsaw both directions inside 120 seconds. Institutions do not gamble on the announcement second—they wait 15–30 minutes for the true post-news Fair Value Gap to form.',
+        bulletPoints: [
+          'Pre-Release Rule (T-15 mins): Close or secure open intraday trades before major Red-Folder USD/GBP/EUR news.',
+          'No Straddle Gambling: Placing simultaneous Buy/Sell stops before news fails because spread expansion triggers both and stops out both.',
+          'Post-News Displacement Play (T+20 mins): Once spreads normalize below 2.0 pips, trade the clean continuation or liquidity sweep retest.'
+        ],
+        illustration: {
+          type: 'steplist',
+          title: 'Red-Folder Macro Event Survival Protocol',
+          caption: 'How pros trade NFP & CPI without getting slipped',
+          content: `T - 15 MINUTES: Toggle "US NFP / CPI / FOMC Today = ON" in Pillar 09 -> Flatten risky scalps
+T = 0 SECONDS:  Algorithmic news spike & spread widening (8 - 15 pips) -> HANDS OFF KEYBOARD
+T + 15 MINS:    Initial fakeout wick finishes; broker spreads return to ~1.1 - 1.5 pips
+T + 20 MINS:    Enter confirmed post-news pullback with 0.01 micro lot ($2.00 max risk)`
+        },
+        realWorldExample: {
+          pair: 'XAU/USD (Gold) & GBP/USD',
+          context: 'US CPI inflation report released at 15:30 EAT.',
+          setup: 'Gold spiked +$14 up then dumped -$22 within 4 minutes. At 15:52 EAT, Gold stabilized and formed a clean M15 structure retest.',
+          outcome: 'Traders who waited 20 minutes avoided the whipsaw and captured a clean 1:2.8 R:R move with tight 1.5 pip spread.',
+          keyTakeaway: 'Let the news dust settle; trade the aftermath, never the explosion.'
+        },
+        actionableChecklist: [
+          'Toggle Red-Folder US News or Central Bank Rate Day ON in Pillar 09 when scheduled.',
+          'Wait 15–20 minutes after major economic announcements before entering.',
+          'Confirm broker spread has returned to normal (< 2.0 pips on majors) before clicking Buy/Sell.'
+        ]
+      },
+      {
+        id: 'ms-07',
+        number: '07',
+        title: 'Multi-Timeframe Candle Sync: Matching Chart Price with MT4 Execution',
+        levelTag: 'Core Execution',
+        duration: '13 mins',
+        summary: 'Why stale static numbers fail in real trading and how live candlestick syncing guarantees valid Stop Loss and Take Profit placement.',
+        concept: 'Markets tick every second. If an analysis tool shows an outdated entry price (for example, 1.39672 when the live 15-minute candle on your chart has moved to 1.39463), entering a Stop Loss calculated from the old price can sit on the wrong side of current price—causing MT4/MT5 to reject the order with [Invalid S/L or T/P] or give you a broken Risk-to-Reward ratio. Always anchor every calculation to the latest quoted candlestick.',
+        bulletPoints: [
+          'Live Feed vs Futures Offset: Spot Gold (XAU/USD) and Gold Futures (GC1!) trade at slightly different premiums—always verify your exact broker candle price.',
+          'Micro-Tick Strategy Sensitivity: Even a 10–25 pip move across M10/M15 candles shifts price across the 20 EMA and changes RSI momentum.',
+          'MT4 Mathematical Invariant: For BUY orders, SL MUST strictly be < Entry < TP. For SELL orders, TP MUST strictly be < Entry < SL.'
+        ],
+        illustration: {
+          type: 'formula',
+          title: 'Zero-Rejection MT4/MT5 Price Invariant',
+          caption: 'Mathematical check enforced across PivotFx engines',
+          content: `LIVE CANDLE QUOTE = C_live (Fetched live or typed directly from your chart)
+
+BUY BY MARKET:   StopLoss (C_live - SL_pips) < Entry (C_live) < TP1 < TP2
+SELL BY MARKET:  TP2 < TP1 < Entry (C_live) < StopLoss (C_live + SL_pips)`
+        },
+        realWorldExample: {
+          pair: 'USD/CAD M15',
+          context: 'Live chart candle quoted at 1.39463 while an unrefreshed daily cache showed 1.39672 (21 pips away).',
+          setup: 'Clicked Reanalyse / Sync Live Candle -> Engine pulled live quote @ 1.39463 and recalculated EMA20, EMA50, RSI, SL, TP1, TP2, and EA inputs.',
+          outcome: 'MT4 accepted the order instantaneously with exact 16-pip Stop Loss ($1.60 risk) and +48 pip final target.',
+          keyTakeaway: 'Never input stale numbers—always re-sync your live candlestick right before execution.'
+        },
+        actionableChecklist: [
+          'Verify the live candlestick quote on your chart matches the Entry Price shown on your ticket.',
+          'Click Refresh / Reanalyse right before executing if candles have moved.',
+          'Confirm SL < Entry < TP for BUY or TP < Entry < SL for SELL.'
+        ]
+      },
+      {
+        id: 'ms-08',
+        number: '08',
+        title: 'Synthesizing Global Macro Safety + 0.01 Micro-Lot Risk for Consistent Growth',
+        levelTag: 'Pro / Institutional',
+        duration: '15 mins',
+        summary: 'Combine macro directional filters with strict $2.00 (260 KES) maximum loss discipline to survive any global market cycle.',
+        concept: 'Global macro awareness is your shield against bad environments, and the Gilgil $2.00 Risk Rule (strict 0.01 micro lot) is your shield against unexpected market shocks. Even when global factors look 90% favorable, an unscheduled geopolitical headline can reverse any currency pair in seconds. Because your risk is permanently capped at 0.01 micro lot (~$1.50 to $2.00 per trade), no single global shock can ever damage your account.',
+        bulletPoints: [
+          'Two-Layer Armor: Layer 1 (Pillar 09 Macro Check) keeps you out of low-probability chop and news whipsaws; Layer 2 (0.01 Micro Lot) caps every loss at <= $2.00.',
+          'Selective Daily Quota: You only need 1 to 2 clean macro-aligned setups per day during London or NY sessions.',
+          'Monthly Compounding Math: Winning 60% of 30 monthly setups at 1:2.5 R:R on 0.01 lot grows a small Kenyan account steadily with minimal stress.'
+        ],
+        illustration: {
+          type: 'diagram',
+          title: 'The Dual-Shield Institutional Architecture',
+          caption: 'Macro Environment Filter + Mathematical Position Sizing',
+          content: `[ LAYER 1: PILLAR 09 MACRO & SAFETY SHIELD ]
+   ├── Checks DXY Basket + Risk-On/Off + EAT Session + Macro News
+   └── Filters out unsafe sessions & low-probability counter-USD trades
+             │
+             ▼ (Only A+ Safe Setups Pass Through)
+[ LAYER 2: GILGIL $2.00 (260 KES) EXECUTION ENGINE ]
+   ├── Auto-syncs live chart candlestick & valid MT4 SL / TP1 / TP2
+   └── Enforces strict 0.01 Micro Lot so max downside is capped at $2.00`
+        },
+        realWorldExample: {
+          pair: 'All 8 Major Pairs',
+          context: 'Trader followed Pillar 09 daily safety checks across 20 consecutive trading days.',
+          setup: 'Skipped trading on 3 red-folder CPI/FOMC days and never opened orders after 22:00 EAT; traded only green-lit setups at 0.01 lot.',
+          outcome: 'Avoided all major spread/news drawdowns and finished the month +18.4% net positive.',
+          keyTakeaway: 'Knowing when NOT to trade is half of institutional profitability.'
+        },
+        actionableChecklist: [
+          'Make checking Pillar 09 your mandatory first step every morning before opening MT4.',
+          'Trade only pairs marked SAFE TO BUY or SAFE TO SELL in your active session.',
+          'Never exceed 0.01 micro lot until your verified account balance crosses $500+.'
         ]
       }
     ]

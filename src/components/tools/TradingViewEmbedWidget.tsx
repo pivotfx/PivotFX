@@ -50,6 +50,8 @@ export const getTradingViewInterval = (tf: Timeframe): string => {
       return '1';
     case 'M5':
       return '5';
+    case 'M10':
+      return '10';
     case 'M15':
       return '15';
     case 'H1':
@@ -93,7 +95,7 @@ export const TradingViewEmbedWidget: React.FC<TradingViewEmbedWidgetProps> = ({
     'AUD/USD'
   ];
 
-  const TF_OPTIONS: Timeframe[] = ['M5', 'M15', 'H1', 'H4', 'D1'];
+  const TF_OPTIONS: Timeframe[] = ['M5', 'M10', 'M15', 'H1', 'H4', 'D1'];
 
   return (
     <div
@@ -112,11 +114,12 @@ export const TradingViewEmbedWidget: React.FC<TradingViewEmbedWidgetProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-mono font-black text-white">{pair}</span>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#D4AF37]/20 text-[#D4AF37] font-bold">
-                {timeframe}
+              <span className="text-[10px] font-mono text-[#D4AF37] font-bold">
+                · {timeframe}
               </span>
-              <span className="w-2 h-2 rounded-full bg-[#00C261] animate-ping" />
-              <span className="text-[9px] font-mono text-[#00C261] font-bold hidden sm:inline">LIVE FEED</span>
+              <span className="text-[10px] font-mono text-[#00C261] font-bold hidden sm:inline">
+                · TradingView Stream
+              </span>
             </div>
             <p className="text-[10px] text-slate-400 font-mono">
               TradingView Cloud Engine • EAT Nairobi Timezone

@@ -1,285 +1,41 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CurrencyPair, Timeframe, BrokerId } from '../../types';
 import {
-  Globe,
+  MarketScanData,
+  INITIAL_MARKETS_DATA,
+  globalLiveStream,
+  computeRealChartTradeParams,
+  evaluatePairKenyaTiming,
+  getCurrentMacroContext
+} from '../../utils/liveMarketEngine';
+import { LiveInteractiveCandleChart } from './LiveInteractiveCandleChart';
+import {
   RefreshCw,
   Sparkles,
   TrendingUp,
   TrendingDown,
-  ArrowRight,
-  ShieldCheck,
   CheckCircle2,
-  AlertTriangle,
   Award,
   Zap,
   Bot,
   Copy,
   Check,
-  Compass,
-  Scale,
   BarChart3,
-  ExternalLink,
-  Flame,
-  Target
+  Target,
+  ArrowLeft,
+  ArrowRight,
+  Activity,
+  Radar,
+  Clock
 } from 'lucide-react';
 
-export interface MarketScanData {
-  pair: CurrencyPair;
-  symbol: string;
-  price: number;
-  bias: 'STRONG_BUY' | 'STRONG_SELL' | 'NEUTRAL_CHOP';
-  confidence: number; // e.g. 96.4
-  trend: string;
-  ictPattern: string;
-  projection: string;
-  projectedPips: number;
-  suggestedSL: number;
-  suggestedTP1: number;
-  suggestedTP2: number;
-  ema20: number;
-  ema50: number;
-  rsi: number;
-  keyLevel: number;
-  patternType: 'Tower Top Liquidity Sweep' | '20/50 EMA Trend Bounce' | 'Asian Liquidity Sweep' | 'Fair Value Gap Re-test' | 'Bearish Order Block Mitigation';
-  riskReward: string;
-  isTopPick?: boolean;
-  volatility: 'HIGH' | 'MEDIUM' | 'LOW';
-  recommendedSession: string;
-  spreadByBroker: Record<BrokerId, { symbol: string; spread: number; notes: string }>;
-}
-
-export const INITIAL_MARKETS_DATA: MarketScanData[] = [
-  {
-    pair: 'XAU/USD',
-    symbol: 'GOLD (Spot)',
-    price: 4041.50,
-    bias: 'STRONG_BUY',
-    confidence: 96.4,
-    trend: 'Institutional Bullish Expansion',
-    ictPattern: 'Asian Low Sweep + Bullish Order Block Defended',
-    projection: 'Next 4H-24H Trajectory: Swept Asian sell-side liquidity at 4032.00. Institutional algorithms repricing upwards to tag 4075.00 Buy-Side Liquidity pool (+335 pips expansion).',
-    projectedPips: 335,
-    suggestedSL: 4025.00,
-    suggestedTP1: 4055.00,
-    suggestedTP2: 4075.00,
-    ema20: 4036.20,
-    ema50: 4028.80,
-    rsi: 58.4,
-    keyLevel: 4032.00,
-    patternType: 'Fair Value Gap Re-test',
-    riskReward: '1 : 2.8',
-    isTopPick: true,
-    volatility: 'HIGH',
-    recommendedSession: 'London / NY Overlap (15:30 - 18:30 EAT)',
-    spreadByBroker: {
-      fxpesa: { symbol: 'XAUUSD', spread: 2.2, notes: 'CMA Kenya investor protected. M-Pesa instant deposit.' },
-      hfm: { symbol: 'GOLD', spread: 2.4, notes: 'High leverage up to 1:1000.' },
-      exness: { symbol: 'XAUUSD.m', spread: 1.2, notes: 'Raw zero spread available. Instant algorithmic M-Pesa withdrawal.' },
-      fbs: { symbol: 'XAUUSD', spread: 2.6, notes: 'Cent account compatible for micro testing.' }
-    }
-  },
-  {
-    pair: 'GBP/USD',
-    symbol: 'Cable',
-    price: 1.29169,
-    bias: 'STRONG_SELL',
-    confidence: 93.8,
-    trend: 'Bearish Tower Top Liquidity Sweep',
-    ictPattern: 'Tower Top Liquidity Sweep + Fair Value Gap Mitigation',
-    projection: 'Next 4H-24H Trajectory: Swept previous session high at 1.29656. Closed below 20 EMA with RSI bearish divergence. Projection targets 1.28520 50 EMA imbalance (-64 pips drop).',
-    projectedPips: 64,
-    suggestedSL: 1.29680,
-    suggestedTP1: 1.28850,
-    suggestedTP2: 1.28520,
-    ema20: 1.28850,
-    ema50: 1.28520,
-    rsi: 76.4,
-    keyLevel: 1.29656,
-    patternType: 'Tower Top Liquidity Sweep',
-    riskReward: '1 : 2.5',
-    volatility: 'HIGH',
-    recommendedSession: 'London Open (10:00 - 12:30 EAT)',
-    spreadByBroker: {
-      fxpesa: { symbol: 'GBPUSD', spread: 1.2, notes: 'CMA Regulated, tight 1.2 pip spread.' },
-      hfm: { symbol: 'GBPUSD.h', spread: 1.4, notes: 'Standard execution.' },
-      exness: { symbol: 'GBPUSD.m', spread: 0.7, notes: 'Micro standard, 0.7 pip typical spread.' },
-      fbs: { symbol: 'GBPUSD', spread: 1.5, notes: 'Cent and Standard account.' }
-    }
-  },
-  {
-    pair: 'EUR/USD',
-    symbol: 'Fiber',
-    price: 1.08420,
-    bias: 'STRONG_BUY',
-    confidence: 91.2,
-    trend: 'Dynamic 20 EMA Bullish Continuation',
-    ictPattern: '20/50 EMA Bullish Bounce + FVG Consequent Encroachment',
-    projection: 'Next 4H-24H Trajectory: Pulled back into 1.08320 dynamic 20 EMA support. Expecting displacement expansion towards 1.08950 (+53 pips move).',
-    projectedPips: 53,
-    suggestedSL: 1.08200,
-    suggestedTP1: 1.08700,
-    suggestedTP2: 1.08950,
-    ema20: 1.08320,
-    ema50: 1.08180,
-    rsi: 54.2,
-    keyLevel: 1.08200,
-    patternType: '20/50 EMA Trend Bounce',
-    riskReward: '1 : 2.4',
-    volatility: 'MEDIUM',
-    recommendedSession: 'London / NY (10:00 - 17:00 EAT)',
-    spreadByBroker: {
-      fxpesa: { symbol: 'EURUSD', spread: 1.1, notes: 'Lowest standard spread on CMA platform.' },
-      hfm: { symbol: 'EURUSD', spread: 1.2, notes: 'Standard account.' },
-      exness: { symbol: 'EURUSD.m', spread: 0.6, notes: 'Zero spread account reaches 0.1 pip.' },
-      fbs: { symbol: 'EURUSD', spread: 1.3, notes: 'Standard spread.' }
-    }
-  },
-  {
-    pair: 'BTC/USD',
-    symbol: 'Bitcoin Spot',
-    price: 68450.00,
-    bias: 'STRONG_BUY',
-    confidence: 94.2,
-    trend: 'Institutional Liquidity Compression',
-    ictPattern: 'Equal Lows Sell-Side Sweep + Higher Timeframe Displacement',
-    projection: 'Next 4H-24H Trajectory: Engineered liquidity sweep below 67,200 followed by V-reversal. Institutional target set at $70,500 all-time high breakout liquidity pool (+$2,050 USD move).',
-    projectedPips: 205,
-    suggestedSL: 67100.00,
-    suggestedTP1: 69500.00,
-    suggestedTP2: 70500.00,
-    ema20: 67800.00,
-    ema50: 67200.00,
-    rsi: 62.8,
-    keyLevel: 67100.00,
-    patternType: 'Fair Value Gap Re-test',
-    riskReward: '1 : 2.8',
-    volatility: 'HIGH',
-    recommendedSession: '24/7 Global Liquidity Flow',
-    spreadByBroker: {
-      fxpesa: { symbol: 'BTCUSD', spread: 25.0, notes: 'CMA CFD contract with weekend rollover.' },
-      hfm: { symbol: 'BTCUSD', spread: 30.0, notes: 'High leverage crypto CFD.' },
-      exness: { symbol: 'BTCUSD', spread: 18.0, notes: 'Zero overnight swap fee on crypto CFDs.' },
-      fbs: { symbol: 'BTCUSD', spread: 35.0, notes: 'Crypto swap rates apply.' }
-    }
-  },
-  {
-    pair: 'USD/JPY',
-    symbol: 'Ninja',
-    price: 153.400,
-    bias: 'STRONG_BUY',
-    confidence: 88.5,
-    trend: 'Yield Differential Uptrend',
-    ictPattern: 'Discount Mitigation + Break of Structure Retest',
-    projection: 'Next 4H-24H Trajectory: US 10Y Yields rallying. USD/JPY holding 152.90 discount zone with trajectory towards 154.300 (+90 pips).',
-    projectedPips: 90,
-    suggestedSL: 152.800,
-    suggestedTP1: 153.850,
-    suggestedTP2: 154.300,
-    ema20: 153.050,
-    ema50: 152.750,
-    rsi: 57.6,
-    keyLevel: 152.800,
-    patternType: '20/50 EMA Trend Bounce',
-    riskReward: '1 : 2.2',
-    volatility: 'MEDIUM',
-    recommendedSession: 'Tokyo / NY Session (03:00 & 15:30 EAT)',
-    spreadByBroker: {
-      fxpesa: { symbol: 'USDJPY', spread: 1.2, notes: 'Standard CMA spread.' },
-      hfm: { symbol: 'USDJPY', spread: 1.3, notes: 'High leverage available.' },
-      exness: { symbol: 'USDJPY.m', spread: 0.7, notes: 'Tight micro spread.' },
-      fbs: { symbol: 'USDJPY', spread: 1.4, notes: 'Cent account ready.' }
-    }
-  },
-  {
-    pair: 'GBP/JPY',
-    symbol: 'Guppy / Dragon',
-    price: 198.200,
-    bias: 'STRONG_BUY',
-    confidence: 90.7,
-    trend: 'High-Volatility Bullish Expansion',
-    ictPattern: 'London Open Judas Sweep + High Probability Continuation',
-    projection: 'Next 4H-24H Trajectory: Swept 197.40 London low, aggressive wick rejection. Trajectory targeting 199.500 psychological resistance (+130 pips).',
-    projectedPips: 130,
-    suggestedSL: 197.300,
-    suggestedTP1: 198.900,
-    suggestedTP2: 199.500,
-    ema20: 197.650,
-    ema50: 197.100,
-    rsi: 61.5,
-    keyLevel: 197.300,
-    patternType: 'Asian Liquidity Sweep',
-    riskReward: '1 : 2.5',
-    volatility: 'HIGH',
-    recommendedSession: 'London Session (10:00 - 13:00 EAT)',
-    spreadByBroker: {
-      fxpesa: { symbol: 'GBPJPY', spread: 1.8, notes: 'Tight cross-pair spread.' },
-      hfm: { symbol: 'GBPJPY', spread: 2.0, notes: 'Standard spread.' },
-      exness: { symbol: 'GBPJPY.m', spread: 1.1, notes: 'Low friction on Dragon pair.' },
-      fbs: { symbol: 'GBPJPY', spread: 2.2, notes: 'High leverage.' }
-    }
-  },
-  {
-    pair: 'USD/CAD',
-    symbol: 'Loonie',
-    price: 1.38900,
-    bias: 'STRONG_SELL',
-    confidence: 86.4,
-    trend: 'Bearish Order Block Rejection',
-    ictPattern: 'Daily Order Block Touch + M15 Market Structure Shift',
-    projection: 'Next 4H-24H Trajectory: Rejected 1.3930 institutional ceiling. Oil strength pushing CAD higher. Trajectory towards 1.38300 (-60 pips).',
-    projectedPips: 60,
-    suggestedSL: 1.39350,
-    suggestedTP1: 1.38600,
-    suggestedTP2: 1.38300,
-    ema20: 1.39150,
-    ema50: 1.39320,
-    rsi: 41.2,
-    keyLevel: 1.39350,
-    patternType: 'Bearish Order Block Mitigation',
-    riskReward: '1 : 2.2',
-    volatility: 'MEDIUM',
-    recommendedSession: 'New York Session (15:30 - 20:00 EAT)',
-    spreadByBroker: {
-      fxpesa: { symbol: 'USDCAD', spread: 1.3, notes: 'CMA standard.' },
-      hfm: { symbol: 'USDCAD', spread: 1.5, notes: 'Standard.' },
-      exness: { symbol: 'USDCAD.m', spread: 0.8, notes: 'Low spread.' },
-      fbs: { symbol: 'USDCAD', spread: 1.6, notes: 'Cent account.' }
-    }
-  },
-  {
-    pair: 'AUD/USD',
-    symbol: 'Aussie',
-    price: 0.65800,
-    bias: 'NEUTRAL_CHOP',
-    confidence: 61.2,
-    trend: 'Range Equilibrium Chop',
-    ictPattern: 'Equilibrium Indecision Zone — No Directional Edge',
-    projection: 'Price is trapped between 0.6560 support and 0.6600 resistance without structural displacement. Institutional advice: AVOID / FLAT until breakout.',
-    projectedPips: 15,
-    suggestedSL: 0.65500,
-    suggestedTP1: 0.65900,
-    suggestedTP2: 0.66050,
-    ema20: 0.65820,
-    ema50: 0.65840,
-    rsi: 49.5,
-    keyLevel: 0.65500,
-    patternType: '20/50 EMA Trend Bounce',
-    riskReward: '1 : 1.5',
-    volatility: 'LOW',
-    recommendedSession: 'Asian / Sydney Session',
-    spreadByBroker: {
-      fxpesa: { symbol: 'AUDUSD', spread: 1.2, notes: 'Low spread.' },
-      hfm: { symbol: 'AUDUSD', spread: 1.4, notes: 'Standard.' },
-      exness: { symbol: 'AUDUSD.m', spread: 0.7, notes: 'Low spread.' },
-      fbs: { symbol: 'AUDUSD', spread: 1.5, notes: 'Cent account.' }
-    }
-  }
-];
+export type { MarketScanData };
+export { INITIAL_MARKETS_DATA };
 
 interface MultiMarketRadarEngineProps {
   selectedBroker: BrokerId;
   onSelectMarketForAnalysis: (market: MarketScanData, mode?: 'standard' | 'deep_ai') => void;
-  onOpenTradingViewForPair: (pair: CurrencyPair) => void;
+  onOpenTradingViewForPair: (pair: CurrencyPair, tf?: Timeframe, price?: number) => void;
 }
 
 export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
@@ -287,453 +43,847 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
   onSelectMarketForAnalysis,
   onOpenTradingViewForPair,
 }) => {
-  const [markets, setMarkets] = useState<MarketScanData[]>(INITIAL_MARKETS_DATA);
+  const [markets, setMarkets] = useState<MarketScanData[]>(() => globalLiveStream.getState().markets);
+  const [lastScannedTime, setLastScannedTime] = useState<string>(() => globalLiveStream.getState().syncedAt);
+  const [feedConnected, setFeedConnected] = useState<boolean>(() => globalLiveStream.getState().liveFeedConnected);
+  const [lockedPairs, setLockedPairs] = useState<Partial<Record<CurrencyPair, boolean>>>(
+    () => globalLiveStream.getState().lockedPairs
+  );
+  const [customTfs, setCustomTfs] = useState<Partial<Record<CurrencyPair, Timeframe>>>(
+    () => globalLiveStream.getState().customTimeframes
+  );
+  const [activeScanMode, setActiveScanMode] = useState<'auto_1s' | 'scan_all' | 'rescan' | 'deep_ai'>(
+    () => globalLiveStream.getState().lastScanMode
+  );
   const [isScanning, setIsScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState(0);
-  const [lastScannedTime, setLastScannedTime] = useState<string>('Live (10 seconds ago)');
-  const [filterBias, setFilterBias] = useState<'ALL' | 'BUY' | 'SELL' | 'TOP_PICK'>('ALL');
+  const [filterBias, setFilterBias] = useState<'ALL' | 'PCT_MOVERS' | 'BUY' | 'SELL' | 'FLIPPED'>('ALL');
+  // Independent card selection: null = uncongested 8-card grid; CurrencyPair = isolated single-market Chart & Analysis screen
+  const [selectedPair, setSelectedPair] = useState<CurrencyPair | null>(null);
+  const [scanBanner, setScanBanner] = useState<string | null>(null);
+  const [copiedCardPair, setCopiedCardPair] = useState<string | null>(null);
   const [copiedEa, setCopiedEa] = useState(false);
 
-  // Find Top Pick
-  const topMarket = markets.find((m) => m.isTopPick) || markets[0];
+  // Subscribe to global 24/7 every-second live market stream
+  useEffect(() => {
+    const unsubscribe = globalLiveStream.subscribe((streamState) => {
+      setMarkets(streamState.markets);
+      setLastScannedTime(streamState.syncedAt);
+      setFeedConnected(streamState.liveFeedConnected);
+      setLockedPairs(streamState.lockedPairs);
+      setCustomTfs(streamState.customTimeframes);
+    });
+    return () => unsubscribe();
+  }, []);
 
-  // Re-scan all markets with audio & animation
-  const handleRescanMarkets = () => {
-    setIsScanning(true);
-    setScanProgress(0);
-
-    const interval = setInterval(() => {
-      setScanProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          return 100;
-        }
-        return prev + 25;
-      });
-    }, 200);
-
-    setTimeout(() => {
-      setIsScanning(false);
-      setLastScannedTime(new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' EAT');
-      playRadarBeep();
-    }, 1100);
-  };
-
-  const playRadarBeep = () => {
+  const playRadarBeep = (freq = 1050) => {
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.type = 'triangle';
-      osc.frequency.setValueAtTime(1050, audioCtx.currentTime);
-      gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.16);
       osc.connect(gain);
       gain.connect(audioCtx.destination);
       osc.start();
-      osc.stop(audioCtx.currentTime + 0.2);
+      osc.stop(audioCtx.currentTime + 0.16);
     } catch {
       // Audio fallback
     }
   };
 
-  // Generate EA MQL Code for selected top market
-  const eaMqlCode = `// --- PIVOTFX INSTITUTIONAL SEMI-AUTOMATED EA CONFIG ---
-// Broker Server: ${selectedBroker.toUpperCase()}
-// Symbol: ${topMarket.spreadByBroker[selectedBroker]?.symbol || topMarket.pair}
-// Direction: ${topMarket.bias === 'STRONG_BUY' ? 'BUY_LIMIT / INSTANT_BUY' : 'SELL_LIMIT / INSTANT_SELL'}
-// AI Confidence: ${topMarket.confidence}% High Probability
-// Gilgil Shield: $2.00 Max Capital Risk Enforced
+  // Instant Scan All Markets / Rescan / Deep AI Scan
+  const handleRunScan = async (mode: 'scan_all' | 'rescan' | 'deep_ai') => {
+    setIsScanning(true);
+    setActiveScanMode(mode);
+    const updatedState = await globalLiveStream.triggerScan(mode);
+    setIsScanning(false);
 
-input string   EA_Name             = "PivotFx_Institutional_V2";
-input int      MagicNumber         = 882024;
-input double   LotSize             = 0.01;        // Strict Gilgil Micro Lot ($2 Max Risk)
-input double   EntryPrice          = ${topMarket.price};
-input double   StopLoss            = ${topMarket.suggestedSL};
-input double   TakeProfit_1        = ${topMarket.suggestedTP1}; // Close 50% Scale-Out
-input double   TakeProfit_2        = ${topMarket.suggestedTP2}; // Final Institutional Target
-input int      MaxSlippagePips     = 3;
-input bool     BreakEvenAtTP1      = true;        // Move SL to Entry at TP1
-input double   MaxRiskUsdPerTrade  = 2.00;        // 260 KES hard loss cap
-// ----------------------------------------------------`;
+    const leader = updatedState.markets[0];
+    const modeLabel =
+      mode === 'deep_ai'
+        ? 'DEEP AI SCAN'
+        : mode === 'rescan'
+        ? 'LIVE RESCAN'
+        : 'SCAN ALL MARKETS';
 
-  const handleCopyEa = () => {
-    navigator.clipboard.writeText(eaMqlCode);
-    setCopiedEa(true);
-    setTimeout(() => setCopiedEa(false), 2500);
+    if (leader) {
+      const dirWord = leader.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
+      const pctStr = leader.change24hPct >= 0 ? `+${leader.change24hPct}%` : `${leader.change24hPct}%`;
+      setScanBanner(
+        `${modeLabel} COMPLETE (${updatedState.syncedAt}) · #1 Leader: ${leader.pair} [${leader.recommendedTf}] @ ${leader.price} (${pctStr}) · ${dirWord} BY MARKET · SL ${leader.suggestedSL} · TP ${leader.suggestedTP2}`
+      );
+      setTimeout(() => setScanBanner(null), 5000);
+    }
+
+    playRadarBeep(mode === 'deep_ai' ? 1220 : mode === 'rescan' ? 1120 : 1020);
   };
 
-  // Filtered Markets
-  const filteredMarkets = markets.filter((m) => {
-    if (filterBias === 'TOP_PICK') return m.isTopPick;
-    if (filterBias === 'BUY') return m.bias === 'STRONG_BUY';
-    if (filterBias === 'SELL') return m.bias === 'STRONG_SELL';
-    return true;
-  });
+  // Filtered & Sorted Markets (#1, #2, #3... live leaderboard)
+  const filteredMarkets = (() => {
+    const base = markets.filter((m) => {
+      if (filterBias === 'BUY') return m.bias === 'STRONG_BUY';
+      if (filterBias === 'SELL') return m.bias === 'STRONG_SELL';
+      if (filterBias === 'FLIPPED') return Boolean(m.directionFlipped);
+      return true;
+    });
+    if (filterBias === 'PCT_MOVERS') {
+      return [...base].sort((a, b) => Math.abs(b.change24hPct) - Math.abs(a.change24hPct));
+    }
+    return base;
+  })();
+
+  const macroContext = (() => {
+    const pctMap: Partial<Record<CurrencyPair, number>> = {};
+    markets.forEach((m) => {
+      pctMap[m.pair] = m.change24hPct;
+    });
+    return getCurrentMacroContext(pctMap);
+  })();
+
+  const topLeader = markets[0];
+  const focusedMarket = selectedPair ? markets.find((m) => m.pair === selectedPair) || null : null;
+  const TIMEFRAME_CHOICES: Timeframe[] = ['M5', 'M10', 'M15', 'H1', 'H4'];
 
   return (
     <div className="space-y-6">
-      {/* Top Banner: Multi-Market Deep AI Cockpit Header */}
-      <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-950 to-slate-900 border border-[#D4AF37]/40 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
-        <div className="space-y-1">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#D4AF37]/20 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-mono font-bold">
-            <Globe className="w-3.5 h-3.5 text-[#D4AF37] animate-spin" style={{ animationDuration: '12s' }} />
-            <span>GLOBAL RADAR • 8 INSTITUTIONAL MARKETS SYNCHRONIZED</span>
+      {/* 1. TOP SPEED SCANNER HEADER: 24/7 EVERY-SECOND SYNC + 3 SCAN BUTTONS */}
+      <div className="p-5 sm:p-6 rounded-2xl bg-slate-950 border border-[#D4AF37]/45 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4 shadow-xl">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 text-xs font-mono font-bold flex-wrap tabular-nums">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#00C261]/15 text-[#00C261] border border-[#00C261]/40">
+              <Activity className="w-3.5 h-3.5 animate-pulse" />
+              <span>24/7 AUTO-SYNC LIVE (1s)</span>
+            </span>
+            <span className="text-[#D4AF37]">
+              {feedConnected ? 'Interbank & Crypto Stream Active' : 'Real-Time Calibrated Feed'}
+            </span>
+            <span aria-hidden="true" className="text-slate-600">·</span>
+            <span className="text-white font-black">{lastScannedTime}</span>
           </div>
-          <h3 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2">
-            <span>Multi-Market Deep AI Scanner & EA Terminal</span>
+
+          <h3 className="text-xl sm:text-2xl font-black text-white">
+            AI Market Scanner · Independent Result Cards & Live Candles
           </h3>
-          <p className="text-xs text-slate-300 font-mono">
-            Scans across Forex majors, Gold, and Crypto to isolate the #1 trending market with high % confidence.
+          <p className="text-xs text-slate-300 font-mono max-w-3xl">
+            Updates automatically every second 24/7 and re-ranks <strong>#1, #2, #3</strong> live as candle prices move or flip between <strong>BUY</strong> and <strong>SELL</strong>. Click any card below to inspect its live candlestick chart.
           </p>
         </div>
 
-        {/* Re-Scan Action Button */}
-        <div className="flex items-center gap-3">
-          <div className="text-right hidden sm:block">
-            <span className="text-[10px] font-mono text-slate-400 block">Radar Status</span>
-            <span className="text-xs font-mono text-[#00C261] font-bold">
-              {isScanning ? `Scanning ${scanProgress}%...` : lastScannedTime}
-            </span>
-          </div>
+        {/* THREE SPEED SCAN BUTTONS: Scan All Markets | Rescan | Deep AI Scan */}
+        <div className="flex items-center gap-2.5 flex-wrap shrink-0 w-full xl:w-auto">
+          <button
+            type="button"
+            onClick={() => handleRunScan('scan_all')}
+            disabled={isScanning}
+            className={`px-4 py-2.5 rounded-xl font-mono font-black text-xs uppercase tracking-wider flex items-center gap-1.5 transition active:scale-95 whitespace-nowrap ${
+              activeScanMode === 'scan_all'
+                ? 'bg-cyan-400 text-black shadow-lg'
+                : 'bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40'
+            }`}
+          >
+            <Radar className={`w-3.5 h-3.5 ${isScanning && activeScanMode === 'scan_all' ? 'animate-spin' : ''}`} />
+            <span>Scan All Markets</span>
+          </button>
 
           <button
-            onClick={handleRescanMarkets}
+            type="button"
+            onClick={() => handleRunScan('rescan')}
             disabled={isScanning}
-            className="px-4 py-2.5 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg transition active:scale-95 disabled:opacity-50"
+            className={`px-4 py-2.5 rounded-xl font-mono font-black text-xs uppercase tracking-wider flex items-center gap-1.5 transition active:scale-95 whitespace-nowrap ${
+              activeScanMode === 'rescan'
+                ? 'bg-[#00C261] text-black shadow-lg'
+                : 'bg-slate-900 hover:bg-slate-800 text-[#00C261] border border-[#00C261]/40'
+            }`}
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin' : ''}`} />
-            <span>{isScanning ? 'Scanning Markets...' : 'Re-scan All Markets'}</span>
+            <RefreshCw className={`w-3.5 h-3.5 ${isScanning && activeScanMode === 'rescan' ? 'animate-spin' : ''}`} />
+            <span>Rescan</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleRunScan('deep_ai')}
+            disabled={isScanning}
+            className="px-4 py-2.5 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-lg transition active:scale-95 whitespace-nowrap"
+          >
+            <Sparkles className={`w-3.5 h-3.5 ${isScanning && activeScanMode === 'deep_ai' ? 'animate-spin' : ''}`} />
+            <span>Deep AI Scan</span>
           </button>
         </div>
       </div>
 
-      {/* #1 BEST TRENDING MARKET HIGHLIGHT CARD */}
-      {topMarket && (
-        <div className="relative overflow-hidden p-6 rounded-3xl bg-gradient-to-br from-amber-950/40 via-slate-900 to-slate-950 border-2 border-[#D4AF37] shadow-2xl">
-          {/* Background Ambient Glow */}
-          <div className="absolute top-0 right-0 w-80 h-80 bg-[#D4AF37]/10 rounded-full blur-3xl pointer-events-none" />
-
-          <div className="relative z-10 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#D4AF37]/30 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="px-3 py-1 rounded-full bg-[#D4AF37] text-black font-black text-xs font-mono flex items-center gap-1.5 shadow-md">
-                  <Award className="w-3.5 h-3.5" />
-                  <span>#1 BEST TRENDING MARKET RIGHT NOW</span>
-                </span>
-                <span className="text-xs font-mono text-amber-200">
-                  Highest Confluence Rating Across All Pairs
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="px-3 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-[#00C261] text-xs font-mono font-black">
-                  {topMarket.confidence}% HIGH CONFIDENCE
-                </span>
-                <span className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 text-xs font-mono font-bold">
-                  Volatility: {topMarket.volatility}
-                </span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-center">
-              {/* Asset & Trend Info (5 cols) */}
-              <div className="lg:col-span-5 space-y-2">
-                <div className="flex items-baseline gap-3">
-                  <h2 className="text-3xl font-black text-white tracking-tight">{topMarket.pair}</h2>
-                  <span className="text-sm font-mono text-[#D4AF37] font-bold">{topMarket.symbol}</span>
-                  <span className="text-lg font-mono font-bold text-white">@ {topMarket.price}</span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <span className="px-2.5 py-1 rounded-lg bg-[#00C261]/20 text-[#00C261] text-xs font-mono font-black border border-[#00C261]/30">
-                    {topMarket.bias.replace('_', ' ')}
-                  </span>
-                  <span className="text-xs text-white font-bold">{topMarket.trend}</span>
-                </div>
-
-                <p className="text-xs text-slate-300 font-mono leading-relaxed bg-slate-950/70 p-3 rounded-xl border border-slate-800">
-                  <strong className="text-[#D4AF37]">ICT Pattern:</strong> {topMarket.ictPattern}
-                </p>
-
-                <div className="text-[11px] font-mono text-cyan-300 flex items-center gap-1.5">
-                  <Compass className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Best Session: {topMarket.recommendedSession}</span>
-                </div>
-              </div>
-
-              {/* Trajectory & Targets (4 cols) */}
-              <div className="lg:col-span-4 bg-slate-950/90 rounded-2xl p-4 border border-slate-800 space-y-3 font-mono text-xs">
-                <div className="flex items-center justify-between text-[#D4AF37] font-bold border-b border-slate-800 pb-1.5">
-                  <span className="flex items-center gap-1.5">
-                    <Target className="w-3.5 h-3.5" />
-                    <span>Projected Trajectory:</span>
-                  </span>
-                  <span className="text-emerald-400 font-extrabold">+{topMarket.projectedPips} Pips</span>
-                </div>
-
-                <p className="text-[11px] text-slate-300 leading-relaxed">
-                  {topMarket.projection}
-                </p>
-
-                <div className="grid grid-cols-3 gap-2 text-center pt-1">
-                  <div className="p-1.5 rounded-lg bg-red-950/30 border border-red-900/40">
-                    <span className="text-[9px] text-red-400 block">Stop Loss</span>
-                    <span className="font-bold text-white text-xs">{topMarket.suggestedSL}</span>
-                  </div>
-                  <div className="p-1.5 rounded-lg bg-cyan-950/30 border border-cyan-900/40">
-                    <span className="text-[9px] text-cyan-400 block">TP1 (50%)</span>
-                    <span className="font-bold text-white text-xs">{topMarket.suggestedTP1}</span>
-                  </div>
-                  <div className="p-1.5 rounded-lg bg-emerald-950/30 border border-emerald-900/40">
-                    <span className="text-[9px] text-emerald-400 block">Final Target</span>
-                    <span className="font-bold text-white text-xs">{topMarket.suggestedTP2}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Buttons (3 cols) */}
-              <div className="lg:col-span-3 space-y-2">
-                <button
-                  onClick={() => onSelectMarketForAnalysis(topMarket, 'deep_ai')}
-                  className="w-full py-3 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg hover:scale-[1.01] transition active:scale-95"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span>🧠 Deep AI Analyse ({topMarket.pair})</span>
-                </button>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => onSelectMarketForAnalysis(topMarket, 'standard')}
-                    className="py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-slate-500 font-mono font-bold text-[11px] flex items-center justify-center gap-1.5 transition active:scale-95"
-                  >
-                    <Zap className="w-3.5 h-3.5 text-amber-400" />
-                    <span>⚡ Standard</span>
-                  </button>
-
-                  <button
-                    onClick={() => onOpenTradingViewForPair(topMarket.pair)}
-                    className="py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white font-mono font-bold text-[11px] flex items-center justify-center gap-1.5 border border-slate-800 hover:border-[#D4AF37] transition"
-                  >
-                    <BarChart3 className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Live Chart</span>
-                  </button>
-                </div>
-
-                {/* Gilgil $2 Guarantee Stamp */}
-                <div className="p-2 rounded-xl bg-[#D4AF37]/10 border border-[#D4AF37]/30 text-[10px] font-mono text-center text-amber-200">
-                  <span>Gilgil Rule: 0.01 Micro Lot ($2.00 / 260 KES Max Risk)</span>
-                </div>
-              </div>
-            </div>
+      {/* Live Scan Status Flash Banner */}
+      {scanBanner && (
+        <div className="p-3.5 rounded-xl bg-emerald-950/60 border border-[#00C261]/50 text-emerald-200 text-xs font-mono flex items-center justify-between gap-2 tabular-nums animate-in fade-in duration-200">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-[#00C261] shrink-0" />
+            <span>{scanBanner}</span>
           </div>
+          <span className="text-[11px] text-[#00C261] font-bold shrink-0">Synced ✓</span>
         </div>
       )}
 
-      {/* FILTER BUTTONS & BROKER CONTEXT SELECTOR */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/70 p-3.5 rounded-2xl border border-slate-800">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-xs font-mono text-slate-400 font-bold mr-1">Filter Radar:</span>
-          {(['ALL', 'TOP_PICK', 'BUY', 'SELL'] as const).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => setFilterBias(mode)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition ${
-                filterBias === mode
-                  ? 'bg-[#D4AF37] text-black shadow-md'
-                  : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-              }`}
-            >
-              {mode === 'ALL' ? 'All 8 Markets' : mode === 'TOP_PICK' ? '⭐ Top Pick' : mode === 'BUY' ? 'Bullish Only' : 'Bearish Only'}
-            </button>
-          ))}
-        </div>
+      {/* =========================================================================
+          VIEW A: SINGLE SELECTED MARKET CHART & DEEP AI WORKSPACE
+          Opens ONLY when user clicks a specific card! Includes prominent Back button.
+          ========================================================================= */}
+      {focusedMarket ? (
+        (() => {
+          const activeTf = customTfs[focusedMarket.pair] || focusedMarket.recommendedTf;
+          const computed = computeRealChartTradeParams({
+            targetPair: focusedMarket.pair,
+            targetTf: activeTf,
+            targetBroker: selectedBroker,
+            price: focusedMarket.price,
+            keyLevel: focusedMarket.keyLevel,
+            ema20: focusedMarket.ema20,
+            ema50: focusedMarket.ema50,
+            rsi: focusedMarket.rsi,
+            atrPips: focusedMarket.atrPips,
+            macro: macroContext,
+            biasOverride: focusedMarket.bias === 'STRONG_SELL' ? 'SELL' : 'BUY'
+          });
+          const kenyaTiming = evaluatePairKenyaTiming(focusedMarket.pair);
+          const isBuy = computed.direction === 'BUY';
+          const pctPositive = focusedMarket.change24hPct >= 0;
+          const rankNum = markets.findIndex((x) => x.pair === focusedMarket.pair) + 1;
 
-        <div className="flex items-center gap-2 text-xs font-mono">
-          <span className="text-slate-400">Current Broker Context:</span>
-          <span className="px-2.5 py-1 rounded-lg bg-[#D4AF37]/15 text-[#D4AF37] font-bold border border-[#D4AF37]/30 uppercase">
-            {selectedBroker}
-          </span>
-        </div>
-      </div>
+          const eaMqlCode = `// --- PIVOTFX LIVE AUTO-SYNC EA CONFIG ---
+// Broker: ${selectedBroker.toUpperCase()} | Synced: ${lastScannedTime} | Rank #${rankNum}
+// Symbol: ${computed.brokerSymbol} (${focusedMarket.pair} · ${activeTf})
+// Direction: ${computed.orderType} | 24h Move: ${pctPositive ? '+' : ''}${focusedMarket.change24hPct}%
+// Live Indicators: 20 EMA = ${focusedMarket.ema20} | 50 EMA = ${focusedMarket.ema50} | RSI = ${focusedMarket.rsi}
+// Gilgil Shield: 0.01 Micro Lot ($2.00 / 260 KES Max Risk Cap)
 
-      {/* 8-MARKET RADAR GRID */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {filteredMarkets.map((m) => {
-          const brokerSpec = m.spreadByBroker[selectedBroker];
-          const isBuy = m.bias === 'STRONG_BUY';
-          const isChop = m.bias === 'NEUTRAL_CHOP';
+input double   LotSize             = 0.01;
+input double   EntryPrice          = ${computed.entryPrice};
+input double   StopLoss            = ${computed.stopLoss}; // -${computed.slPips} pips ($${computed.actualRiskUsd.toFixed(2)} max risk)
+input double   TakeProfit_1        = ${computed.tp1}; // Close 50% & Move SL to BE
+input double   TakeProfit_2        = ${computed.tp2}; // Final Target (+${computed.tpPips} pips)
+input double   MaxRiskUsdPerTrade  = 2.00;`;
 
           return (
-            <div
-              key={m.pair}
-              className={`rounded-2xl p-4.5 bg-slate-950/80 border transition-all hover:scale-[1.01] flex flex-col justify-between space-y-3.5 ${
-                m.isTopPick
-                  ? 'border-[#D4AF37] shadow-lg shadow-[#D4AF37]/10'
-                  : 'border-slate-800 hover:border-slate-700'
-              }`}
-            >
-              {/* Header */}
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-mono text-base font-black text-white">{m.pair}</span>
-                    {m.isTopPick && (
-                      <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-black bg-[#D4AF37] text-black">
-                        TOP #1
+            <div className="space-y-5 animate-in fade-in duration-200 font-mono tabular-nums">
+              {/* Top Return Bar + Quick Switcher for Top #1, #2, #3 */}
+              <div className="p-4 rounded-2xl bg-slate-900 border-2 border-[#D4AF37]/60 flex flex-wrap items-center justify-between gap-3 shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => setSelectedPair(null)}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] hover:text-white border border-[#D4AF37]/50 text-xs font-black transition group"
+                >
+                  <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+                  <span>← Back to All Scanned Cards (Ranks #1–#{markets.length})</span>
+                </button>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] text-slate-400 mr-1">Top Leaders:</span>
+                  {markets.slice(0, 4).map((mItem, idx) => (
+                    <button
+                      key={mItem.pair}
+                      type="button"
+                      onClick={() => setSelectedPair(mItem.pair)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition ${
+                        mItem.pair === focusedMarket.pair
+                          ? 'bg-[#D4AF37] text-black font-black'
+                          : 'bg-slate-950 text-slate-300 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      #{idx + 1} {mItem.pair} ({mItem.change24hPct >= 0 ? `+${mItem.change24hPct}%` : `${mItem.change24hPct}%`})
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Main Single-Market Live Chart & Execution Card */}
+              <div className="rounded-3xl p-5 sm:p-6 bg-slate-950 border-2 border-[#D4AF37] shadow-2xl space-y-5">
+                {/* Market Title, Rank, Direction, % Move & Timeframe Controls */}
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2 flex-wrap text-xs">
+                      <span className="px-2.5 py-1 rounded-lg bg-[#D4AF37] text-black font-black">
+                        RANK #{rankNum}
                       </span>
-                    )}
+                      <span
+                        className={`px-2.5 py-1 rounded-lg font-black ${
+                          isBuy
+                            ? 'bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/50'
+                            : 'bg-red-500/20 text-red-300 border border-red-500/50'
+                        }`}
+                      >
+                        {computed.orderType}
+                      </span>
+                      {focusedMarket.directionFlipped && (
+                        <span className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-400/50 font-black animate-pulse">
+                          DIRECTION FLIPPED ({focusedMarket.previousDirection} → {computed.direction})
+                        </span>
+                      )}
+                      <span className="text-[#00C261] font-black">{computed.confidence}% AI Confidence</span>
+                    </div>
+
+                    <div className="flex items-baseline gap-3 flex-wrap">
+                      <h2 className="text-2xl sm:text-3xl font-black text-white">
+                        {focusedMarket.pair} ({computed.brokerSymbol})
+                      </h2>
+                      <span className="text-xl font-black text-[#D4AF37]">@ {focusedMarket.price}</span>
+                      <span
+                        className={`inline-flex items-center gap-1 text-sm font-black ${
+                          pctPositive ? 'text-[#00C261]' : 'text-red-400'
+                        }`}
+                      >
+                        {pctPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                        {pctPositive ? `+${focusedMarket.change24hPct.toFixed(2)}%` : `${focusedMarket.change24hPct.toFixed(2)}%`}
+                      </span>
+                    </div>
                   </div>
 
-                  <span
-                    className={`font-mono text-[10px] font-black px-2 py-0.5 rounded-full ${
-                      m.confidence >= 90
-                        ? 'bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40'
-                        : m.confidence >= 80
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                        : 'bg-slate-800 text-slate-400 border border-slate-700'
-                    }`}
-                  >
-                    {m.confidence}% CONFIDENCE
-                  </span>
+                  {/* Timeframe Selector Bar */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[11px] text-slate-400 mr-1">Timeframe:</span>
+                    {TIMEFRAME_CHOICES.map((tf) => (
+                      <button
+                        key={tf}
+                        type="button"
+                        onClick={() => globalLiveStream.setPairTimeframe(focusedMarket.pair, tf)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                          activeTf === tf
+                            ? 'bg-[#D4AF37] text-black font-black'
+                            : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                        }`}
+                      >
+                        {tf}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="flex items-center justify-between text-xs font-mono">
-                  <span className="text-slate-400">{m.symbol}</span>
-                  <span className="font-bold text-white">@ {m.price}</span>
-                </div>
-              </div>
+                {/* INTERACTIVE LIVE CANDLESTICK CHART (Updates screen + summary cards in real time as candle price changes!) */}
+                <LiveInteractiveCandleChart
+                  pair={focusedMarket.pair}
+                  timeframe={activeTf}
+                  candles={focusedMarket.candles || []}
+                  livePrice={focusedMarket.price}
+                  ema20={focusedMarket.ema20}
+                  ema50={focusedMarket.ema50}
+                  entryPrice={computed.entryPrice}
+                  stopLoss={computed.stopLoss}
+                  tp1={computed.tp1}
+                  tp2={computed.tp2}
+                  direction={computed.direction}
+                  change24hPct={focusedMarket.change24hPct}
+                  isLockedToCustom={Boolean(lockedPairs[focusedMarket.pair])}
+                  onCandlePriceChange={(newPrice) =>
+                    globalLiveStream.setCustomCandlePrice(focusedMarket.pair, newPrice, activeTf)
+                  }
+                  onResetToLiveStream={() => globalLiveStream.unlockPairToLiveStream(focusedMarket.pair)}
+                />
 
-              {/* Bias Badge & Trend */}
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-black ${
-                      isChop
-                        ? 'bg-slate-800 text-slate-400'
-                        : isBuy
-                        ? 'bg-emerald-500/20 text-[#00C261] border border-emerald-500/30'
-                        : 'bg-red-500/20 text-red-300 border border-red-500/30'
-                    }`}
-                  >
-                    {m.bias.replace('_', ' ')}
-                  </span>
-                  <span className="text-[11px] text-slate-300 font-bold truncate">{m.trend}</span>
+                {/* 5-CARD AUTO-SYNCED EXECUTION NUMBERS ROW */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
+                  <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block">Live Entry</span>
+                    <strong className="text-base text-white">{computed.entryPrice}</strong>
+                    <span className="text-[10px] text-[#00C261] block">Auto-Synced Candle</span>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-red-950/35 border border-red-500/40">
+                    <span className="text-[10px] text-red-300 block">Stop Loss (-{computed.slPips}p)</span>
+                    <strong className="text-base text-red-400">{computed.stopLoss}</strong>
+                    <span className="text-[10px] text-red-300 block">${computed.actualRiskUsd.toFixed(2)} Max Risk</span>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-cyan-950/35 border border-cyan-500/40">
+                    <span className="text-[10px] text-cyan-300 block">TP1 (50% Scale-Out)</span>
+                    <strong className="text-base text-cyan-300">{computed.tp1}</strong>
+                    <span className="text-[10px] text-slate-400 block">Move SL to Breakeven</span>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-emerald-950/35 border border-emerald-500/40">
+                    <span className="text-[10px] text-emerald-300 block">Final TP2 (+{computed.tpPips}p)</span>
+                    <strong className="text-base text-[#00C261]">{computed.tp2}</strong>
+                    <span className="text-[10px] text-emerald-300 block">R:R {computed.riskReward}</span>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800">
+                    <span className="text-[10px] text-amber-300 block">Kenya EAT Window</span>
+                    <strong className="text-sm text-white block">{kenyaTiming.countdownFormatted}</strong>
+                    <span className="text-[10px] text-cyan-300 block truncate">{kenyaTiming.currentWindowName}</span>
+                  </div>
                 </div>
 
-                <p className="text-[10px] font-mono text-slate-400 line-clamp-2">
-                  {m.ictPattern}
-                </p>
-              </div>
+                {/* Institutional Trajectory + Technical Indicators + Kenya Entry Guidance */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 text-xs">
+                  <div className="lg:col-span-7 p-4 rounded-2xl bg-slate-900/70 border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between text-[#D4AF37] font-bold">
+                      <span className="flex items-center gap-1.5">
+                        <Target className="w-4 h-4" />
+                        <span>AI Institutional Trajectory & Liquidity Projection</span>
+                      </span>
+                      <span className="text-emerald-400">Spread ~{computed.brokerSpread}p</span>
+                    </div>
+                    <p className="text-slate-200 leading-relaxed">{computed.trajectory}</p>
+                    <p className="text-[11px] text-cyan-300">
+                      {kenyaTiming.statusLabel}: {kenyaTiming.reasonText}
+                    </p>
+                  </div>
 
-              {/* Broker Contract & Spread Note */}
-              <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800/80 space-y-1 font-mono text-[10px]">
-                <div className="flex items-center justify-between text-slate-400">
-                  <span>{selectedBroker.toUpperCase()} Symbol:</span>
-                  <strong className="text-white">{brokerSpec?.symbol || m.pair}</strong>
+                  <div className="lg:col-span-5 p-4 rounded-2xl bg-slate-900/70 border border-slate-800 grid grid-cols-2 gap-2.5">
+                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                      <span className="text-[10px] text-slate-400 block">20 EMA (Cyan)</span>
+                      <strong className="text-cyan-300">{focusedMarket.ema20}</strong>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                      <span className="text-[10px] text-slate-400 block">50 EMA (Amber)</span>
+                      <strong className="text-amber-300">{focusedMarket.ema50}</strong>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                      <span className="text-[10px] text-slate-400 block">RSI (14) Momentum</span>
+                      <strong className="text-white">{focusedMarket.rsi}</strong>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                      <span className="text-[10px] text-slate-400 block">Liquidity Sweep Pool</span>
+                      <strong className="text-[#D4AF37]">{focusedMarket.keyLevel}</strong>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between text-slate-400">
-                  <span>Typical Spread:</span>
-                  <strong className="text-amber-400">{brokerSpec?.spread} pips</strong>
-                </div>
-              </div>
 
-              {/* Target & Action */}
-              <div className="space-y-2 pt-1 border-t border-slate-800/80">
-                <div className="flex items-center justify-between text-xs font-mono">
-                  <span className="text-slate-400 text-[10px]">Target Move:</span>
-                  <span className={`font-bold ${isChop ? 'text-slate-400' : 'text-[#00C261]'}`}>
-                    {isChop ? 'Range (Flat)' : `+${m.projectedPips} Pips`}
-                  </span>
+                {/* ALL-FACTOR INSTITUTIONAL BUY / SELL JUDGMENT MATRIX (5 Factors) */}
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-[#D4AF37]/40 space-y-3 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-[#D4AF37]" />
+                      <span className="text-[#D4AF37] font-black uppercase tracking-wider">
+                        All-Factor AI Judgment Scorecard ({computed.orderType})
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 font-black">
+                      <span className="text-[#00C261]">BULL: {computed.bullScorePct}%</span>
+                      <span className="text-slate-600">vs</span>
+                      <span className="text-red-400">BEAR: {computed.bearScorePct}%</span>
+                      <span className="text-slate-400">· DXY {macroContext.dxyPressurePct >= 0 ? `+${macroContext.dxyPressurePct}%` : `${macroContext.dxyPressurePct}%`}</span>
+                    </div>
+                  </div>
+
+                  {/* Visual Bull vs Bear Weight Bar */}
+                  <div className="w-full h-2.5 rounded-full bg-red-950/70 overflow-hidden flex border border-slate-800">
+                    <div
+                      className="h-full bg-[#00C261] transition-all duration-300"
+                      style={{ width: `${computed.bullScorePct}%` }}
+                    />
+                    <div
+                      className="h-full bg-red-500 transition-all duration-300"
+                      style={{ width: `${computed.bearScorePct}%` }}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-2.5">
+                    {computed.factorVerdicts.map((fv) => (
+                      <div
+                        key={fv.name}
+                        className={`p-3 rounded-xl border space-y-1 ${
+                          fv.signal === 'BUY'
+                            ? 'bg-emerald-950/25 border-emerald-500/35'
+                            : fv.signal === 'SELL'
+                            ? 'bg-red-950/25 border-red-500/35'
+                            : 'bg-amber-950/25 border-amber-500/35'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[10px] font-bold text-slate-300 truncate">{fv.name}</span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-black ${
+                              fv.signal === 'BUY'
+                                ? 'bg-[#00C261]/25 text-[#00C261]'
+                                : fv.signal === 'SELL'
+                                ? 'bg-red-500/25 text-red-300'
+                                : 'bg-amber-500/25 text-amber-300'
+                            }`}
+                          >
+                            {fv.signal}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-300 leading-snug">{fv.detail}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-1.5 pt-1">
+                {/* Auto-Synced EA Script */}
+                <div className="p-4 rounded-2xl bg-[#070B14] border border-slate-800 space-y-2.5 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[#D4AF37] font-bold flex items-center gap-1.5">
+                      <Bot className="w-4 h-4" />
+                      <span>Live Auto-Synced EA Parameters ({focusedMarket.pair} [{activeTf}])</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(eaMqlCode);
+                        setCopiedEa(true);
+                        setTimeout(() => setCopiedEa(false), 2000);
+                      }}
+                      className="px-3 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/40 text-[11px] font-bold flex items-center gap-1 transition"
+                    >
+                      {copiedEa ? <Check className="w-3.5 h-3.5 text-[#00C261]" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedEa ? 'EA Copied!' : 'Copy EA Config'}</span>
+                    </button>
+                  </div>
+                  <pre className="p-3 rounded-xl bg-black/70 border border-slate-800/80 text-[11px] text-emerald-300 overflow-x-auto leading-relaxed">
+                    {eaMqlCode}
+                  </pre>
+                </div>
+
+                {/* Action Footer with Instant Reanalyse + Return Button */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => handleRunScan('deep_ai')}
+                      disabled={isScanning}
+                      className="px-4 py-2.5 rounded-xl bg-[#00C261] hover:bg-[#00dc6e] text-black font-black text-xs uppercase tracking-wider flex items-center gap-1.5 transition active:scale-95"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin' : ''}`} />
+                      <span>Reanalyse Whole Market</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onSelectMarketForAnalysis({ ...focusedMarket, recommendedTf: activeTf }, 'deep_ai')
+                      }
+                      className="px-4 py-2.5 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center gap-1.5 transition"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Open Full Order Ticket</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onOpenTradingViewForPair(focusedMarket.pair, activeTf, focusedMarket.price)
+                      }
+                      className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 font-bold text-xs flex items-center gap-1.5 transition"
+                    >
+                      <BarChart3 className="w-3.5 h-3.5" />
+                      <span>External TradingView</span>
+                    </button>
+                  </div>
+
                   <button
-                    onClick={() => onSelectMarketForAnalysis(m, 'standard')}
-                    className="py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 font-mono font-bold text-[10px] transition flex items-center justify-center gap-1 active:scale-95"
-                    title="Auto-update real quote & analyze technical confluence"
+                    type="button"
+                    onClick={() => setSelectedPair(null)}
+                    className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/50 font-black text-xs flex items-center gap-1.5 transition"
                   >
-                    <Zap className="w-3 h-3 text-amber-400" />
-                    <span>⚡ Analyse</span>
-                  </button>
-
-                  <button
-                    onClick={() => onSelectMarketForAnalysis(m, 'deep_ai')}
-                    className="py-2 rounded-xl bg-[#D4AF37]/20 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black font-mono font-bold text-[10px] transition border border-[#D4AF37]/40 flex items-center justify-center gap-1 shadow-sm active:scale-95"
-                    title="Deep AI Institutional Scan with real SL, TP and MT4 ticket"
-                  >
-                    <Sparkles className="w-3 h-3" />
-                    <span>🧠 Deep AI</span>
-                  </button>
-
-                  <button
-                    onClick={() => onOpenTradingViewForPair(m.pair)}
-                    className="py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white font-mono font-bold text-[10px] transition border border-slate-800 flex items-center justify-center gap-1"
-                  >
-                    <BarChart3 className="w-3 h-3 text-cyan-400" />
-                    <span>Chart</span>
+                    <ArrowLeft className="w-4 h-4" />
+                    <span>Return to All Scanned Cards</span>
                   </button>
                 </div>
               </div>
             </div>
           );
-        })}
-      </div>
+        })()
+      ) : (
+        /* =========================================================================
+           VIEW B: UNCONGESTED 8 INDEPENDENT CLICKABLE RESULT CARDS
+           Top summary shows strictly: #Rank (#1, #2, #3...), Pair, %, Candle Price, BUY/SELL, SL, TP
+           Clicking any card opens View A (Chart Candles & Deep Analysis)
+           ========================================================================= */
+        <div className="space-y-5">
+          {/* #1 Live Leader Quick Strip */}
+          {topLeader && (() => {
+            const topComputed = computeRealChartTradeParams({
+              targetPair: topLeader.pair,
+              targetTf: customTfs[topLeader.pair] || topLeader.recommendedTf,
+              targetBroker: selectedBroker,
+              price: topLeader.price,
+              keyLevel: topLeader.keyLevel,
+              ema20: topLeader.ema20,
+              ema50: topLeader.ema50,
+              rsi: topLeader.rsi,
+              atrPips: topLeader.atrPips,
+              biasOverride: topLeader.bias === 'STRONG_SELL' ? 'SELL' : 'BUY'
+            });
+            const topPctPos = topLeader.change24hPct >= 0;
 
-      {/* INSTITUTIONAL EA TERMINAL (EXPERT ADVISOR CODE GENERATOR) */}
-      <div className="p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-2">
-            <Bot className="w-5 h-5 text-[#D4AF37]" />
-            <div>
-              <h4 className="text-sm font-bold text-white font-mono flex items-center gap-2">
-                <span>Semi-Automated EA (Expert Advisor) Intelligence Terminal</span>
-                <span className="px-2 py-0.5 rounded bg-[#00C261]/20 text-[#00C261] text-[10px] font-bold">
-                  ARMED & VERIFIED
-                </span>
-              </h4>
-              <p className="text-[11px] text-slate-400 font-mono">
-                Direct MQL Parameter Export calibrated for {selectedBroker.toUpperCase()} with Gilgil $2 Shield.
-              </p>
+            return (
+              <div
+                onClick={() => setSelectedPair(topLeader.pair)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedPair(topLeader.pair);
+                  }
+                }}
+                className="p-5 rounded-3xl bg-gradient-to-r from-slate-900 via-[#0E1629] to-slate-900 border-2 border-[#D4AF37] shadow-2xl cursor-pointer flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 font-mono tabular-nums hover:shadow-[0_0_30px_rgba(212,175,55,0.2)] transition"
+              >
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 flex-wrap text-xs">
+                    <span className="px-3 py-1 rounded-lg bg-[#D4AF37] text-black font-black flex items-center gap-1">
+                      <Award className="w-3.5 h-3.5" />
+                      <span>#1 LEADING MARKET SETUP</span>
+                    </span>
+                    <span className="text-cyan-300 font-bold">
+                      Best TF: {customTfs[topLeader.pair] || topLeader.recommendedTf}
+                    </span>
+                    <span className="text-[#00C261] font-black">{topComputed.confidence}% AI</span>
+                  </div>
+
+                  <div className="flex items-baseline gap-3 flex-wrap">
+                    <span className="text-2xl sm:text-3xl font-black text-white">{topLeader.pair}</span>
+                    <span className="text-lg font-black text-[#D4AF37]">@ {topLeader.price}</span>
+                    <span
+                      className={`inline-flex items-center gap-0.5 text-sm font-black ${
+                        topPctPos ? 'text-[#00C261]' : 'text-red-400'
+                      }`}
+                    >
+                      {topPctPos ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                      {topPctPos ? `+${topLeader.change24hPct}%` : `${topLeader.change24hPct}%`}
+                    </span>
+                    <span
+                      className={`px-2.5 py-0.5 rounded-lg text-xs font-black ${
+                        topComputed.direction === 'BUY'
+                          ? 'bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40'
+                          : 'bg-red-500/20 text-red-300 border border-red-500/40'
+                      }`}
+                    >
+                      {topComputed.orderType}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 flex-wrap w-full lg:w-auto justify-between lg:justify-end">
+                  <div className="grid grid-cols-3 gap-2.5 text-xs bg-slate-950/90 px-4 py-2.5 rounded-2xl border border-slate-800">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Entry</span>
+                      <strong className="text-white">{topComputed.entryPrice}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-red-400 block">SL</span>
+                      <strong className="text-red-300">{topComputed.stopLoss}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-emerald-400 block">TP2</span>
+                      <strong className="text-[#00C261]">{topComputed.tp2}</strong>
+                    </div>
+                  </div>
+
+                  <span className="px-4 py-3 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center gap-1.5 whitespace-nowrap">
+                    <span>Open Chart & Analysis</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Filter Pills Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/70 p-3.5 rounded-2xl border border-slate-800">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs font-mono text-slate-400 font-bold mr-1">Sort / Filter:</span>
+              {([
+                { id: 'ALL', label: 'All 8 (#1–#8 AI Rank)' },
+                { id: 'PCT_MOVERS', label: 'Top % Movers' },
+                { id: 'BUY', label: 'Bullish (BUY)' },
+                { id: 'SELL', label: 'Bearish (SELL)' },
+                { id: 'FLIPPED', label: 'Direction Flips' }
+              ] as const).map((mode) => (
+                <button
+                  key={mode.id}
+                  type="button"
+                  onClick={() => setFilterBias(mode.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition whitespace-nowrap shrink-0 ${
+                    filterBias === mode.id
+                      ? 'bg-[#D4AF37] text-black shadow-md'
+                      : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                  }`}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="text-xs font-mono text-slate-400">
+              Click any card below to inspect live candles, indicators & EA settings
             </div>
           </div>
 
-          <button
-            onClick={handleCopyEa}
-            className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] font-mono font-bold text-xs flex items-center gap-1.5 border border-[#D4AF37]/40 transition active:scale-95"
-          >
-            {copiedEa ? <Check className="w-3.5 h-3.5 text-[#00C261]" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copiedEa ? 'EA Parameters Copied!' : 'Copy EA Parameters'}</span>
-          </button>
-        </div>
+          {/* 8 INDEPENDENT CLICKABLE SUMMARY CARDS (Uncongested Top Metrics Only) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {filteredMarkets.map((m) => {
+              const activeTf = customTfs[m.pair] || m.recommendedTf;
+              const computed = computeRealChartTradeParams({
+                targetPair: m.pair,
+                targetTf: activeTf,
+                targetBroker: selectedBroker,
+                price: m.price,
+                keyLevel: m.keyLevel,
+                ema20: m.ema20,
+                ema50: m.ema50,
+                rsi: m.rsi,
+                atrPips: m.atrPips,
+                macro: macroContext,
+                biasOverride: m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY'
+              });
+              const isBuy = computed.direction === 'BUY';
+              const pctPositive = m.change24hPct >= 0;
+              const rank = m.currentRank || markets.findIndex((x) => x.pair === m.pair) + 1;
+              const rankImproved = m.previousRank && rank < m.previousRank;
+              const kenyaTiming = evaluatePairKenyaTiming(m.pair);
+              const tickUp = m.lastTickDir === 'UP';
+              const tickDown = m.lastTickDir === 'DOWN';
 
-        {/* Code Block */}
-        <pre className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 text-[11px] font-mono text-emerald-300 overflow-x-auto leading-relaxed">
-          {eaMqlCode}
-        </pre>
+              return (
+                <div
+                  key={m.pair}
+                  onClick={() => setSelectedPair(m.pair)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setSelectedPair(m.pair);
+                    }
+                  }}
+                  className={`rounded-2xl p-4 sm:p-5 bg-slate-950 border transition-all cursor-pointer flex flex-col justify-between space-y-4 font-mono tabular-nums hover:-translate-y-0.5 ${
+                    rank === 1
+                      ? 'border-[#D4AF37] shadow-[0_0_20px_rgba(212,175,55,0.12)]'
+                      : 'border-slate-800 hover:border-[#D4AF37]/70'
+                  }`}
+                >
+                  {/* Top Row: Rank Badge + Pair + Direction Badge */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`px-2 py-0.5 rounded-lg text-[11px] font-black ${
+                            rank === 1
+                              ? 'bg-[#D4AF37] text-black'
+                              : rank <= 3
+                              ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                              : 'bg-slate-900 text-slate-300 border border-slate-800'
+                          }`}
+                        >
+                          #{rank}
+                        </span>
+                        {rankImproved && (
+                          <span className="text-[10px] text-[#00C261] font-bold">
+                            ▲ from #{m.previousRank}
+                          </span>
+                        )}
+                        {lockedPairs[m.pair] && (
+                          <span className="text-[10px] text-amber-300 font-bold">· Custom</span>
+                        )}
+                      </div>
 
-        {/* How to use the EA */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono">
-          <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
-            <span className="text-[#D4AF37] font-bold block">1. Open MT4/MT5 Terminal</span>
-            <p className="text-slate-400 text-[11px]">
-              Log in to your {selectedBroker.toUpperCase()} account on desktop or mobile app.
-            </p>
-          </div>
-          <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
-            <span className="text-cyan-400 font-bold block">2. Input Exact Values</span>
-            <p className="text-slate-400 text-[11px]">
-              Paste parameters into your EA Input tab, or execute via F9 Order Ticket.
-            </p>
-          </div>
-          <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
-            <span className="text-[#00C261] font-bold block">3. Capital Shield Guaranteed</span>
-            <p className="text-slate-400 text-[11px]">
-              0.01 micro lot ensures maximum loss is fixed strictly at $2.00 (260 KES).
-            </p>
+                      <span
+                        className={`px-2.5 py-0.5 rounded-lg text-[11px] font-black ${
+                          isBuy
+                            ? 'bg-emerald-500/20 text-[#00C261] border border-emerald-500/35'
+                            : 'bg-red-500/20 text-red-300 border border-red-500/35'
+                        }`}
+                      >
+                        {computed.direction} ({isBuy ? computed.bullScorePct : computed.bearScorePct}%)
+                      </span>
+                    </div>
+
+                    {/* Pair Name, Candle Price & Live % */}
+                    <div className="flex items-baseline justify-between gap-2">
+                      <div>
+                        <span className="text-lg font-black text-white">{m.pair}</span>
+                        <span className="text-xs text-[#D4AF37] font-bold ml-1.5">· {activeTf}</span>
+                      </div>
+                      <span
+                        className={`inline-flex items-center gap-0.5 text-xs font-black ${
+                          pctPositive ? 'text-[#00C261]' : 'text-red-400'
+                        }`}
+                      >
+                        {pctPositive ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+                        <span>{pctPositive ? `+${m.change24hPct.toFixed(2)}%` : `${m.change24hPct.toFixed(2)}%`}</span>
+                      </span>
+                    </div>
+
+                    <div className="text-sm font-black text-white flex items-center justify-between gap-1">
+                      <span>
+                        Candle:{' '}
+                        <span
+                          className={
+                            tickUp
+                              ? 'text-[#00C261]'
+                              : tickDown
+                              ? 'text-red-400'
+                              : 'text-[#D4AF37]'
+                          }
+                        >
+                          {tickUp ? '▲ ' : tickDown ? '▼ ' : ''}@ {m.price}
+                        </span>
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-bold">
+                        {computed.confidence}% AI
+                      </span>
+                    </div>
+                    {m.directionFlipped && (
+                      <div className="text-[10px] text-amber-300 font-bold">
+                        Flipped {m.previousDirection} → {computed.direction}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Clean SL & TP Summary Box */}
+                  <div className="grid grid-cols-2 gap-2 p-3 rounded-xl bg-slate-900/90 border border-slate-800/80 text-xs">
+                    <div>
+                      <span className="text-[10px] text-red-400 block">Stop Loss (-{computed.slPips}p)</span>
+                      <strong className="text-red-300">{computed.stopLoss}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-emerald-400 block">Take Profit (+{computed.tpPips}p)</span>
+                      <strong className="text-[#00C261]">{computed.tp2}</strong>
+                    </div>
+                  </div>
+
+                  {/* Card Footer: Kenya Timing Pill + Open Chart CTA */}
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/80 text-[11px]">
+                    <span
+                      className={`inline-flex items-center gap-1 truncate ${
+                        kenyaTiming.isFavorableTime ? 'text-[#00C261]' : 'text-amber-300'
+                      }`}
+                    >
+                      <Clock className="w-3 h-3 shrink-0" />
+                      <span>{kenyaTiming.isFavorableTime ? 'EAT Good' : kenyaTiming.countdownFormatted}</span>
+                    </span>
+
+                    <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const ticket = `${m.pair} [${activeTf}] ${computed.orderType} @ ${computed.entryPrice} | SL: ${computed.stopLoss} | TP2: ${computed.tp2}`;
+                          navigator.clipboard.writeText(ticket);
+                          setCopiedCardPair(m.pair);
+                          setTimeout(() => setCopiedCardPair(null), 1500);
+                        }}
+                        className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800"
+                        title="Copy Order Levels"
+                      >
+                        {copiedCardPair === m.pair ? (
+                          <Check className="w-3 h-3 text-[#00C261]" />
+                        ) : (
+                          <Copy className="w-3 h-3 text-[#D4AF37]" />
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPair(m.pair)}
+                        className="px-2.5 py-1.5 rounded-lg bg-[#D4AF37]/20 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black font-black text-[11px] flex items-center gap-1 transition"
+                      >
+                        <span>Chart</span>
+                        <ArrowRight className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

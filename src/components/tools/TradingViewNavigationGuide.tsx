@@ -173,7 +173,7 @@ export const TradingViewNavigationGuide: React.FC = () => {
       stepByStepHowToUse: [
         '1. Hover your cursor over the exact price level on the chart.',
         '2. Click the small (+) plus icon that appears on the right price scale, or press Alt + A.',
-        '3. Select "Add Alert for GBPUSD at 1.29150".',
+        '3. Select "Add Alert for GBPUSD at 1.35100".',
         '4. Set Condition: "Crossing" or "Entering Channel".',
         '5. Action: Play sound + Send push notification to mobile phone.'
       ],
@@ -183,9 +183,9 @@ export const TradingViewNavigationGuide: React.FC = () => {
         title: 'Price Scale Quick Alert (+)',
         description: 'Set alerts directly by clicking the price axis',
         asciiDiagram: `Price Scale:
- 1.29650 ──
- 1.29200 ── [ + ] ◄── Click (+) icon on price scale to set instant alert!
- 1.28850 ──`
+ 1.35450 ──
+ 1.35100 ── [ + ] ◄── Click (+) icon on price scale to set instant alert!
+ 1.34750 ──`
       }
     },
     {
@@ -320,7 +320,7 @@ export const TradingViewNavigationGuide: React.FC = () => {
         asciiDiagram: `┌─────────────────────────────────────┐
 │ TARGET PROFIT (+60 Pips)   [ GREEN ]│
 │                                     │
-├─────────────────────────────────────┤ ◄── ENTRY PRICE (1.29150)
+├─────────────────────────────────────┤ ◄── ENTRY PRICE (1.35100)
 │ STOP LOSS (-20 Pips)       [  RED  ]│ Risk/Reward: 1 : 3.00
 └─────────────────────────────────────┘`
       }
@@ -332,7 +332,7 @@ export const TradingViewNavigationGuide: React.FC = () => {
       shortcut: 'Hold Shift + Click anywhere on chart',
       iconName: 'Maximize2',
       whatItDoes: 'Measures the exact distance in pips, percentage change, and number of bars/hours between any two points on your chart.',
-      whyNewbiesNeedIt: 'Newbies often struggle calculating pips manually (e.g. subtracting 1.28520 from 1.29169). The Pip Ruler shows exact pips (e.g. "64.9 pips") in half a second!',
+      whyNewbiesNeedIt: 'Newbies often struggle calculating pips manually (e.g. subtracting 1.34451 from 1.35100). The Pip Ruler shows exact pips (e.g. "64.9 pips") in half a second!',
       stepByStepHowToUse: [
         '1. Super shortcut: Simply hold down the SHIFT key on your keyboard.',
         '2. Click on the swing low.',
@@ -374,7 +374,7 @@ export const TradingViewNavigationGuide: React.FC = () => {
  ┌───┐
  │ U │ ◄── Horseshoe Magnet Icon (Click to turn blue / ON)
  └───┘
- Snaps cursor to exact wick high: 1.29656!`
+ Snaps cursor to exact wick high: 1.35456!`
       }
     },
 
@@ -400,10 +400,10 @@ export const TradingViewNavigationGuide: React.FC = () => {
         description: 'Curated asset list with live prices',
         asciiDiagram: `Right Sidebar:
 ┌──────── Watchlist ────────┐
-│ [★] DXY      104.25  +0.2%│
-│ [★] GBPUSD   1.2916  -0.4%│ ◄── Cable
-│ [★] EURUSD   1.0850  -0.3%│ ◄── Fiber
-│ [★] XAUUSD   2035.5  +0.6%│ ◄── Gold
+│ [★] DXY      99.85   -0.2%│
+│ [★] GBPUSD   1.3500  +0.3%│ ◄── Cable
+│ [★] EURUSD   1.1267  +0.4%│ ◄── Fiber
+│ [★] XAUUSD   3955.0  +0.8%│ ◄── Gold
 └───────────────────────────┘`
       }
     },

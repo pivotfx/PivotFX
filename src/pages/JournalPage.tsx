@@ -63,7 +63,7 @@ export const JournalPage: React.FC<JournalPageProps> = ({
 
   // 2. Margin Calculator
   const [marginLots, setMarginLots] = useState('0.01');
-  const [marginPrice, setMarginPrice] = useState('1.0850');
+  const [marginPrice, setMarginPrice] = useState('1.12670');
 
   // 3. $2 Rule Survival Calculator
   const [accountBalanceKes, setAccountBalanceKes] = useState('5000'); // approx $38
@@ -123,8 +123,8 @@ export const JournalPage: React.FC<JournalPageProps> = ({
 
   // Margin Required: (Contract Size * Lots * Price) / Leverage
   const contractSize = 100000;
-  const marginUsdFxpesa = (contractSize * (parseFloat(marginLots) || 0.01) * (parseFloat(marginPrice) || 1.0850)) / 400;
-  const marginUsdHfm = (contractSize * (parseFloat(marginLots) || 0.01) * (parseFloat(marginPrice) || 1.0850)) / 1000;
+  const marginUsdFxpesa = (contractSize * (parseFloat(marginLots) || 0.01) * (parseFloat(marginPrice) || 1.12670)) / 400;
+  const marginUsdHfm = (contractSize * (parseFloat(marginLots) || 0.01) * (parseFloat(marginPrice) || 1.12670)) / 1000;
   const marginKesFxpesa = marginUsdFxpesa * 130;
   const marginKesHfm = marginUsdHfm * 130;
 
@@ -493,7 +493,7 @@ export const JournalPage: React.FC<JournalPageProps> = ({
                   <div className="p-2 rounded-lg bg-[#00C261]/20 text-[#00C261]">🛡️</div>
                   <div>
                     <strong className="text-white block font-mono">Tower Survivor</strong>
-                    <span className="text-slate-400 text-[10px]">Avoided the 1296.56 trap</span>
+                    <span className="text-slate-400 text-[10px]">Avoided the 1.35450 trap</span>
                   </div>
                 </div>
 

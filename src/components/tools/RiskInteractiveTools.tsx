@@ -19,9 +19,9 @@ export const RiskInteractiveTools: React.FC = () => {
   const [pairType, setPairType] = useState<'standard' | 'jpy'>('standard');
 
   // Risk-Reward Calculator State
-  const [entryPrice, setEntryPrice] = useState<number>(1.0850);
-  const [slPrice, setSlPrice] = useState<number>(1.0830);
-  const [tpPrice, setTpPrice] = useState<number>(1.0910);
+  const [entryPrice, setEntryPrice] = useState<number>(1.1267);
+  const [slPrice, setSlPrice] = useState<number>(1.1247);
+  const [tpPrice, setTpPrice] = useState<number>(1.1327);
   const [direction, setDirection] = useState<'buy' | 'sell'>('buy');
 
   // Compound Growth Simulator State

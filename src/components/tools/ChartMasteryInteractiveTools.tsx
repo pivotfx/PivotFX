@@ -72,6 +72,7 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
   const timeframesList = [
     { code: '1', label: '1m', desc: 'Scalping' },
     { code: '5', label: '5m', desc: 'Execution' },
+    { code: '10', label: '10m', desc: 'M10 Precision' },
     { code: '15', label: '15m', desc: 'Core Setup' },
     { code: '60', label: '1h', desc: 'Intraday Bias' },
     { code: '240', label: '4h', desc: 'Institutional Structure' },
@@ -102,22 +103,22 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
       newbieSample: {
         pair: 'EUR/USD (M15)',
         scenario: 'Uptrend from London session open into New York morning.',
-        exactAction: 'Connect Swing Low 1 at 1.0820 with Swing Low 2 at 1.0845. When Candle 5 tests the projected trendline at 1.0862 and prints a bullish rejection wick, enter Long with Stop Loss below the wick.',
+        exactAction: 'Connect Swing Low 1 at 1.1240 with Swing Low 2 at 1.1265. When Candle 5 tests the projected trendline at 1.1282 and prints a bullish rejection wick, enter Long with Stop Loss below the wick.',
         commonMistake: 'Drawing the line cutting through the middle of candle bodies. Professional trendlines touch the wicks without slicing real bodies!'
       },
       trendType: 'bullish',
-      trendline: { startIndex: 0, startPrice: 1.0820, endIndex: 4, endPrice: 1.0865, label: 'Dynamic Support Trendline' },
+      trendline: { startIndex: 0, startPrice: 1.1240, endIndex: 4, endPrice: 1.1285, label: 'Dynamic Support Trendline' },
       visualCandles: [
-        { id: 1, open: 1.0825, high: 1.0838, low: 1.0820, close: 1.0835, label: 'Low 1 (Anchor)' },
-        { id: 2, open: 1.0835, high: 1.0855, low: 1.0832, close: 1.0850 },
-        { id: 3, open: 1.0850, high: 1.0868, low: 1.0845, close: 1.0865, label: 'Higher High' },
-        { id: 4, open: 1.0865, high: 1.0870, low: 1.0852, close: 1.0854, label: 'Pullback' },
-        { id: 5, open: 1.0854, high: 1.0875, low: 1.0852, close: 1.0872, label: 'Bounce (Entry)' },
-        { id: 6, open: 1.0872, high: 1.0890, low: 1.0870, close: 1.0888, label: 'Impulse Target' },
+        { id: 1, open: 1.1245, high: 1.1258, low: 1.1240, close: 1.1255, label: 'Low 1 (Anchor)' },
+        { id: 2, open: 1.1255, high: 1.1275, low: 1.1252, close: 1.1270 },
+        { id: 3, open: 1.1270, high: 1.1288, low: 1.1265, close: 1.1285, label: 'Higher High' },
+        { id: 4, open: 1.1285, high: 1.1290, low: 1.1272, close: 1.1274, label: 'Pullback' },
+        { id: 5, open: 1.1274, high: 1.1295, low: 1.1272, close: 1.1292, label: 'Bounce (Entry)' },
+        { id: 6, open: 1.1292, high: 1.1310, low: 1.1290, close: 1.1308, label: 'Impulse Target' },
       ],
-      entryLevel: 1.0855,
-      slLevel: 1.0840,
-      tpLevel: 1.0890,
+      entryLevel: 1.1275,
+      slLevel: 1.1260,
+      tpLevel: 1.1310,
     },
     {
       id: 'horizontal',
@@ -129,34 +130,34 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
       whenToUse: [
         'Mark previous day high (PDH) and previous day low (PDL) at 00:00 UTC.',
         'Mark clean support floors where price bounced 2 or more times.',
-        'Mark institutional round psychological numbers (e.g. 1.0800, 1.0900, 2050.00).'
+        'Mark institutional round psychological numbers (e.g. 1.1200, 1.1300, 3955.00).'
       ],
       howToUseSteps: [
         '1. Press Alt + H while hovering over your target price peak or trough.',
         '2. Use the color picker to color code: Blue for 4H Levels, Green for Support, Red for Resistance.',
-        '3. Double-click the line to set an exact price coordinate down to the 5th decimal (e.g. 1.08500).',
+        '3. Double-click the line to set an exact price coordinate down to the 5th decimal (e.g. 1.12670).',
         '4. Right click -> Add Alert on Horizontal Line so your phone rings when price arrives.'
       ],
       newbieSample: {
         pair: 'GBP/USD (H1)',
         scenario: 'Double top rejection at Asian session high.',
-        exactAction: 'Place Alt+H at 1.2720. When New York open pushes upward but wicks off 1.2720 leaving a red pinbar, execute Sell order.',
+        exactAction: 'Place Alt+H at 1.3545. When New York open pushes upward but wicks off 1.3545 leaving a red pinbar, execute Sell order.',
         commonMistake: 'Treating a horizontal line as an invisible brick wall. Price will often pierce it by 3 to 7 pips to sweep retail stop losses before turning around!'
       },
       trendType: 'reversal',
-      resistanceLevel: 1.2720,
-      supportLevel: 1.2660,
+      resistanceLevel: 1.3545,
+      supportLevel: 1.3485,
       visualCandles: [
-        { id: 1, open: 1.2680, high: 1.2718, low: 1.2675, close: 1.2712 },
-        { id: 2, open: 1.2712, high: 1.2720, low: 1.2700, close: 1.2705, label: 'Touch 1' },
-        { id: 3, open: 1.2705, high: 1.2710, low: 1.2680, close: 1.2685 },
-        { id: 4, open: 1.2685, high: 1.2722, low: 1.2682, close: 1.2715, label: 'Fakeout Sweep' },
-        { id: 5, open: 1.2715, high: 1.2718, low: 1.2670, close: 1.2672, label: 'Rejection Close' },
-        { id: 6, open: 1.2672, high: 1.2675, low: 1.2645, close: 1.2650, label: 'Cascade' },
+        { id: 1, open: 1.3505, high: 1.3543, low: 1.3500, close: 1.3537 },
+        { id: 2, open: 1.3537, high: 1.3545, low: 1.3525, close: 1.3530, label: 'Touch 1' },
+        { id: 3, open: 1.3530, high: 1.3535, low: 1.3505, close: 1.3510 },
+        { id: 4, open: 1.3510, high: 1.3547, low: 1.3507, close: 1.3540, label: 'Fakeout Sweep' },
+        { id: 5, open: 1.3540, high: 1.3543, low: 1.3495, close: 1.3497, label: 'Rejection Close' },
+        { id: 6, open: 1.3497, high: 1.3500, low: 1.3470, close: 1.3475, label: 'Cascade' },
       ],
-      slLevel: 1.2730,
-      entryLevel: 1.2700,
-      tpLevel: 1.2650,
+      slLevel: 1.3555,
+      entryLevel: 1.3525,
+      tpLevel: 1.3475,
     },
     {
       id: 'fibonacci',
@@ -178,28 +179,28 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
       ],
       newbieSample: {
         pair: 'XAU/USD Gold (M15)',
-        scenario: 'Gold rallied from $2020.00 to $2040.00 during London open.',
-        exactAction: 'Anchor Fib at 2020.00 and top at 2040.00. The 50% retracement sits at 2030.00, and 61.8% is 2027.60. Set Buy Limit orders inside the 2028-2030 zone with Stop Loss at 2023.00.',
+        scenario: 'Gold rallied from $3940.00 to $3960.00 during London open.',
+        exactAction: 'Anchor Fib at 3940.00 and top at 3960.00. The 50% retracement sits at 3950.00, and 61.8% is 3947.64. Set Buy Limit orders inside the 3948-3950 zone with Stop Loss at 3943.00.',
         commonMistake: 'Leaving all default 15 fib levels enabled. Clean your TradingView settings to keep only 0, 0.5, 0.618, 0.786, and 1.0 to avoid chart clutter!'
       },
       trendType: 'bullish',
       fibLevels: [
-        { level: 1.0, price: 2040.0, label: '100% Swing High' },
-        { level: 0.618, price: 2027.6, label: '61.8% Golden Pocket' },
-        { level: 0.5, price: 2030.0, label: '50.0% Equilibrium' },
-        { level: 0.0, price: 2020.0, label: '0.0% Swing Low' },
+        { level: 1.0, price: 3960.0, label: '100% Swing High' },
+        { level: 0.618, price: 3947.64, label: '61.8% Golden Pocket' },
+        { level: 0.5, price: 3950.0, label: '50.0% Equilibrium' },
+        { level: 0.0, price: 3940.0, label: '0.0% Swing Low' },
       ],
       visualCandles: [
-        { id: 1, open: 2021.0, high: 2028.0, low: 2020.0, close: 2027.5, label: 'Impulse Start' },
-        { id: 2, open: 2027.5, high: 2036.0, low: 2027.0, close: 2035.0 },
-        { id: 3, open: 2035.0, high: 2040.0, low: 2034.0, close: 2039.5, label: 'Peak (100%)' },
-        { id: 4, open: 2039.5, high: 2039.5, low: 2033.0, close: 2033.5, label: 'Pullback' },
-        { id: 5, open: 2033.5, high: 2034.0, low: 2028.5, close: 2029.0, label: 'Hits 61.8%' },
-        { id: 6, open: 2029.0, high: 2037.0, low: 2028.0, close: 2036.5, label: 'Explosion Up' },
+        { id: 1, open: 3941.0, high: 3948.0, low: 3940.0, close: 3947.5, label: 'Impulse Start' },
+        { id: 2, open: 3947.5, high: 3956.0, low: 3947.0, close: 3955.0 },
+        { id: 3, open: 3955.0, high: 3960.0, low: 3954.0, close: 3959.5, label: 'Peak (100%)' },
+        { id: 4, open: 3959.5, high: 3959.5, low: 3953.0, close: 3953.5, label: 'Pullback' },
+        { id: 5, open: 3953.5, high: 3954.0, low: 3948.5, close: 3949.0, label: 'Hits 61.8%' },
+        { id: 6, open: 3949.0, high: 3957.0, low: 3948.0, close: 3956.5, label: 'Explosion Up' },
       ],
-      entryLevel: 2029.0,
-      slLevel: 2023.0,
-      tpLevel: 2045.0,
+      entryLevel: 3949.0,
+      slLevel: 3943.0,
+      tpLevel: 3965.0,
     },
     {
       id: 'long-position',
@@ -222,20 +223,20 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
       ],
       newbieSample: {
         pair: 'USD/JPY (M15)',
-        scenario: 'Buying a pullback at 154.200.',
-        exactAction: 'Entry: 154.200. SL: 154.050 (15 pips risk). TP: 154.650 (45 pips reward). Tool calculates RRR = 3.00. High quality setup!',
+        scenario: 'Buying a pullback at 158.200.',
+        exactAction: 'Entry: 158.200. SL: 158.050 (15 pips risk). TP: 158.650 (45 pips reward). Tool calculates RRR = 3.00. High quality setup!',
         commonMistake: 'Entering a trade where the green profit zone is smaller than the red risk zone (e.g. risking 30 pips to make 10 pips = guaranteed account blow up).'
       },
       trendType: 'bullish',
-      entryLevel: 154.20,
-      slLevel: 154.05,
-      tpLevel: 154.65,
+      entryLevel: 158.20,
+      slLevel: 158.05,
+      tpLevel: 158.65,
       visualCandles: [
-        { id: 1, open: 154.00, high: 154.15, low: 153.98, close: 154.10 },
-        { id: 2, open: 154.10, high: 154.30, low: 154.08, close: 154.25 },
-        { id: 3, open: 154.25, high: 154.28, low: 154.18, close: 154.20, label: 'Entry Candle' },
-        { id: 4, open: 154.20, high: 154.45, low: 154.18, close: 154.42 },
-        { id: 5, open: 154.42, high: 154.65, low: 154.38, close: 154.62, label: '1:3 TP Reached' },
+        { id: 1, open: 158.00, high: 158.15, low: 157.98, close: 158.10 },
+        { id: 2, open: 158.10, high: 158.30, low: 158.08, close: 158.25 },
+        { id: 3, open: 158.25, high: 158.28, low: 158.18, close: 158.20, label: 'Entry Candle' },
+        { id: 4, open: 158.20, high: 158.45, low: 158.18, close: 158.42 },
+        { id: 5, open: 158.42, high: 158.65, low: 158.38, close: 158.62, label: '1:3 TP Reached' },
       ],
     },
     {
@@ -258,20 +259,20 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
       ],
       newbieSample: {
         pair: 'EUR/USD (M15)',
-        scenario: 'Gilgil Tower Top Reversal at 1.0890.',
-        exactAction: 'Sell at 1.0875. SL at 1.0895 (20 pips risk). TP at 1.0815 (60 pips reward). RRR = 3.00.',
+        scenario: 'Gilgil Tower Top Reversal at 1.1310.',
+        exactAction: 'Sell at 1.1295. SL at 1.1315 (20 pips risk). TP at 1.1235 (60 pips reward). RRR = 3.00.',
         commonMistake: 'Moving the Stop Loss further away while the trade is active because you are scared of losing. Never widen a stop loss!'
       },
       trendType: 'bearish',
-      entryLevel: 1.0875,
-      slLevel: 1.0895,
-      tpLevel: 1.0815,
+      entryLevel: 1.1295,
+      slLevel: 1.1315,
+      tpLevel: 1.1235,
       visualCandles: [
-        { id: 1, open: 1.0850, high: 1.0890, low: 1.0848, close: 1.0885, label: 'Tower High' },
-        { id: 2, open: 1.0885, high: 1.0892, low: 1.0870, close: 1.0872, label: 'Breakdown' },
-        { id: 3, open: 1.0872, high: 1.0876, low: 1.0850, close: 1.0852 },
-        { id: 4, open: 1.0852, high: 1.0855, low: 1.0830, close: 1.0832 },
-        { id: 5, open: 1.0832, high: 1.0835, low: 1.0815, close: 1.0818, label: 'Target Hit' },
+        { id: 1, open: 1.1270, high: 1.1310, low: 1.1268, close: 1.1305, label: 'Tower High' },
+        { id: 2, open: 1.1305, high: 1.1312, low: 1.1290, close: 1.1292, label: 'Breakdown' },
+        { id: 3, open: 1.1292, high: 1.1296, low: 1.1270, close: 1.1272 },
+        { id: 4, open: 1.1272, high: 1.1275, low: 1.1250, close: 1.1252 },
+        { id: 5, open: 1.1252, high: 1.1255, low: 1.1235, close: 1.1238, label: 'Target Hit' },
       ],
     },
     {
@@ -295,21 +296,21 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
       newbieSample: {
         pair: 'GBP/USD (M15)',
         scenario: 'Fair Value Gap created by London open expansion.',
-        exactAction: 'Candle 1 high is 1.2640. Candle 3 low is 1.2670. Draw rectangle between 1.2640 and 1.2670. When Candle 5 re-tests 1.2655, buy the mitigation!',
+        exactAction: 'Candle 1 high is 1.3480. Candle 3 low is 1.3510. Draw rectangle between 1.3480 and 1.3510. When Candle 5 re-tests 1.3495, buy the mitigation!',
         commonMistake: 'Drawing 20 overlapping boxes until the chart looks like a coloring book. Only keep the 2 most recent active unmitigated zones!'
       },
       trendType: 'bullish',
-      fvgZone: { top: 1.2670, bottom: 1.2640, label: 'Bullish FVG Value Zone' },
+      fvgZone: { top: 1.3510, bottom: 1.3480, label: 'Bullish FVG Value Zone' },
       visualCandles: [
-        { id: 1, open: 1.2620, high: 1.2640, low: 1.2615, close: 1.2635, label: 'Candle 1' },
-        { id: 2, open: 1.2635, high: 1.2690, low: 1.2630, close: 1.2685, label: 'Expansion' },
-        { id: 3, open: 1.2685, high: 1.2710, low: 1.2670, close: 1.2705, label: 'Candle 3' },
-        { id: 4, open: 1.2705, high: 1.2708, low: 1.2655, close: 1.2660, label: 'Retest Gap' },
-        { id: 5, open: 1.2660, high: 1.2725, low: 1.2655, close: 1.2720, label: 'Continuation' },
+        { id: 1, open: 1.3460, high: 1.3480, low: 1.3455, close: 1.3475, label: 'Candle 1' },
+        { id: 2, open: 1.3475, high: 1.3530, low: 1.3470, close: 1.3525, label: 'Expansion' },
+        { id: 3, open: 1.3525, high: 1.3550, low: 1.3510, close: 1.3545, label: 'Candle 3' },
+        { id: 4, open: 1.3545, high: 1.3548, low: 1.3495, close: 1.3500, label: 'Retest Gap' },
+        { id: 5, open: 1.3500, high: 1.3565, low: 1.3495, close: 1.3560, label: 'Continuation' },
       ],
-      entryLevel: 1.2655,
-      slLevel: 1.2630,
-      tpLevel: 1.2720,
+      entryLevel: 1.3495,
+      slLevel: 1.3470,
+      tpLevel: 1.3560,
     },
     {
       id: 'measure-tool',
@@ -337,10 +338,10 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
       },
       trendType: 'bearish',
       visualCandles: [
-        { id: 1, open: 1.3500, high: 1.3525, low: 1.3495, close: 1.3520, label: 'High' },
-        { id: 2, open: 1.3520, high: 1.3522, low: 1.3490, close: 1.3495 },
-        { id: 3, open: 1.3495, high: 1.3500, low: 1.3470, close: 1.3475, label: '-45.0 Pips' },
-        { id: 4, open: 1.3475, high: 1.3480, low: 1.3450, close: 1.3455 },
+        { id: 1, open: 1.3940, high: 1.3965, low: 1.3935, close: 1.3960, label: 'High' },
+        { id: 2, open: 1.3960, high: 1.3962, low: 1.3930, close: 1.3935 },
+        { id: 3, open: 1.3935, high: 1.3940, low: 1.3910, close: 1.3915, label: '-45.0 Pips' },
+        { id: 4, open: 1.3915, high: 1.3920, low: 1.3890, close: 1.3895 },
       ],
     },
     {
@@ -362,16 +363,16 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
       newbieSample: {
         pair: 'EUR/USD',
         scenario: 'Snapping to the exact London low.',
-        exactAction: 'With Magnet enabled, hovering near the wick tip snaps your Fibonacci anchor perfectly to 1.08234 rather than an inaccurate 1.08241.',
+        exactAction: 'With Magnet enabled, hovering near the wick tip snaps your Fibonacci anchor perfectly to 1.12434 rather than an inaccurate 1.12441.',
         commonMistake: 'Leaving Magnet off and missing a limit order fill by 0.3 pips because your line was drawn slightly off the true wick!'
       },
       trendType: 'bullish',
       visualCandles: [
-        { id: 1, open: 1.0810, high: 1.0825, low: 1.0805, close: 1.0820, label: 'Magnet Snap Low' },
-        { id: 2, open: 1.0820, high: 1.0845, low: 1.0818, close: 1.0840 },
-        { id: 3, open: 1.0840, high: 1.0870, low: 1.0838, close: 1.0868, label: 'Magnet Snap High' },
+        { id: 1, open: 1.1230, high: 1.1245, low: 1.1225, close: 1.1240, label: 'Magnet Snap Low' },
+        { id: 2, open: 1.1240, high: 1.1265, low: 1.1238, close: 1.1260 },
+        { id: 3, open: 1.1260, high: 1.1290, low: 1.1258, close: 1.1288, label: 'Magnet Snap High' },
       ],
-      trendline: { startIndex: 0, startPrice: 1.0805, endIndex: 2, endPrice: 1.0868, label: 'Snapped to Exact Wicks' },
+      trendline: { startIndex: 0, startPrice: 1.1225, endIndex: 2, endPrice: 1.1288, label: 'Snapped to Exact Wicks' },
     },
     {
       id: 'timeframe-selector',
@@ -386,9 +387,9 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
         'Tier 3 (M5 / M1): Sniper entry timing with tightest stop loss.'
       ],
       howToUseSteps: [
-        '1. Top-left corner of TradingView has the timeframe pill bar (1m, 5m, 15m, 1h, 4h, D).',
+        '1. Top-left corner of TradingView has the timeframe pill bar (1m, 5m, 10m, 15m, 1h, 4h, D).',
         '2. Or simply type the number "15" on your keyboard and hit Enter to jump instantly to M15.',
-        '3. Click the star icon next to 5m, 15m, 1h, and 4h to favorite them to your permanent top bar.'
+        '3. Click the star icon next to 5m, 10m, 15m, 1h, and 4h to favorite them to your permanent top bar.'
       ],
       newbieSample: {
         pair: 'GBP/USD',
@@ -398,8 +399,8 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
       },
       trendType: 'range',
       visualCandles: [
-        { id: 1, open: 1.2500, high: 1.2550, low: 1.2480, close: 1.2540, label: 'Daily Candle' },
-        { id: 2, open: 1.2540, high: 1.2580, low: 1.2530, close: 1.2570, label: 'Contains 96 M15 Candles' },
+        { id: 1, open: 1.3440, high: 1.3490, low: 1.3420, close: 1.3480, label: 'Daily Candle' },
+        { id: 2, open: 1.3480, high: 1.3520, low: 1.3470, close: 1.3510, label: 'Contains 96 M15 Candles' },
       ],
     },
     {
@@ -429,14 +430,14 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
       },
       trendType: 'bullish',
       visualCandles: [
-        { id: 1, open: 1.0800, high: 1.0830, low: 1.0795, close: 1.0825, label: '20 EMA Cross' },
-        { id: 2, open: 1.0825, high: 1.0850, low: 1.0820, close: 1.0845 },
-        { id: 3, open: 1.0845, high: 1.0848, low: 1.0832, close: 1.0835, label: 'Value Zone Test' },
-        { id: 4, open: 1.0835, high: 1.0865, low: 1.0832, close: 1.0860, label: '50 EMA Bounce' },
+        { id: 1, open: 1.1220, high: 1.1250, low: 1.1215, close: 1.1245, label: '20 EMA Cross' },
+        { id: 2, open: 1.1245, high: 1.1270, low: 1.1240, close: 1.1265 },
+        { id: 3, open: 1.1265, high: 1.1268, low: 1.1252, close: 1.1255, label: 'Value Zone Test' },
+        { id: 4, open: 1.1255, high: 1.1285, low: 1.1252, close: 1.1280, label: '50 EMA Bounce' },
       ],
-      entryLevel: 1.0835,
-      slLevel: 1.0815,
-      tpLevel: 1.0880,
+      entryLevel: 1.1255,
+      slLevel: 1.1235,
+      tpLevel: 1.1300,
     },
   ];
 
@@ -448,7 +449,7 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
       icon: 'Crosshair',
       what: 'Displays precise coordinate cross lines with exact price on Y axis and date/time on X axis. Clicking and dragging measures: [Bars Count / Pip Distance / Current Price].',
       how: 'Press Ctrl+F or click middle mouse wheel. Click on Candle A wick, drag to Candle B wick. The middle number in the bracket (e.g. 154) is pips in pipette format (15.4 standard pips).',
-      sample: 'Measuring stop loss on EUR/USD: drag reads [5 / 182 / 1.08420] = 5 candles, 18.2 pips distance.'
+      sample: 'Measuring stop loss on EUR/USD: drag reads [5 / 182 / 1.12670] = 5 candles, 18.2 pips distance.'
     },
     {
       id: 'order-types',
@@ -456,7 +457,7 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
       icon: 'Zap',
       what: 'Understanding the 4 pending order mechanics: Buy Limit (buy below market on a dip), Sell Limit (sell above market on a pump), Buy Stop (buy after breakout above high), Sell Stop (sell after breakdown below low).',
       how: 'Press F9 to open New Order window. Switch "Type" dropdown from Market Execution to Pending Order. Select Buy Limit, enter target wholesale price, SL, and TP, then click Place.',
-      sample: 'Gilgil Tower Top short: Place a Sell Limit at 1.2965 with SL at 1.2985. You do not need to sit watching screen all day; MT5 fills you automatically!'
+      sample: 'Gilgil Tower Top short: Place a Sell Limit at 1.3545 with SL at 1.3565. You do not need to sit watching screen all day; MT5 fills you automatically!'
     },
     {
       id: 'market-watch',

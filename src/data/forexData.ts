@@ -115,32 +115,32 @@ export const BROKERS: BrokerInfo[] = [
 ];
 
 export const PAIRS_PRESETS: Record<CurrencyPair, { defaultPrice: number; pipDecimals: number; pipValueKes: number }> = {
-  'EUR/USD': { defaultPrice: 1.0842, pipDecimals: 4, pipValueKes: 130 },
-  'GBP/USD': { defaultPrice: 1.2915, pipDecimals: 4, pipValueKes: 130 },
-  'USD/JPY': { defaultPrice: 153.40, pipDecimals: 2, pipValueKes: 110 },
-  'GBP/JPY': { defaultPrice: 198.20, pipDecimals: 2, pipValueKes: 110 },
-  'XAU/USD': { defaultPrice: 2742.50, pipDecimals: 2, pipValueKes: 130 },
-  'AUD/USD': { defaultPrice: 0.6580, pipDecimals: 4, pipValueKes: 130 },
-  'USD/CAD': { defaultPrice: 1.3890, pipDecimals: 4, pipValueKes: 120 },
-  'BTC/USD': { defaultPrice: 68450.00, pipDecimals: 2, pipValueKes: 130 },
+  'EUR/USD': { defaultPrice: 1.12670, pipDecimals: 5, pipValueKes: 130 },
+  'GBP/USD': { defaultPrice: 1.34998, pipDecimals: 5, pipValueKes: 130 },
+  'USD/JPY': { defaultPrice: 158.250, pipDecimals: 3, pipValueKes: 110 },
+  'GBP/JPY': { defaultPrice: 213.635, pipDecimals: 3, pipValueKes: 110 },
+  'XAU/USD': { defaultPrice: 3955.00, pipDecimals: 2, pipValueKes: 130 },
+  'AUD/USD': { defaultPrice: 0.70151, pipDecimals: 5, pipValueKes: 130 },
+  'USD/CAD': { defaultPrice: 1.39350, pipDecimals: 5, pipValueKes: 120 },
+  'BTC/USD': { defaultPrice: 80491.43, pipDecimals: 2, pipValueKes: 130 },
 };
 
-// Gilgil Historical Case Studies
+// Gilgil Historical Case Studies (Calibrated to Contemporary Market Benchmarks)
 export const HISTORICAL_GILGIL_CASES = {
   towerLoss: {
-    symbol: 'GBP/USD / Gold Equivalent',
-    price: 1296.56,
+    symbol: 'GBP/USD (1.35450 Trap) / XAU/USD Parabolic Spike',
+    price: 1.35450,
     date: 'Gilgil Live Trading Session — The Turning Point',
-    description: 'Entered LONG at 1296.56 after 4 consecutive green candles. Price was 42 pips above the 20 EMA and 68 pips above 50 EMA. RSI was 83.2 (severe overbought divergence). No stop loss was set, and the position was oversized by 5x the normal account risk. A brutal Tower Top reversal wick formed within 15 minutes, cascading down 70+ pips. The entire demo/account was blown in one single revenge session.',
-    lesson: 'NEVER chase candles extended far away from the 20 EMA when RSI is > 75. A high candle without dynamic EMA support is a trap waiting for institutional liquidity grab.',
+    description: 'Entered LONG at 1.35450 after 4 consecutive green M15 candles. Price was 42 pips above the 20 EMA (1.35030) and 68 pips above 50 EMA (1.34770). RSI was 83.2 (severe overbought divergence). No stop loss was set, and the position was oversized above 0.01 micro lot. A brutal Tower Top reversal wick formed within 15 minutes, cascading down 70+ pips toward 1.34720.',
+    lesson: 'NEVER chase candles extended far away from the 20 EMA when RSI is > 75. Always verify live chart price and place Stop Loss on the valid MT4 side.',
   },
   towerWin: {
-    symbol: 'GBP/USD / Gold Equivalent',
-    price: 1291.69,
-    exitPrice: 1289.38,
+    symbol: 'GBP/USD (1.35100 Short) / XAU/USD Pullback',
+    price: 1.35100,
+    exitPrice: 1.34780,
     date: 'Gilgil Live Trading Session — The Disciplined Execution',
-    description: 'Patiently waited for the Tower Top exhaustion to confirm. Price rejected the 1292.00 resistance with a long upper rejection pinbar, closed below the 20 EMA on M15, with RSI falling from 68 back below 50. Entry executed precisely at 1291.69 with a strict $2 risk stop loss at 1293.20. Target locked at 1289.38 (previous support zone). Order executed cleanly, delivering +23.1 pips profit (+3.5R return).',
-    lesson: 'Wait for the Tower to exhaust. Enter on the break back through the 20 EMA with RSI confirmation, risking strictly $2 per micro lot. Patience yields consistency.',
+    description: 'Patiently waited for the Tower Top exhaustion to confirm at 1.35450. Price printed a long upper rejection pinbar, closed below the 20 EMA (1.35180) on M15, with RSI resetting below 50. Executed SELL at 1.35100 with a strict $2 risk stop loss above structure at 1.35260 (SL > Entry for Sell) and Take Profit at 1.34780 (TP < Entry). Clean +32.0 pips (+2.0R return).',
+    lesson: 'Wait for the Tower to exhaust and confirm the 20 EMA break. Keep SL > Entry on Sells and SL < Entry on Buys so MT4 executes cleanly with $2.00 max risk.',
   }
 };
 
@@ -151,14 +151,14 @@ export const SAMPLE_INITIAL_JOURNAL: JournalTrade[] = [
     pair: 'GBP/USD',
     broker: 'fxpesa',
     type: 'SELL',
-    entryPrice: 1291.69,
-    exitPrice: 1289.38,
+    entryPrice: 1.35100,
+    exitPrice: 1.34780,
     score: 92,
     mode: 'Tower Reversal + EMA Retest',
     riskUsd: 2.00,
     pnlUsd: 7.20,
     status: 'WON',
-    notes: 'Classic Gilgil setup. M15 upper wick rejection at 1292.00, crossed below 20 EMA, RSI was 62 turning down. Took profit at 1289.38 support.'
+    notes: 'Classic Gilgil setup on GBP/USD. M15 upper wick rejection at 1.35450, crossed below 20 EMA, RSI was 62 turning down. Took profit at 1.34780 support.'
   },
   {
     id: 'tr-02',
@@ -166,8 +166,8 @@ export const SAMPLE_INITIAL_JOURNAL: JournalTrade[] = [
     pair: 'EUR/USD',
     broker: 'fxpesa',
     type: 'BUY',
-    entryPrice: 1.0825,
-    exitPrice: 1.0858,
+    entryPrice: 1.12520,
+    exitPrice: 1.12850,
     score: 86,
     mode: 'EMA 20/50 Dynamic Bounce',
     riskUsd: 2.00,
@@ -181,8 +181,8 @@ export const SAMPLE_INITIAL_JOURNAL: JournalTrade[] = [
     pair: 'GBP/JPY',
     broker: 'hfm',
     type: 'BUY',
-    entryPrice: 1296.56,
-    exitPrice: 1294.50,
+    entryPrice: 214.200,
+    exitPrice: 213.920,
     score: 34,
     mode: 'FOMO Chase (Historical Mistake Sample)',
     riskUsd: 2.00,
@@ -196,8 +196,8 @@ export const SAMPLE_INITIAL_JOURNAL: JournalTrade[] = [
     pair: 'EUR/USD',
     broker: 'fxpesa',
     type: 'SELL',
-    entryPrice: 1.0890,
-    exitPrice: 1.0860,
+    entryPrice: 1.12900,
+    exitPrice: 1.12600,
     score: 89,
     mode: 'London Open 11:00 AM EAT Breakout',
     riskUsd: 2.00,
@@ -224,7 +224,7 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
     ],
     content: [
       'Forex (Foreign Exchange) is simply exchanging one national currency for another — like exchanging Kenyan Shillings (KES) for US Dollars (USD). In forex trading, currencies are quoted in pairs like EUR/USD.',
-      'The first currency is the BASE currency, and the second is the QUOTE currency. When EUR/USD is 1.0850, it means 1 Euro costs 1.0850 US Dollars.',
+      'The first currency is the BASE currency, and the second is the QUOTE currency. When EUR/USD is 1.1267, it means 1 Euro costs 1.1267 US Dollars.',
       'In Kenya, there are TWO distinct broker categories: CMA Regulated (like FXPesa, licensed by the Capital Markets Authority in Nairobi under EGM Securities) and Offshore Brokers (like HFM and FBS, licensed in Seychelles or Belize).',
       'With FXPesa, you deposit directly via Lipa Na M-Pesa with zero delay and local legal protection. With offshore brokers, you get higher leverage (1:1000+) but no Kenyan ombudsman if something goes wrong.'
     ],
@@ -234,8 +234,8 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       {
         title: 'Sample Case: EUR/USD Price Quote Breakdown',
         type: 'broker_sample',
-        description: 'EUR/USD quoted at Bid: 1.0850 / Ask: 1.0852 on FXPesa MT4.',
-        mathSnippet: 'Spread = Ask (1.0852) - Bid (1.0850) = 0.0002 = 2.0 Pips. On a 0.01 micro lot, 2.0 pips cost approx $0.20 (26 KES).',
+        description: 'EUR/USD quoted at Bid: 1.1267 / Ask: 1.1269 on FXPesa MT4.',
+        mathSnippet: 'Spread = Ask (1.1269) - Bid (1.1267) = 0.0002 = 2.0 Pips. On a 0.01 micro lot, 2.0 pips cost approx $0.20 (26 KES).',
         takeaway: 'Always check the spread before placing an order. Wide spreads increase your hurdle to breakeven.'
       },
       {
@@ -284,7 +284,7 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       {
         title: 'Trade Sample: 0.01 Micro Lot EUR/USD Execution',
         type: 'math_sample',
-        description: 'Balance: 4,000 KES ($30 USD). Entry: 1.0830 Buy. Stop Loss: 1.0810 (20 pips). Target: 1.0870 (40 pips).',
+        description: 'Balance: 4,000 KES ($30 USD). Entry: 1.1267 Buy. Stop Loss: 1.1247 (20 pips). Target: 1.1307 (40 pips).',
         mathSnippet: 'Risk = 20 pips x $0.10/pip = $2.00 (260 KES). Reward = 40 pips x $0.10/pip = $4.00 (520 KES). Risk:Reward = 1:2.',
         takeaway: 'Even on a small 4,000 KES deposit, you only risk 6.5% of your account with a clean 1:2 payout potential.'
       }
@@ -326,10 +326,10 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
     chartIllustrationType: 'pinbar_tower',
     samplesAndCases: [
       {
-        title: 'Historical Sample: The M15 Rejection Wick at 1292.00',
+        title: 'Live Pattern Sample: The M15 Rejection Wick at 1.35450',
         type: 'win_case',
-        description: 'Price surged to 1292.15, printed a 14-pip upper shadow, and closed at 1291.60 with a tiny 2-pip body.',
-        takeaway: 'The long upper tail signaled sellers absorbing all breakout liquidity. Triggered our short reversal entry.'
+        description: 'GBP/USD surged to 1.35465, printed a 14-pip upper shadow, and closed at 1.35410 with a tiny 2-pip body.',
+        takeaway: 'The long upper tail signaled sellers absorbing all breakout liquidity. Triggered our short reversal entry at 1.35100.'
       }
     ],
     practiceExercise: {
@@ -337,7 +337,7 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       actionHint: 'Step through the animation to watch the long upper tail reject resistance.',
       toolTarget: 'tradingview'
     },
-    liveMarketExample: 'The Gilgil 1291.69 win formed right after an M15 candle with a 14-pip upper wick rejecting the 1292.00 round psychological resistance.',
+    liveMarketExample: 'The GBP/USD 1.35100 short win formed right after an M15 candle with a 14-pip upper wick rejecting the 1.35450 resistance zone.',
     homework: 'Find 3 pinbar rejection candles on the M15 timeframe of EUR/USD and note whether price reversed after.',
     quiz: {
       question: 'What does a long upper wick on a candlestick indicate?',
@@ -422,7 +422,7 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       {
         title: 'Winning Case: EUR/USD Dynamic Pullback Bounce',
         type: 'win_case',
-        description: 'H1 trend strongly bullish (EMA 20 > EMA 50). Price pulled back to 1.0825 directly into the 50 EMA, formed a bullish hammer, and rallied 33 pips to 1.0858.',
+        description: 'H1 trend strongly bullish (EMA 20 > EMA 50). Price pulled back to 1.1255 directly into the 50 EMA, formed a bullish hammer, and rallied 33 pips to 1.1288.',
         takeaway: 'Entering in the Value Zone gives tight stop losses directly beneath the 50 EMA.'
       }
     ],
@@ -431,7 +431,7 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       actionHint: 'Notice how price respects the dynamic slope during London session runs.',
       toolTarget: 'tradingview'
     },
-    liveMarketExample: 'On GBP/USD H1 chart, notice how price bounces off the 20 EMA repeatedly during strong London session runs.',
+    liveMarketExample: 'On GBP/USD (1.34998) H1 chart, notice how price bounces off the 20 EMA repeatedly during strong London session runs.',
     homework: 'Add EMA 20 (Cyan) and EMA 50 (Orange) to your MT4 chart. Highlight three instances where price bounced off the 20 EMA.',
     quiz: {
       question: 'What is the "Value Zone" in the PivotFX 20/50 system?',
@@ -450,53 +450,53 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
     belt: 'blue',
     levelTag: 'Intermediate',
     number: '06',
-    title: 'RSI Momentum & The Gilgil 1291.69 Case Study',
+    title: 'RSI Momentum & The Gilgil GBP/USD 1.35100 Case Study',
     duration: '15 mins',
-    summary: 'The authentic story: Deconstructing the 1296.56 loss vs the disciplined 1291.69 to 1289.38 win.',
+    summary: 'Deconstructing the 1.35450 FOMO breakout trap vs the disciplined 1.35100 to 1.34780 short reversal win.',
     learningObjectives: [
-      'Deconstruct why buying at 1296.56 blew accounts in Gilgil.',
-      'Master the 3-step breakdown formula of the 1291.69 winning reversal.',
+      'Deconstruct why buying at 1.35450 (or chasing XAU/USD at highs without SL) blew accounts in Gilgil.',
+      'Master the 3-step breakdown formula of the 1.35100 winning reversal.',
       'Detect RSI divergence when price makes equal highs but RSI forms lower highs.'
     ],
     content: [
       'The Relative Strength Index (RSI 14) measures the velocity and magnitude of price changes. Conventional textbooks say "buy at 30 and sell at 70". In real markets, strong trends can stay above 70 for hours.',
-      'In Gilgil, we learned this the hard way: Buying Gold/GBP at 1296.56 because "the breakout looked massive" caused a devastating loss because price was already overstretched and RSI was at 83 with bearish divergence.',
-      'How the 1291.69 win was executed: We waited for price to reject the tower top, saw RSI peak at 72 and drop back through 60, and waited for the M15 candle to close below the 20 EMA.',
-      'Entry was struck at 1291.69 with a 15-pip stop loss ($1.95 risk). Price dropped smoothly to the 50 EMA support at 1289.38, banking +23.1 pips. Patience beats FOMO every single day.'
+      'In Gilgil, traders learned this the hard way: Buying GBP/USD at 1.35450 because "the breakout looked massive" caused a painful loss because price was already overstretched 35 pips above the 20 EMA and RSI was at 83 with bearish divergence.',
+      'How the 1.35100 win was executed: We waited for price to reject the tower top, saw RSI peak at 75.8 and drop back through 60, and waited for the M15 candle to close below the 20 EMA.',
+      'Entry was struck at 1.35100 with a 15-pip stop loss at 1.35250 ($1.50 risk). Price dropped smoothly to the 50 EMA support at 1.34780, banking +32.0 pips. Patience beats FOMO every single day.'
     ],
     realTimeNote: 'Formula: High probability setup = Overextended Tower + RSI exhaustion + Break back through 20 EMA.',
     chartIllustrationType: 'rsi_divergence',
     samplesAndCases: [
       {
-        title: 'Infamous Loss: The 1296.56 Parabolic Chaser',
+        title: 'FOMO Mistake: The 1.35450 Parabolic Chaser',
         type: 'loss_case',
-        description: 'Entered LONG after 4 giant green candles. Price was 42 pips above 20 EMA, RSI was 83.2. Blown in 15 minutes when a 70-pip reversal wick formed.',
+        description: 'Entered LONG after 4 giant green candles. Price was 42 pips above 20 EMA, RSI was 83.2. Stopped out when a 70-pip reversal wick formed.',
         takeaway: 'Never chase candles overextended from the 20 EMA when RSI is > 75.'
       },
       {
-        title: 'Disciplined Win: The 1291.69 Short Reversal',
+        title: 'Disciplined Win: The 1.35100 Short Reversal',
         type: 'win_case',
-        description: 'Waited for upper wick rejection, RSI drop below 60, and close below 20 EMA. Shorted at 1291.69 with 15 pip stop. Hit target at 1289.38 for +23.1 pips.',
+        description: 'Waited for upper wick rejection, RSI drop below 60, and close below 20 EMA. Shorted at 1.35100 with 15 pip stop (1.35250). Hit target at 1.34780 for +32.0 pips.',
         takeaway: 'Let the trap form first. Enter with the institutional sellers on confirmed EMA crossover.'
       }
     ],
     practiceExercise: {
-      prompt: 'Load the 1291.69 preset in Pillar 02 (Super Analysis Tool) to inspect the 92/100 confluence score.',
-      actionHint: 'Observe how the tool analyzes distance to EMA 20 and confirms the entry.',
+      prompt: 'Load the GBP/USD 1.3545 preset in Pillar 02 (Super Analysis Tool) to inspect the 92/100 confluence score.',
+      actionHint: 'Observe how the tool anchors SL above your live chart price and confirms the entry.',
       toolTarget: 'super-analysis'
     },
-    liveMarketExample: 'Compare 1296.56 (chasing at the top) vs 1291.69 (entering the confirmed reversal). That 5-pip difference in entry timing is the line between blown accounts and consistent profitability.',
-    homework: 'Open the Super Analysis Tool on PivotFX Lab. Enter Price: 1291.69, EMA 20: 1292.80, EMA 50: 1294.50, RSI: 46. See the score generated.',
+    liveMarketExample: 'Compare 1.35450 (chasing at the top) vs 1.35100 (entering the confirmed reversal) — and on Gold XAU/USD, compare chasing Spot 3968 / Futures 4050 vs entering on pullback.',
+    homework: 'Open the Super Analysis Tool on PivotFX Lab. Enter GBP/USD Price: 1.35450, EMA 20: 1.35100, EMA 50: 1.34820, RSI: 75.8. See the score and MT4 SL/TP generated.',
     quiz: {
-      question: 'Why did the trade at 1296.56 fail while 1291.69 succeeded?',
+      question: 'Why did buying at the extended top (1.35450) fail while waiting for the breakdown (1.35100) succeeded?',
       options: [
-        '1296.56 was placed on MT5 instead of MT4',
-        '1296.56 chased an overextended move far from EMAs with RSI > 80, while 1291.69 waited for exhaustion and EMA retest',
+        'It was placed on MT5 instead of MT4',
+        'Buying chased an overextended move far from EMAs with RSI > 80, while waiting waited for exhaustion and EMA breakdown',
         'The broker manipulated the price',
         'Gold was closed'
       ],
       correctIndex: 1,
-      explanation: '1296.56 chased an overbought, overextended market. 1291.69 waited for the confirmed breakdown below EMA 20 with RSI falling from extreme overbought.'
+      explanation: 'Chasing an overbought market traps buyers; waiting for the confirmed breakdown below EMA 20 with RSI falling gives clean institutional confirmation.'
     }
   },
   {
@@ -762,7 +762,7 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       'In traditional retail textbooks, double tops are considered "strong resistance" and double bottoms "strong support". To institutional algorithms, however, these areas represent dense clusters of resting stop-loss orders known as Liquidity Pools.',
       'Above every double top or Previous Day High (PDH) sit thousands of retail Buy Stop orders. This is Buy-Side Liquidity (BSL). When large banks need to fill a $500M short position, they cannot buy at the top—they need sellers. By driving price up through the double top, they trigger the retail Buy Stops, instantly acquiring the counterpart liquidity needed to dump the market.',
       'Below double bottoms or Previous Day Lows (PDL) sit resting Sell Stops (Sell-Side Liquidity / SSL). Smart money sweeps SSL to accumulate long positions at wholesale discount pricing.',
-      'The Gilgil 1296.56 loss vs 1291.69 win is the quintessential liquidity lesson: 1296.56 bought directly into the BSL purge. 1291.69 entered with smart money AFTER the BSL was absorbed and price closed back under resistance.'
+      'The GBP/USD 1.35450 BSL sweep loss vs 1.35100 win is the quintessential liquidity lesson: 1.35450 bought directly into the BSL purge. 1.35100 entered with smart money AFTER the BSL was absorbed and price closed back under resistance.'
     ],
     realTimeNote: 'Institutional Law: Price moves from one liquidity pool (BSL) directly to the opposing liquidity pool (SSL). Never buy at BSL or sell at SSL.',
     chartIllustrationType: 'liquidity_pool',
@@ -772,21 +772,21 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       buttonName: 'Horizontal Ray (Alt + J)',
       shortcut: 'Alt + J',
       action: 'Click exactly on the swing high wick to project Buy-Side Liquidity (BSL) ray forward into future candles.',
-      howToSample: 'Press Alt + J at yesterday high (1.2965). Label the ray "BSL Pool". Wait for a 5-to-10 pip sweep with an upper wick rejection.'
+      howToSample: 'Press Alt + J at yesterday high (1.35450). Label the ray "BSL Pool". Wait for a 5-to-10 pip sweep with an upper wick rejection.'
     },
     samplesAndCases: [
       {
-        title: 'The Gilgil 1296.56 BSL Purge Disaster',
+        title: 'The GBP/USD 1.35450 BSL Purge Trap',
         type: 'loss_case',
-        description: 'Retail traders bought the breakout at 1.29656 as price pierced the Asian high. Banks swept 8 pips of BSL and dumped 75 pips straight down.',
-        mathSnippet: 'Retail Loss: Bought 1.29656 -> Stopped out at 1.29350 (-30.6 pips). On 0.10 lot = -$306 loss in 25 minutes.',
+        description: 'Retail traders bought the breakout at 1.35450 as price pierced the Asian high. Banks swept 8 pips of BSL and dumped 65 pips straight down.',
+        mathSnippet: 'Retail Loss: Bought 1.35450 -> Stopped out at 1.35250 (-20.0 pips). With the Gilgil $2 rule on 0.01 lot, loss is capped at $2.00 instead of -$306.',
         takeaway: 'Never buy breakouts of clean double tops. Assume the first breakout is a liquidity sweep until proven by a displacement retest.'
       },
       {
-        title: 'The 1291.69 Institutional Short Reversal',
+        title: 'The 1.35100 Institutional Short Reversal',
         type: 'win_case',
-        description: 'Waited for the BSL sweep to complete at 1.2965, watched M15 candle body slam back below 1.2925, and shorted at 1.29169 targeting SSL at 1.2885.',
-        mathSnippet: 'Win Result: Entry: 1.29169, SL: 1.29369 (20 pips / $2 rule), Exit: 1.28850 (+31.9 pips). Reward:Risk = 1:1.6 (+$3.19 on 0.01 micro lot).',
+        description: 'Waited for the BSL sweep to complete at 1.35450, watched M15 candle body slam back below 1.35250, and shorted at 1.35100 targeting SSL at 1.34780.',
+        mathSnippet: 'Win Result: Entry: 1.35100, SL: 1.35250 (15 pips / $1.50 risk), Exit: 1.34780 (+32.0 pips). Reward:Risk = 1:2.1 (+$3.20 on 0.01 micro lot).',
         takeaway: 'Enter on the second mouse principle: The first mouse (breakout chaser) gets caught in the trap; the second mouse gets the cheese.'
       }
     ],
@@ -795,8 +795,8 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       actionHint: 'Look at how price reacts when testing that level: Does it cleanly break with displacement or poke a wick and reverse?',
       toolTarget: '/chart-mastery'
     },
-    liveMarketExample: 'Check GBP/USD or XAU/USD right now. Locate the previous day high. You will see resting buy stops pooled right above it waiting for London open.',
-    homework: 'Mark the Previous Day High (PDH) and Previous Day Low (PDL) on EUR/USD and note whether London open swept one of them.',
+    liveMarketExample: 'Check GBP/USD (1.34998) or XAU/USD (3955.00 Spot / 4041.495 Futures) right now. Locate the previous day high. You will see resting buy stops pooled right above it waiting for London open.',
+    homework: 'Mark the Previous Day High (PDH) and Previous Day Low (PDL) on EUR/USD (1.12670) and note whether London open swept one of them.',
     quiz: {
       question: 'What orders are resting above an obvious double top resistance level in the market?',
       options: [
@@ -837,14 +837,14 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       buttonName: 'Rectangle Tool (Left Toolbar)',
       shortcut: 'Alt + R / 4th Tool Menu',
       action: 'Click the Rectangle tool on the left toolbar to shade the imbalance area from Candle 1 High to Candle 3 Low.',
-      howToSample: 'Select Rectangle, click Candle 1 high wick at 1.0840, drag across to Candle 3 low wick at 1.0870. The 50% line inside is Consequent Encroachment (1.0855).'
+      howToSample: 'Select Rectangle, click Candle 1 high wick at 1.1252, drag across to Candle 3 low wick at 1.1282. The 50% line inside is Consequent Encroachment (1.1267).'
     },
     samplesAndCases: [
       {
         title: 'EUR/USD M15 Consequent Encroachment (C.E.) Execution',
         type: 'win_case',
-        description: 'Displacement surge created an M15 FVG between 1.0840 (Candle 1 High) and 1.0870 (Candle 3 Low). C.E. calculated at 1.0855.',
-        mathSnippet: 'C.E. = 1.0840 + ((1.0870 - 1.0840) / 2) = 1.0855. Buy Limit placed at 1.0855. Tapped at 16:45 EAT, rallied to 1.0920 (+65 pips).',
+        description: 'Displacement surge created an M15 FVG between 1.1252 (Candle 1 High) and 1.1282 (Candle 3 Low). C.E. calculated at 1.1267.',
+        mathSnippet: 'C.E. = 1.1252 + ((1.1282 - 1.1252) / 2) = 1.1267. Buy Limit placed at 1.1267. Tapped at 16:45 EAT, rallied to 1.1325 (+58 pips).',
         takeaway: 'Entering at 50% C.E. cut the required stop loss in half and doubled the reward-to-risk ratio from 1:1.5 to 1:3.2.'
       }
     ],
@@ -853,7 +853,7 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       actionHint: 'Measure the distance between Candle 1 and Candle 3 with the Rectangle tool and locate the 50% midline.',
       toolTarget: '/chart-mastery'
     },
-    liveMarketExample: 'On EUR/USD M15 during the New York session, watch how price retraces exactly into the 50% level of the 15:30 EAT displacement candle.',
+    liveMarketExample: 'On EUR/USD M15 during the New York session, watch how price retraces into the 50% level (around 1.1267) of the 15:30 EAT displacement candle.',
     homework: 'Identify 3 unmitigated Fair Value Gaps on your MT4/MT5 demo chart and set an alert at their Consequent Encroachment.',
     quiz: {
       question: 'What is Consequent Encroachment (C.E.) in ICT methodology?',
@@ -895,14 +895,14 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       buttonName: 'Fibonacci Retracement (Alt + F)',
       shortcut: 'Alt + F',
       action: 'Pull Fibonacci from the Order Block body open to close, configuring only 0, 0.5 (Mean Threshold), and 1.0.',
-      howToSample: 'On GBP/USD H1, anchor 0 at body open 1.2940 and 1 at body close 1.2910. The 0.5 level at 1.2925 is your sniper Sell Limit entry.'
+      howToSample: 'On GBP/USD H1, anchor 0 at body open 1.3535 and 1 at body close 1.3505. The 0.5 level at 1.3520 is your sniper Sell Limit entry.'
     },
     samplesAndCases: [
       {
         title: 'GBP/USD H1 Bearish Order Block Mean Threshold Fill',
         type: 'win_case',
         description: 'At London open, GBP/USD printed an H1 green candle followed by an aggressive 60-pip drop breaking previous day low.',
-        mathSnippet: 'OB Body: 1.2940 to 1.2910. Mean Threshold (50%): 1.2925. Sell Limit filled at 1.2925, SL: 1.2970 (45 pips), Target: 1.2800 (+125 pips).',
+        mathSnippet: 'OB Body: 1.3535 to 1.3505. Mean Threshold (50%): 1.3520. Sell Limit filled at 1.3520, SL: 1.3555 (35 pips), Target: 1.3420 (+100 pips).',
         takeaway: 'Entering at the Mean Threshold rather than the front edge gives 15 extra pips of profit and lower drawdown.'
       }
     ],
@@ -911,7 +911,7 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       actionHint: 'Notice how the confluence score checks whether price is within 5 pips of the 20/50 EMA dynamic line.',
       toolTarget: '/strategy-vault'
     },
-    liveMarketExample: 'Examine the H1 chart on GBP/USD. Find the last green candle before the London morning sell-off. Price tapped its 50% Mean Threshold before collapsing.',
+    liveMarketExample: 'Examine the H1 chart on GBP/USD (~1.34998). Find the last green candle before the London morning sell-off. Price tapped its 50% Mean Threshold before collapsing.',
     homework: 'Identify one Bullish Order Block on M15 EUR/USD that resulted in a break of structure. Mark its 50% Mean Threshold.',
     quiz: {
       question: 'What is the "Mean Threshold" of an ICT Order Block?',
@@ -953,14 +953,14 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       buttonName: 'Crosshair Tool (Ctrl + Click / Mousewheel)',
       shortcut: 'Alt + C',
       action: 'Use the Crosshair tool to precisely measure candle body close prices relative to the previous swing high/low line.',
-      howToSample: 'Hover Crosshair over swing high at 156.00. Check the displacement candle close: 156.35. A 35-pip body close confirms MSS.'
+      howToSample: 'Hover Crosshair over swing high at 158.10. Check the displacement candle close: 158.45. A 35-pip body close confirms MSS.'
     },
     samplesAndCases: [
       {
         title: 'USD/JPY M15 Genuine MSS with Displacement',
         type: 'win_case',
-        description: 'Downtrend in USD/JPY shifted when a massive 30-pip green candle closed above 156.00 with an open FVG below.',
-        mathSnippet: 'Entry on FVG retest: 156.20, SL: 155.95 (25 pips), TP: 157.30 (+110 pips). R:R = 1:4.4.',
+        description: 'Pullback in USD/JPY shifted bullish when a massive 30-pip green candle closed above 158.45 with an open FVG below.',
+        mathSnippet: 'Entry on FVG retest: 158.250, SL: 158.000 (25 pips), TP: 159.350 (+110 pips). R:R = 1:4.4.',
         takeaway: 'Displacement provides institutional validation that smart money has flipped net positioning from short to long.'
       }
     ],
@@ -1017,14 +1017,14 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       {
         title: 'The London Judas Swing Execution on GBP/USD',
         type: 'win_case',
-        description: 'Asian range was 1.2890 to 1.2930. At 10:15 AM EAT, London open spiked to 1.29656 (+35 pips above Asian high). At 10:45 AM EAT, M15 candle closed back at 1.29169.',
-        mathSnippet: 'Short at 1.29169, SL: 1.29400 (23 pips), TP: Asian Low 1.28900 (+26.9 pips). Won cleanly in 45 minutes.',
+        description: 'Asian range was 1.3485 to 1.3522. At 10:15 AM EAT, London open spiked to 1.35450 (+23 pips above Asian high). At 10:45 AM EAT, M15 candle closed back at 1.35100.',
+        mathSnippet: 'Short at 1.35100, SL: 1.35320 (22 pips), TP: Asian Low 1.34850 (+25.0 pips). Won cleanly in 45 minutes.',
         takeaway: 'Wait 30 minutes after London open (10:30 AM EAT) before pulling the trigger. The first move is almost always the Judas fakeout.'
       },
       {
         title: 'The NY AM Silver Bullet M5 FVG on EUR/USD',
         type: 'win_case',
-        description: 'At 15:30 EAT US Core CPI release, price displaced down 40 pips. At 15:45 EAT, price retraced into M5 FVG at 1.0850 and delivered 25 pips straight to previous day low.',
+        description: 'At 15:30 EAT US Core CPI release, price displaced down 40 pips. At 15:45 EAT, price retraced into M5 FVG at 1.1267 and delivered 25 pips straight to previous day low.',
         mathSnippet: 'Risk: 12 pips ($1.20 on 0.01 lot). Reward: 25 pips ($2.50). Clean 1:2.08 payout.',
         takeaway: 'Silver Bullet setups are mechanical: Identify the liquidity draw, wait for the FVG, set limit order, take profit at pool.'
       }
@@ -1077,14 +1077,14 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       buttonName: 'Long / Short Position Tool (Left Toolbar)',
       shortcut: 'Alt + P / 7th Tool Menu',
       action: 'Click Long Position or Short Position to visually place your Entry, Stop Loss, and Take Profit targets.',
-      howToSample: 'Select Short Position tool, click entry at 1.29169, drag red SL zone to 1.29369 (20 pips), drag green TP zone to 1.28569 (60 pips). Tool displays exact 1:3 Risk-to-Reward ratio!'
+      howToSample: 'Select Short Position tool, click entry at 1.35100, drag red SL zone to 1.35300 (20 pips), drag green TP zone to 1.34500 (60 pips). Tool displays exact 1:3 Risk-to-Reward ratio!'
     },
     samplesAndCases: [
       {
         title: 'Full Daily AMD Cycle on EUR/USD',
         type: 'win_case',
-        description: 'Daily open at 1.0820. Asian consolidation 1.0815 to 1.0830. London manipulated down to 1.0790 (creating Low of the Day). Retested M15 FVG. NY expanded to 1.0880.',
-        mathSnippet: 'Bought London Low at 1.0805, SL: 1.0785 (20 pips), TP: 1.0875 (+70 pips). R:R = 1:3.5. Account gained +$7.00 on 260 KES risk.',
+        description: 'Daily open at 1.1255. Asian consolidation 1.1248 to 1.1265. London manipulated down to 1.1225 (creating Low of the Day). Retested M15 FVG. NY expanded to 1.1310.',
+        mathSnippet: 'Bought London Low at 1.1240, SL: 1.1220 (20 pips), TP: 1.1310 (+70 pips). R:R = 1:3.5. Account gained +$7.00 on 260 KES risk.',
         takeaway: 'Buying below the daily open during London manipulation guarantees entry at the absolute low of the day.'
       }
     ],
@@ -1093,7 +1093,7 @@ export const MASTERCLASS_LESSONS: MasterclassLesson[] = [
       actionHint: 'Notice how the green profit box and red risk box clearly display your target pips and percentage.',
       toolTarget: '/chart-mastery'
     },
-    liveMarketExample: 'Look at yesterday daily candle on EUR/USD or GBP/USD. Observe how the lower wick was formed between 10:00 AM and 11:30 AM EAT before expanding all afternoon.',
+    liveMarketExample: 'Look at yesterday daily candle on EUR/USD (1.12670) or GBP/USD (1.34998). Observe how the lower wick was formed between 10:00 AM and 11:30 AM EAT before expanding all afternoon.',
     homework: 'Chart 3 previous daily candles. Mark the Asian Accumulation box, London Manipulation wick, and NY Distribution body.',
     quiz: {
       question: 'In the ICT Power of 3 (AMD) framework for a bullish day, where should you look to buy?',
@@ -1113,7 +1113,7 @@ export const MASTER_STRATEGIES: MasterclassStrategy[] = [
   {
     id: 'strat-1',
     name: 'PivotFX Tower Reversal System',
-    tagline: 'The battle-tested antidote to the 1296.56 disaster. Catches institutional exhaustion at major highs.',
+    tagline: 'The battle-tested antidote to FOMO breakout chasing. Catches institutional exhaustion at major highs.',
     winRate: 76,
     timeframe: 'M15 / H1',
     indicators: ['EMA 20 (Cyan)', 'EMA 50 (Orange)', 'RSI 14'],
@@ -1123,12 +1123,12 @@ export const MASTER_STRATEGIES: MasterclassStrategy[] = [
         'Price must be extended at least 25+ pips away from the 20 EMA.',
         'RSI must touch 75+ (overbought) with bearish divergence (lower high on RSI while price makes equal/higher high).',
         'Wait for an exhaustion Pinbar or Bearish Engulfing candle that closes BACK BELOW the 20 EMA.',
-        'Execute SELL entry immediately on candle close (just like 1291.69).'
+        'Execute SELL entry immediately on candle close (e.g. GBP/USD at 1.35100 after rejecting 1.35450).'
       ],
-      stopLoss: '5 pips above the Tower High wick (max 15 pips total risk).',
+      stopLoss: '5 pips above the Tower High wick (max 15-20 pips total risk).',
       takeProfit: 'First target at 50 EMA. Second target at previous session low.'
     },
-    gilgilLore: 'Born from our hardest lesson in Gilgil when we lost capital on 1296.56. Turning the tower into our personal ATM.'
+    gilgilLore: 'Born from our hardest lesson in Gilgil when traders chased extended green candles without respecting the 20 EMA extension or RSI overbought status. Turning the tower into our personal edge.'
   },
   {
     id: 'strat-2',
@@ -1214,8 +1214,8 @@ export const FAQS = [
     a: 'Deriv specializes in synthetic volatility indices (which is covered by our sister project TickWealth). PivotFX Lab is dedicated purely to the global foreign exchange currency market (EUR/USD, GBP/USD, Gold) traded through reputable forex brokers. FXPesa is the premier choice in Kenya because it holds an official non-dealing online forex broker license from the Capital Markets Authority (CMA) with direct Lipa Na M-Pesa deposits.'
   },
   {
-    q: 'What is the famous Gilgil story about 1296.56 and 1291.69?',
-    a: 'In Gilgil, Nakuru County, our founders suffered a painful demo and live loss by chasing a parabolic tower top at 1296.56 without respecting the 20 EMA extension or RSI overbought status. We vowed never to let beginner Kenyan traders repeat that mistake. We developed the disciplined 1291.69 reversal system and the ironclad $2 risk rule, turning painful trading lessons into a structured educational curriculum.'
+    q: 'Why do brokers sometimes reject Stop Loss or Take Profit with [Invalid S/L or T/P]?',
+    a: 'MT4/MT5 brokers (like FXPesa) strictly enforce minimum stop-level distances relative to the live Bid/Ask quote: for a BUY trade, Stop Loss must be strictly BELOW current Bid and Take Profit strictly ABOVE current Ask; for a SELL trade, Stop Loss must be strictly ABOVE current Ask and Take Profit strictly BELOW current Bid (and further away than the broker freeze level, e.g. ~5–15 pips). Never type numbers from an old screenshot or spot price if you are trading Futures (e.g. XAU/USD Spot ~3955 vs Gold Futures ~4041).'
   },
   {
     q: 'How does the $2 Rule work with Lipa Na M-Pesa?',

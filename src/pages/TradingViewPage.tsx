@@ -60,8 +60,8 @@ export const TradingViewPage: React.FC<TradingViewPageProps> = ({
       // fallback
     }
     return [
-      { id: '1', price: 1.0880, label: 'Session Resistance', type: 'resistance' },
-      { id: '2', price: 1.0820, label: 'Key Dynamic Support (50 EMA)', type: 'support' },
+      { id: '1', price: 1.12920, label: 'Session Resistance', type: 'resistance' },
+      { id: '2', price: 1.12450, label: 'Key Dynamic Support (50 EMA)', type: 'support' },
     ];
   });
 
@@ -73,12 +73,13 @@ export const TradingViewPage: React.FC<TradingViewPageProps> = ({
   const pairOptions: SelectOption[] = Object.keys(PAIRS_PRESETS).map((p) => ({
     value: p,
     label: p,
-    sublabel: `Symbol: FX:${p.replace('/', '')}`,
+    sublabel: `Symbol: FX:${p.replace('/', '')} • ~${PAIRS_PRESETS[p as CurrencyPair].defaultPrice}`,
   }));
 
   const timeframeOptions: SelectOption[] = [
     { value: 'M1', label: '1 Minute (M1)' },
     { value: 'M5', label: '5 Minutes (M5)' },
+    { value: 'M10', label: '10 Minutes (M10)' },
     { value: 'M15', label: '15 Minutes (M15)', badge: 'Core' },
     { value: 'H1', label: '1 Hour (H1)' },
     { value: 'H4', label: '4 Hours (H4)' },
@@ -88,6 +89,7 @@ export const TradingViewPage: React.FC<TradingViewPageProps> = ({
   // Dynamic score based on timeframe & pair
   const calculateDynamicScore = () => {
     if (timeframe === 'M15') return 88;
+    if (timeframe === 'M10') return 86;
     if (timeframe === 'H1') return 82;
     if (timeframe === 'H4') return 91;
     if (timeframe === 'M5') return 74;
@@ -136,22 +138,35 @@ export const TradingViewPage: React.FC<TradingViewPageProps> = ({
   };
 
   const handleScanDirectly = () => {
-    const currentPrice = PAIRS_PRESETS[pair]?.defaultPrice || 1.0842;
+    const currentPrice = PAIRS_PRESETS[pair]?.defaultPrice || 1.12670;
     onSendToScanner(pair, timeframe, currentPrice, 46.5);
     onNavigate('ai-scanner');
     onAwardXp(25, 'Transferred Chart to AI Scanner');
   };
 
-  // Convert pair to TradingView embed symbol (e.g. FX:EURUSD or OANDA:EURUSD)
-  const tvSymbol = `FX:${pair.replace('/', '')}`;
-  const tvTimeframeCode = timeframe === 'M1' ? '1' : timeframe === 'M5' ? '5' : timeframe === 'M15' ? '15' : timeframe === 'H1' ? '60' : timeframe === 'H4' ? '240' : 'D';
+  // Convert pair to TradingView embed symbol
+  const tvSymbol = pair === 'XAU/USD' ? 'OANDA:XAUUSD' : pair === 'BTC/USD' ? 'BITSTAMP:BTCUSD' : `FX:${pair.replace('/', '')}`;
+  const tvTimeframeCode =
+    timeframe === 'M1'
+      ? '1'
+      : timeframe === 'M5'
+      ? '5'
+      : timeframe === 'M10'
+      ? '10'
+      : timeframe === 'M15'
+      ? '15'
+      : timeframe === 'H1'
+      ? '60'
+      : timeframe === 'H4'
+      ? '240'
+      : 'D';
 
   const towerStepsExplain = [
     { title: 'Phase 1: Parabolic Rush (Tower Ascent)', desc: '3 consecutive green candles sprint higher. Retail traders feel intense FOMO and buy at the peak.' },
-    { title: 'Phase 2: The Red Tower Top Trap (1296.56)', desc: 'Price pushes 40+ pips away from EMA 20. Upper wick forms. Institutional sell orders initiate.' },
+    { title: 'Phase 2: The Red Tower Top Trap (GBP/USD 1.35450)', desc: 'Price pushes 40+ pips away from EMA 20. Upper wick sweeps buy-side liquidity. Institutional sell orders initiate.' },
     { title: 'Phase 3: The Bearish Exhaustion Pinbar', desc: 'Buyers fail to print new highs. RSI forms steep bearish divergence. Wick rejects resistance.' },
-    { title: 'Phase 4: The 1291.69 Green Entry Breakdown', desc: 'Candle closes cleanly BELOW the 20 EMA. Short entry triggered with strict $2 stop above tower high!' },
-    { title: 'Phase 5: Target Realized (1289.38)', desc: 'Price cascades directly into the 50 EMA Value Zone. +23.1 pips booked. Emotionless profit.' },
+    { title: 'Phase 4: The 1.35100 Entry Breakdown', desc: 'Candle closes cleanly BELOW the 20 EMA. Short entry triggered at 1.35100 with SL at 1.35260 (SL > Entry) and $2 max risk.' },
+    { title: 'Phase 5: Target Realized (1.34780)', desc: 'Price cascades directly into the 50 EMA Value Zone. +32.0 pips booked cleanly.' },
   ];
 
   return (
@@ -170,7 +185,7 @@ export const TradingViewPage: React.FC<TradingViewPageProps> = ({
             Built-in TradingView Studio & Custom PivotFX Strategy
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl">
-            Live institutional charts equipped with our custom Tower Reversal detection overlay (Red Tops & Green Entries), EMA indicators, and saved levels.
+            Live institutional charts equipped with our custom Tower Reversal detection overlay, EMA indicators, and saved levels.
           </p>
         </div>
 
@@ -268,12 +283,12 @@ export const TradingViewPage: React.FC<TradingViewPageProps> = ({
             <div className="flex items-center gap-3">
               <span className="flex items-center gap-1.5 font-bold text-red-400">
                 <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
-                RED MARKERS: Tower Top Loss Traps (Avoid Buying!)
+                RED MARKERS: Tower Top Loss Traps (Avoid Buying Extended!)
               </span>
               <span className="hidden sm:inline text-slate-600">|</span>
               <span className="flex items-center gap-1.5 font-bold text-[#00C261]">
                 <span className="w-2.5 h-2.5 rounded-full bg-[#00C261]" />
-                GREEN MARKERS: Disciplined 1291.69 Entries
+                GREEN MARKERS: Disciplined 20 EMA Breakdown Entries (e.g. 1.35100)
               </span>
             </div>
 
@@ -330,7 +345,7 @@ export const TradingViewPage: React.FC<TradingViewPageProps> = ({
             <div className="flex items-center justify-between text-xs font-mono">
               <span className="text-[#00C261] font-bold">Step {towerStep + 1} of 5</span>
               <span className="text-slate-400">
-                {towerStep === 1 ? '⚠️ The 1296.56 Trap' : towerStep === 3 ? '✅ The 1291.69 Entry' : 'Market Cycle'}
+                {towerStep === 1 ? '⚠️ The 1.35450 Trap' : towerStep === 3 ? '✅ The 1.35100 Entry' : 'Market Cycle'}
               </span>
             </div>
 
@@ -389,7 +404,7 @@ export const TradingViewPage: React.FC<TradingViewPageProps> = ({
             <input
               type="number"
               step="any"
-              placeholder="Price (e.g. 1.0850)"
+              placeholder="Price (e.g. 1.12670)"
               value={newLevelPrice}
               onChange={(e) => setNewLevelPrice(e.target.value)}
               className="px-3 py-2 rounded-xl bg-[#0B0F17] border border-slate-700 text-white font-mono outline-none focus:border-[#00C261]"

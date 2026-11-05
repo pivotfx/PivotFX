@@ -15,7 +15,8 @@ import {
   ShieldAlert,
   Zap,
   Lock,
-  ChevronRight
+  ChevronRight,
+  Globe
 } from 'lucide-react';
 
 interface LandingPageProps {
@@ -42,6 +43,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectPillar }) => {
         return <Activity className="w-6 h-6 text-[#D4AF37]" />;
       case '08':
         return <Award className="w-6 h-6 text-[#D4AF37]" />;
+      case '09':
+        return <Globe className="w-6 h-6 text-[#D4AF37]" />;
       default:
         return <Sparkles className="w-6 h-6 text-[#D4AF37]" />;
     }
@@ -71,17 +74,25 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectPillar }) => {
 
           {/* Subheadline: Small capital to prop firm */}
           <p className="text-base sm:text-xl text-slate-300 max-w-2xl mx-auto leading-relaxed font-medium">
-            From small capital to verified prop firm funding. Master institutional order flow, risk discipline, and algorithmic execution across 8 independent academies.
+            From small capital to verified prop firm funding. Master institutional order flow, risk discipline, and global daily trade safety across 9 independent academies.
           </p>
 
           {/* CTA Buttons */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4 pt-4 flex-wrap">
             <button
               onClick={() => onSelectPillar('/fx-academy')}
-              className="w-full sm:w-auto px-8 py-4 rounded-2xl btn-gold text-black font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 group active:scale-95 shadow-xl"
+              className="w-full sm:w-auto px-7 py-4 rounded-2xl btn-gold text-black font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 group active:scale-95 shadow-xl"
             >
-              <span>Explore 8 Masterclasses</span>
+              <span>Explore 9 Masterclasses</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
+            </button>
+
+            <button
+              onClick={() => onSelectPillar('/macro-safety')}
+              className="w-full sm:w-auto px-7 py-4 rounded-2xl bg-emerald-950/80 hover:bg-emerald-900/90 text-[#00C261] hover:text-white font-bold text-sm border border-[#00C261]/50 hover:border-[#00C261] transition flex items-center justify-center gap-2 shadow-lg"
+            >
+              <Globe className="w-4 h-4 text-[#00C261]" />
+              <span>Is It Safe to Buy/Sell Today? (P9)</span>
             </button>
 
             <button
@@ -95,13 +106,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectPillar }) => {
         </div>
       </section>
 
-      {/* 2. Eight Clickable Pillar Cards in Grid */}
+      {/* 2. Nine Clickable Pillar Cards in Grid */}
       <section className="space-y-6">
         <div className="flex items-center justify-between border-b border-slate-800 pb-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#D4AF37] uppercase tracking-wider">
               <Zap className="w-4 h-4" />
-              <span>The 8 Independent Execution Masterclasses</span>
+              <span>The 9 Independent Execution Masterclasses</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-black text-white">
               Select an Academy to Enter

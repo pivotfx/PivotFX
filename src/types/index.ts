@@ -8,6 +8,7 @@ export type PageTab =
   | '/psychology'
   | '/live-pulse'
   | '/growth-lab'
+  | '/macro-safety'
   | 'start-here'
   | 'super-analysis'
   | 'tradingview'
@@ -44,7 +45,7 @@ export interface BrokerInfo {
 
 export type CurrencyPair = 'EUR/USD' | 'GBP/USD' | 'USD/JPY' | 'GBP/JPY' | 'XAU/USD' | 'AUD/USD' | 'USD/CAD' | 'BTC/USD';
 
-export type Timeframe = 'M1' | 'M5' | 'M15' | 'H1' | 'H4' | 'D1';
+export type Timeframe = 'M1' | 'M5' | 'M10' | 'M15' | 'H1' | 'H4' | 'D1';
 
 export interface PillarLesson {
   id: string;

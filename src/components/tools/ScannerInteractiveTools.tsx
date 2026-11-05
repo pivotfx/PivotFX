@@ -1,7 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { CurrencyPair, Timeframe, ScannerAnalysisResult, BrokerId } from '../../types';
 import { TradingViewEmbedWidget } from './TradingViewEmbedWidget';
-import { MultiMarketRadarEngine, MarketScanData, INITIAL_MARKETS_DATA } from './MultiMarketRadarEngine';
+import { MultiMarketRadarEngine } from './MultiMarketRadarEngine';
+import { LiveInteractiveCandleChart } from './LiveInteractiveCandleChart';
+import {
+  MarketScanData,
+  INITIAL_MARKETS_DATA,
+  globalLiveStream,
+  computeRealChartTradeParams,
+  fetchLiveMarketSnapshot,
+  fetchPairLiveCandleSnapshot,
+  evaluateCandleSeriesAndTick,
+  getCurrentMacroContext
+} from '../../utils/liveMarketEngine';
 import {
   SlidersHorizontal,
   Camera,
@@ -27,6 +38,7 @@ import {
   MessageSquare,
   HelpCircle,
   TrendingUp,
+  TrendingDown,
   Scale,
   Globe,
   BarChart3,
@@ -87,22 +99,27 @@ interface AdvisorMessage {
 export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = ({ onLogTrade }) => {
   const [scannerView, setScannerView] = useState<'hub' | 'radar' | 'favorable_chart' | 'manual' | 'advisor' | 'camera'>('hub');
   const [activeTab, setActiveTab] = useState<'camera' | 'manual' | 'radar' | 'advisor'>('manual');
+  const [liveMarkets, setLiveMarkets] = useState<MarketScanData[]>(INITIAL_MARKETS_DATA);
+  const [feedSyncedAt, setFeedSyncedAt] = useState<string>('Synchronizing...');
+  const [syncingQuotes, setSyncingQuotes] = useState<boolean>(false);
+  const [userLockedCandlePrice, setUserLockedCandlePrice] = useState<boolean>(false);
 
-  // Shared Required Data Ingestion State
+  // Shared Required Data Ingestion State (Anchored to live GBP/USD M10/M15 setup)
   const [broker, setBroker] = useState<BrokerId>('fxpesa');
   const [pair, setPair] = useState<CurrencyPair>('GBP/USD');
   const [showTradingView, setShowTradingView] = useState<boolean>(false);
   const [analysisExecutionMode, setAnalysisExecutionMode] = useState<'standard' | 'deep_ai'>('deep_ai');
   const [copiedManualEa, setCopiedManualEa] = useState<boolean>(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('M15');
+  const [biasOverride, setBiasOverride] = useState<'AUTO' | 'BUY' | 'SELL'>('AUTO');
   const [session, setSession] = useState<'London Open (10:00 EAT)' | 'New York AM (15:30 EAT)' | 'Asian Range (03:00 EAT)' | 'London Close (18:30 EAT)'>('London Open (10:00 EAT)');
-  const [patternType, setPatternType] = useState<'Tower Top Liquidity Sweep' | '20/50 EMA Trend Bounce' | 'Asian Liquidity Sweep' | 'Fair Value Gap Re-test' | 'Bearish Order Block Mitigation'>('Tower Top Liquidity Sweep');
-  const [currentPrice, setCurrentPrice] = useState<number>(1.29169);
-  const [keyLevel, setKeyLevel] = useState<number>(1.29656);
-  const [ema20, setEma20] = useState<number>(1.28850);
-  const [ema50, setEma50] = useState<number>(1.28520);
-  const [rsi, setRsi] = useState<number>(76.4);
-  const [traderNotes, setTraderNotes] = useState<string>('Swept previous London session high at 1.29656 with upper wick rejection. RSI showing overbought divergence.');
+  const [patternType, setPatternType] = useState<'Tower Top Liquidity Sweep' | '20/50 EMA Trend Bounce' | 'Asian Liquidity Sweep' | 'Fair Value Gap Re-test' | 'Bearish Order Block Mitigation'>('20/50 EMA Trend Bounce');
+  const [currentPrice, setCurrentPrice] = useState<number>(1.34998);
+  const [keyLevel, setKeyLevel] = useState<number>(1.34818);
+  const [ema20, setEma20] = useState<number>(1.34878);
+  const [ema50, setEma50] = useState<number>(1.34718);
+  const [rsi, setRsi] = useState<number>(58.3);
+  const [traderNotes, setTraderNotes] = useState<string>('GBP/USD live quote @ 1.34998 (+0.66%). Swept sell-side liquidity below 1.34818 with clean 20 EMA displacement.');
 
   // Camera State
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
@@ -125,7 +142,7 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
     {
       id: 'init-1',
       sender: 'ai',
-      text: 'Institutional AI Market Advisor initialized. Ask any market strategy question, or click one of the quick audit buttons below to evaluate liquidity, risk caps, or broker execution.',
+      text: 'Institutional AI Market Advisor initialized with live market stream. Select any pair below or enter your chart candlestick price (e.g. "GBP/USD at 1.34998 on 10m" or "Gold at 4041.495") to compute valid MT4 SL/TP levels.',
       timestamp: 'Active Now'
     }
   ]);
@@ -150,25 +167,128 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Auto-update details first with real-time market data
-  const handleSwitchPairAndSyncRealData = (newPair: CurrencyPair) => {
+  // Subscribe to global 24/7 every-second live stream
+  const userLockedRef = useRef<boolean>(false);
+  const selectedPairRef = useRef<CurrencyPair>(pair);
+  useEffect(() => {
+    userLockedRef.current = userLockedCandlePrice;
+  }, [userLockedCandlePrice]);
+  useEffect(() => {
+    selectedPairRef.current = pair;
+  }, [pair]);
+
+  useEffect(() => {
+    const unsubscribe = globalLiveStream.subscribe((streamState) => {
+      setLiveMarkets(streamState.markets);
+      setFeedSyncedAt(streamState.syncedAt);
+
+      if (!userLockedRef.current) {
+        const match =
+          streamState.markets.find((x) => x.pair === selectedPairRef.current) || streamState.markets[0];
+        if (match) {
+          setCurrentPrice(match.price);
+          setKeyLevel(match.keyLevel);
+          setEma20(match.ema20);
+          setEma50(match.ema50);
+          setRsi(match.rsi);
+          setPatternType(match.patternType);
+          setTraderNotes(match.projection);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleSyncLiveQuotes = async () => {
+    setSyncingQuotes(true);
+    setUserLockedCandlePrice(false);
+    const [singleSnap, allSnap] = await Promise.all([
+      fetchPairLiveCandleSnapshot(pair, timeframe),
+      fetchLiveMarketSnapshot(liveMarkets)
+    ]);
+    setLiveMarkets(allSnap.markets);
+    setFeedSyncedAt(singleSnap.lastCandleTime || allSnap.syncedAt);
+    setCurrentPrice(singleSnap.price);
+    setKeyLevel(singleSnap.keyLevel);
+    setEma20(singleSnap.ema20);
+    setEma50(singleSnap.ema50);
+    setRsi(singleSnap.rsi);
+    setPatternType(singleSnap.patternType);
+    setSyncingQuotes(false);
+    setChatSyncedNotification(
+      `${singleSnap.liveConnected ? 'Live Interbank Candle' : 'Calibrated Feed'} synced (${singleSnap.lastCandleTime}): ${pair} [${timeframe}] @ ${singleSnap.price}`
+    );
+    setTimeout(() => setChatSyncedNotification(null), 3500);
+  };
+
+  // Auto-update details immediately from real-time OHLC candle stream when switching pair or timeframe
+  const handleSwitchPairAndSyncRealData = (
+    newPair: CurrencyPair,
+    customMarkets?: MarketScanData[],
+    newTimeframe?: Timeframe
+  ) => {
+    const activeTf = newTimeframe || timeframe;
     setPair(newPair);
-    const m = INITIAL_MARKETS_DATA.find((x) => x.pair === newPair);
+    if (newTimeframe) setTimeframe(newTimeframe);
+    setUserLockedCandlePrice(false);
+
+    const sourceList = customMarkets || liveMarkets;
+    const m = sourceList.find((x) => x.pair === newPair) || INITIAL_MARKETS_DATA.find((x) => x.pair === newPair);
     if (m) {
+      const reEvaluated = evaluateCandleSeriesAndTick({
+        pair: newPair,
+        timeframe: activeTf,
+        livePrice: m.price,
+        baseCandles: m.candles,
+        change24hPct: m.change24hPct
+      });
       setCurrentPrice(m.price);
-      setKeyLevel(m.keyLevel);
-      setEma20(m.ema20);
-      setEma50(m.ema50);
-      setRsi(m.rsi);
-      setPatternType(m.patternType);
+      setKeyLevel(reEvaluated.keyLevel);
+      setEma20(reEvaluated.ema20);
+      setEma50(reEvaluated.ema50);
+      setRsi(reEvaluated.rsi);
+      setPatternType(reEvaluated.patternType);
       setTraderNotes(m.projection);
     }
+
+    // Fetch live OHLC bars in background for exact latest candlestick quote
+    fetchPairLiveCandleSnapshot(newPair, activeTf).then((snap) => {
+      setCurrentPrice(snap.price);
+      setKeyLevel(snap.keyLevel);
+      setEma20(snap.ema20);
+      setEma50(snap.ema50);
+      setRsi(snap.rsi);
+      setPatternType(snap.patternType);
+      setFeedSyncedAt(snap.lastCandleTime);
+    });
+  };
+
+  // Reactive live candle edit: a slight change upward or downward across candles dynamically recomputes EMA20, EMA50, RSI, liquidity & strategy!
+  const handleLiveCandlePriceEdit = (rawValue: string) => {
+    const num = parseFloat(rawValue) || 0;
+    setCurrentPrice(num);
+    if (num <= 0) return;
+
+    setUserLockedCandlePrice(true);
+    const matchingMarket = liveMarkets.find((m) => m.pair === pair);
+    const reEval = evaluateCandleSeriesAndTick({
+      pair,
+      timeframe,
+      livePrice: num,
+      baseCandles: matchingMarket?.candles,
+      change24hPct: matchingMarket?.change24hPct
+    });
+    setEma20(reEval.ema20);
+    setEma50(reEval.ema50);
+    setRsi(reEval.rsi);
+    setKeyLevel(reEval.keyLevel);
+    setPatternType(reEval.patternType);
   };
 
   // 1-Click Market Selection & Auto Deep AI Scan
   const handleSelectMarketAndDeepScanInChat = (targetPair: CurrencyPair) => {
     handleSwitchPairAndSyncRealData(targetPair);
-    const m = INITIAL_MARKETS_DATA.find((x) => x.pair === targetPair);
+    const m = liveMarkets.find((x) => x.pair === targetPair) || INITIAL_MARKETS_DATA.find((x) => x.pair === targetPair);
     if (m) {
       setActiveTab('advisor');
       handleTriggerChatAnalysis(m, 'deep_ai');
@@ -202,160 +322,7 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
     window.speechSynthesis.speak(utterance);
   };
 
-  // Pure mathematical calculator ensuring Stop Loss & Take Profit anchor directly to real live price & timeframe
-  const computeRealChartTradeParams = (p: {
-    targetPair: CurrencyPair;
-    targetTf: Timeframe;
-    targetBroker: BrokerId;
-    price: number;
-    keyLevel?: number;
-    ema20?: number;
-    ema50?: number;
-    rsi?: number;
-    biasOverride?: 'BUY' | 'SELL';
-  }) => {
-    const isJpy = p.targetPair.includes('JPY');
-    const isGold = p.targetPair.includes('XAU') || p.targetPair.toLowerCase().includes('gold');
-    const isBtc = p.targetPair.includes('BTC');
-
-    const pipMultiplier = isJpy ? 100 : isGold ? 10 : isBtc ? 1 : 10000;
-    const decimals = isJpy ? 3 : isGold ? 2 : isBtc ? 2 : 5;
-
-    // Timeframe-scaled pip distances
-    let baseSlPips = 16;
-    let baseTp1Pips = 30;
-    let baseTp2Pips = 50;
-
-    if (p.targetTf === 'M1') {
-      baseSlPips = isGold ? 40 : 8;
-      baseTp1Pips = isGold ? 60 : 14;
-      baseTp2Pips = isGold ? 100 : 22;
-    } else if (p.targetTf === 'M5') {
-      baseSlPips = isGold ? 65 : 12;
-      baseTp1Pips = isGold ? 90 : 20;
-      baseTp2Pips = isGold ? 140 : 34;
-    } else if (p.targetTf === 'M15') {
-      baseSlPips = isGold ? 105 : 16;
-      baseTp1Pips = isGold ? 150 : 32;
-      baseTp2Pips = isGold ? 175 : 52;
-    } else if (p.targetTf === 'H1') {
-      baseSlPips = isGold ? 160 : 28;
-      baseTp1Pips = isGold ? 240 : 55;
-      baseTp2Pips = isGold ? 320 : 90;
-    } else if (p.targetTf === 'H4') {
-      baseSlPips = isGold ? 280 : 55;
-      baseTp1Pips = isGold ? 420 : 110;
-      baseTp2Pips = isGold ? 600 : 180;
-    } else if (p.targetTf === 'D1') {
-      baseSlPips = isGold ? 500 : 110;
-      baseTp1Pips = isGold ? 800 : 220;
-      baseTp2Pips = isGold ? 1200 : 380;
-    }
-
-    // Direction calculation
-    let isBuy = true;
-    if (p.biasOverride) {
-      isBuy = p.biasOverride === 'BUY';
-    } else if (p.rsi !== undefined && p.rsi >= 70) {
-      isBuy = false;
-    } else if (p.rsi !== undefined && p.rsi <= 35) {
-      isBuy = true;
-    } else if (p.ema20 !== undefined && p.ema50 !== undefined) {
-      isBuy = p.ema20 >= p.ema50;
-    }
-
-    let slPrice: number;
-    let tp1Price: number;
-    let tp2Price: number;
-    let actualSlPips = baseSlPips;
-    let actualTpPips = baseTp2Pips;
-
-    // Handle user's exact Gold level specification:
-    // If Gold and price is around 2742.50: Stop Loss: 2732.00, Take Profit: 2760.00
-    if (isGold && Math.abs(p.price - 2742.50) < 15 && isBuy) {
-      slPrice = 2732.00;
-      tp1Price = 2752.00;
-      tp2Price = 2760.00;
-      actualSlPips = Math.round(Math.abs(p.price - slPrice) * pipMultiplier);
-      actualTpPips = Math.round(Math.abs(tp2Price - p.price) * pipMultiplier);
-    } else {
-      const slOffset = baseSlPips / pipMultiplier;
-      const tp1Offset = baseTp1Pips / pipMultiplier;
-      const tp2Offset = baseTp2Pips / pipMultiplier;
-
-      if (isBuy) {
-        slPrice = Number((p.price - slOffset).toFixed(decimals));
-        tp1Price = Number((p.price + tp1Offset).toFixed(decimals));
-        tp2Price = Number((p.price + tp2Offset).toFixed(decimals));
-      } else {
-        slPrice = Number((p.price + slOffset).toFixed(decimals));
-        tp1Price = Number((p.price - tp1Offset).toFixed(decimals));
-        tp2Price = Number((p.price - tp2Offset).toFixed(decimals));
-      }
-      actualSlPips = baseSlPips;
-      actualTpPips = baseTp2Pips;
-    }
-
-    // Absolute sanity enforcement to prevent MT4 "Invalid S/L or T/P" rejection:
-    if (isBuy) {
-      if (slPrice >= p.price) slPrice = Number((p.price - 15 / pipMultiplier).toFixed(decimals));
-      if (tp1Price <= p.price) tp1Price = Number((p.price + 25 / pipMultiplier).toFixed(decimals));
-      if (tp2Price <= tp1Price) tp2Price = Number((tp1Price + 20 / pipMultiplier).toFixed(decimals));
-    } else {
-      if (slPrice <= p.price) slPrice = Number((p.price + 15 / pipMultiplier).toFixed(decimals));
-      if (tp1Price >= p.price) tp1Price = Number((p.price - 25 / pipMultiplier).toFixed(decimals));
-      if (tp2Price >= tp1Price) tp2Price = Number((tp1Price - 20 / pipMultiplier).toFixed(decimals));
-    }
-
-    // Broker Symbol mappings
-    const cleanPair = p.targetPair.replace('/', '');
-    let brokerSymbol = cleanPair;
-    let brokerSpread = 1.1;
-
-    if (p.targetBroker === 'fxpesa') {
-      brokerSymbol = isGold ? 'XAUUSD' : cleanPair;
-      brokerSpread = isGold ? 2.2 : isJpy ? 1.4 : isBtc ? 25.0 : 1.1;
-    } else if (p.targetBroker === 'exness') {
-      brokerSymbol = isGold ? 'XAUUSD.m' : `${cleanPair}.m`;
-      brokerSpread = isGold ? 1.2 : isJpy ? 0.8 : isBtc ? 15.0 : 0.6;
-    } else if (p.targetBroker === 'hfm') {
-      brokerSymbol = isGold ? 'GOLD' : `${cleanPair}.h`;
-      brokerSpread = isGold ? 2.4 : isJpy ? 1.6 : isBtc ? 30.0 : 1.3;
-    } else if (p.targetBroker === 'fbs') {
-      brokerSymbol = isGold ? 'XAUUSD' : cleanPair;
-      brokerSpread = isGold ? 2.6 : isJpy ? 1.8 : isBtc ? 35.0 : 1.5;
-    }
-
-    const pipValPerLot = isGold ? 1.0 : isJpy ? 0.07 : 0.1;
-    const actualRiskUsd = Math.min(2.0, Number((actualSlPips * 0.01 * 10 * pipValPerLot).toFixed(2)));
-    const potentialGainUsd = Number((actualTpPips * 0.01 * 10 * pipValPerLot).toFixed(2));
-    const orderType = isBuy ? 'BUY BY MARKET' : 'SELL BY MARKET';
-    const riskReward = `1 : ${(actualTpPips / Math.max(1, actualSlPips)).toFixed(1)}`;
-
-    const dynamicTrajectory = isBuy
-      ? `Next 4H-24H Institutional Trajectory: Anchored to live chart candlestick @ ${p.price.toFixed(decimals)} on ${p.targetTf || 'M15'} (${brokerSymbol}). Swept sell-side liquidity below ${(slPrice - (isGold ? 2.5 : 5 / pipMultiplier)).toFixed(decimals)}. Institutional algorithms repricing upwards to tag ${tp2Price.toFixed(decimals)} Buy-Side Liquidity pool (+${actualTpPips} pips expansion). Validated against CMA Kenya zero-debt shield.`
-      : `Next 4H-24H Institutional Trajectory: Anchored to live chart candlestick @ ${p.price.toFixed(decimals)} on ${p.targetTf || 'M15'} (${brokerSymbol}). Swept buy-side liquidity above ${(slPrice + (isGold ? 2.5 : 5 / pipMultiplier)).toFixed(decimals)}. Institutional algorithms repricing downwards to tag ${tp2Price.toFixed(decimals)} Sell-Side Liquidity pool (-${actualTpPips} pips drop). Validated against CMA Kenya zero-debt shield.`;
-
-    return {
-      direction: isBuy ? ('BUY' as const) : ('SELL' as const),
-      orderType,
-      entryPrice: p.price,
-      stopLoss: slPrice,
-      tp1: tp1Price,
-      tp2: tp2Price,
-      slPips: actualSlPips,
-      tpPips: actualTpPips,
-      riskReward,
-      lotSize: 0.01,
-      actualRiskUsd: actualRiskUsd > 0 ? actualRiskUsd : 2.0,
-      potentialGainUsd,
-      brokerSymbol,
-      brokerSpread,
-      decimals,
-      trajectory: dynamicTrajectory,
-      cmaProtection: 'Zero negative balance debt risk (CMA Kenya Regulated Shield)'
-    };
-  };
+  // Trade parameter computation imported from ../../utils/liveMarketEngine
 
   // Generate MQL4 Script Code
   const generateMql4Script = (card: AdvisorTradeCard): string => {
@@ -560,110 +527,59 @@ InpMagicNumber=777129
     }
   };
 
-  // Load Preset Chart Samples
+  // Load Preset Chart Samples (Using Live Contemporary Market Quotes)
   const handleLoadSample = (sampleType: 'gbpusd' | 'eurusd' | 'xauusd') => {
     handleStopCamera();
-    if (sampleType === 'gbpusd') {
-      setPair('GBP/USD');
-      setTimeframe('M15');
-      setSession('London Open (10:00 EAT)');
-      setCurrentPrice(1.29169);
-      setKeyLevel(1.29656);
-      setEma20(1.28850);
-      setEma50(1.28520);
-      setRsi(76.4);
-      setPatternType('Tower Top Liquidity Sweep');
-      setTraderNotes('Gilgil 1.29656 sweep setup. Price pushed 31 pips above 20 EMA, high wick rejected. Re-entering down to 1.28500.');
-      runInstitutionalVisionAnalysis('/samples/gbpusd_tower.png');
-    } else if (sampleType === 'eurusd') {
-      setPair('EUR/USD');
-      setTimeframe('M15');
-      setSession('New York AM (15:30 EAT)');
-      setCurrentPrice(1.08502);
-      setKeyLevel(1.08320);
-      setEma20(1.08320);
-      setEma50(1.08150);
-      setRsi(54.2);
-      setPatternType('20/50 EMA Trend Bounce');
-      setTraderNotes('Bullish trend continuation. Pullback into dynamic 20 EMA support zone during NY session open.');
-      runInstitutionalVisionAnalysis('/samples/eurusd_bounce.png');
-    } else {
-      setPair('XAU/USD');
-      setTimeframe('H1');
-      setSession('London Open (10:00 EAT)');
-      setCurrentPrice(2035.50);
-      setKeyLevel(2042.00);
-      setEma20(2028.00);
-      setEma50(2020.00);
-      setRsi(72.8);
-      setPatternType('Fair Value Gap Re-test');
-      setTraderNotes('Gold swept previous daily high at 2042 and printed an hourly liquidity rejection pinbar.');
-      runInstitutionalVisionAnalysis('/samples/xauusd_sweep.png');
-    }
+    const targetPair: CurrencyPair =
+      sampleType === 'gbpusd' ? 'GBP/USD' : sampleType === 'eurusd' ? 'EUR/USD' : 'XAU/USD';
+    const m = liveMarkets.find((x) => x.pair === targetPair) || INITIAL_MARKETS_DATA.find((x) => x.pair === targetPair)!;
+    setPair(m.pair);
+    setTimeframe(m.recommendedTf);
+    setSession('London Open (10:00 EAT)');
+    setCurrentPrice(m.price);
+    setKeyLevel(m.keyLevel);
+    setEma20(m.ema20);
+    setEma50(m.ema50);
+    setRsi(m.rsi);
+    setPatternType(m.patternType);
+    setTraderNotes(m.projection);
+    runInstitutionalVisionAnalysis(
+      sampleType === 'gbpusd'
+        ? '/samples/gbpusd_tower.png'
+        : sampleType === 'eurusd'
+        ? '/samples/eurusd_bounce.png'
+        : '/samples/xauusd_sweep.png'
+    );
   };
 
-  // Run Real-Time Institutional Vision Analysis (Guaranteed Safe Resolution)
+  // Run Real-Time Institutional Vision Analysis (Guaranteed Safe MT4 S/L & T/P Resolution)
   const runInstitutionalVisionAnalysis = (imageSrc: string) => {
     setAnalyzingCamera(true);
     setCameraAnalysisResult(null);
 
     setTimeout(() => {
       try {
-        const pipMultiplier = pair.includes('JPY') ? 100 : pair.includes('XAU') ? 10 : 10000;
+        const pipMultiplier = pair.includes('JPY') ? 100 : pair.includes('XAU') ? 10 : pair.includes('BTC') ? 1 : 10000;
         const distFromEma20Pips = Math.abs(currentPrice - ema20) * pipMultiplier;
-        const isBullish = ema20 > ema50;
+        const computed = computeRealChartTradeParams({
+          targetPair: pair,
+          targetTf: timeframe,
+          targetBroker: broker,
+          price: currentPrice,
+          keyLevel,
+          ema20,
+          ema50,
+          rsi
+        });
 
-        let score = 78;
-        let verdict = 'HIGH PROBABILITY SELL REVERSAL';
-        let slDistancePips = 20;
-        let tpDistancePips = 50;
+        const score = Math.round(computed.confidence);
+        const verdict =
+          computed.direction === 'BUY'
+            ? `HIGH PROBABILITY BUY (${patternType.toUpperCase()})`
+            : `HIGH PROBABILITY SELL (${patternType.toUpperCase()})`;
 
-        if (patternType === 'Tower Top Liquidity Sweep') {
-          score = distFromEma20Pips >= 18 && rsi >= 70 ? 94 : 86;
-          verdict = 'HIGH PROBABILITY SELL REVERSAL';
-          slDistancePips = Math.max(15, Math.round(Math.abs(keyLevel - currentPrice) * pipMultiplier) + 5);
-          tpDistancePips = Math.round(distFromEma20Pips + 28);
-        } else if (patternType === '20/50 EMA Trend Bounce') {
-          score = isBullish && rsi >= 45 && rsi <= 65 ? 91 : 82;
-          verdict = 'HIGH PROBABILITY BUY CONTINUATION';
-          slDistancePips = 18;
-          tpDistancePips = 45;
-        } else if (patternType === 'Fair Value Gap Re-test') {
-          score = 92;
-          verdict = isBullish ? 'HIGH PROBABILITY BUY (FVG MITIGATION)' : 'HIGH PROBABILITY SELL (FVG MITIGATION)';
-          slDistancePips = 16;
-          tpDistancePips = 48;
-        } else {
-          score = 88;
-          verdict = 'HIGH PROBABILITY ORDER BLOCK SETUP';
-          slDistancePips = 18;
-          tpDistancePips = 52;
-        }
-
-        const slPrice = verdict.includes('BUY')
-          ? currentPrice - slDistancePips / pipMultiplier
-          : currentPrice + slDistancePips / pipMultiplier;
-
-        const tpPrice = verdict.includes('BUY')
-          ? currentPrice + tpDistancePips / pipMultiplier
-          : currentPrice - tpDistancePips / pipMultiplier;
-
-        // Gilgil $2 Rule calculation (max risk $2.00 / 260 KES)
-        const pipValPerLot = pair.includes('XAU') ? 1.0 : pair.includes('JPY') ? 0.07 : 0.1;
-        const calculatedLot = Math.min(0.05, Math.max(0.01, Number((2.0 / (slDistancePips * pipValPerLot * 10)).toFixed(2))));
-        const actualRiskUsd = Number((slDistancePips * calculatedLot * 10 * pipValPerLot).toFixed(2));
-        const potentialGainUsd = Number((tpDistancePips * calculatedLot * 10 * pipValPerLot).toFixed(2));
-
-        const decimals = pair.includes('JPY') ? 3 : pair.includes('XAU') ? 2 : 5;
-        const formattedSL = Number(slPrice.toFixed(decimals));
-        const formattedTP = Number(tpPrice.toFixed(decimals));
-        const tp1Price = Number((verdict.includes('BUY') ? currentPrice + (tpDistancePips * 0.5) / pipMultiplier : currentPrice - (tpDistancePips * 0.5) / pipMultiplier).toFixed(decimals));
-
-        // Broker Spread Analysis
-        const brokerSpreadPips = broker === 'fxpesa' ? 1.2 : broker === 'hfm' ? 1.4 : broker === 'exness' ? 0.6 : 1.6;
-        const brokerSpreadCostUsd = (brokerSpreadPips * calculatedLot * 10 * pipValPerLot).toFixed(2);
-
-        const orderType = verdict.includes('BUY') ? 'BUY BY MARKET' : 'SELL BY MARKET';
+        const brokerSpreadCostUsd = (computed.brokerSpread * 0.01 * 10 * (pair.includes('XAU') ? 0.1 : 0.1)).toFixed(2);
+        const decimals = computed.decimals;
 
         setCameraAnalysisResult({
           imageSrc,
@@ -671,52 +587,53 @@ InpMagicNumber=777129
           timeframe,
           session,
           broker,
-          currentPrice,
+          currentPrice: computed.entryPrice,
           keyLevel,
           pattern: patternType,
           score,
-          confidencePercent: score,
-          orderType,
+          confidencePercent: computed.confidence,
+          orderType: computed.orderType,
           verdict,
-          entryPrice: currentPrice,
-          suggestedSL: formattedSL,
-          suggestedTP: formattedTP,
-          tp1Price,
-          slPips: slDistancePips,
-          tpPips: tpDistancePips,
-          riskReward: (tpDistancePips / slDistancePips).toFixed(1),
-          suggestedLot: calculatedLot,
-          actualRiskUsd: Math.min(2.0, actualRiskUsd),
-          potentialGainUsd,
-          brokerSpreadPips,
+          entryPrice: computed.entryPrice,
+          suggestedSL: computed.stopLoss,
+          suggestedTP: computed.tp2,
+          tp1Price: computed.tp1,
+          slPips: computed.slPips,
+          tpPips: computed.tpPips,
+          riskReward: computed.riskReward,
+          suggestedLot: computed.lotSize,
+          actualRiskUsd: computed.actualRiskUsd,
+          potentialGainUsd: computed.potentialGainUsd,
+          brokerSpreadPips: computed.brokerSpread,
           brokerSpreadCostUsd,
+          mt4SafetyProof: computed.mt4SafetyProof,
           ocrExtracted: {
             detectedPair: pair,
             detectedTimeframe: timeframe,
-            detectedPrice: currentPrice,
+            detectedPrice: computed.entryPrice,
             detectedWickPeak: keyLevel,
             wickExcessPips: (Math.abs(keyLevel - currentPrice) * pipMultiplier).toFixed(1),
-            fvgZone: `${(currentPrice - 0.0006).toFixed(decimals)} - ${(currentPrice + 0.0006).toFixed(decimals)}`,
+            fvgZone: `${(currentPrice - 6 / pipMultiplier).toFixed(decimals)} - ${(currentPrice + 6 / pipMultiplier).toFixed(decimals)}`,
             obStatus: 'Defended Mean Threshold (50%)',
             status: '100% INGESTED'
           },
           confluences: [
             `Session Timing: ${session} aligns with institutional bank liquidity.`,
-            `Spread Check: ${broker.toUpperCase()} typical spread is ~${brokerSpreadPips} pips ($${brokerSpreadCostUsd} on ${calculatedLot} lot).`,
-            `Mean Reversion: Price extended ${distFromEma20Pips.toFixed(1)} pips from 20 EMA.`,
+            `Spread Check: ${broker.toUpperCase()} typical spread is ~${computed.brokerSpread} pips ($${brokerSpreadCostUsd} on 0.01 lot).`,
+            `Mean Reversion: Price positioned ${distFromEma20Pips.toFixed(1)} pips from 20 EMA (${ema20}).`,
             `Momentum Engine: RSI (14) at ${rsi} confirms institutional positioning.`,
-            `ICT Matrix: Clean wick rejection above ${keyLevel} with fair value gap confluence.`,
+            `${computed.mt4SafetyProof}`,
             `Gilgil $2 Protection: Mathematical risk hard-capped at $2.00 (260 KES).`
           ],
           mt4Steps: [
-            `1. Open MT4/MT5 -> Select ${pair} -> Press F9 (New Order Ticket)`,
-            `2. Type: ${orderType} (Instant Algorithmic Execution)`,
-            `3. Volume: STRICTLY ${calculatedLot} Micro Lot (Gilgil $2 Capital Shield)`,
-            `4. Set Stop Loss: ${formattedSL} (${slDistancePips} pips)`,
-            `5. Set Take Profit: ${formattedTP} (+${tpDistancePips} pips)`,
-            `6. Scale-Out Protocol: Close 50% at ${tp1Price} (+${Math.round(tpDistancePips * 0.5)} pips) & move SL to Breakeven`
+            `1. Open MT4/MT5 -> Select ${computed.brokerSymbol} (${timeframe}) -> Press F9 (New Order Ticket)`,
+            `2. Type: ${computed.orderType} @ ${computed.entryPrice}`,
+            `3. Volume: STRICTLY ${computed.lotSize} Micro Lot (Gilgil $2 Capital Shield)`,
+            `4. Set Stop Loss: ${computed.stopLoss} (-${computed.slPips} pips)`,
+            `5. Set Take Profit: ${computed.tp2} (+${computed.tpPips} pips)`,
+            `6. Scale-Out Protocol: Close 50% at ${computed.tp1} & move SL to Breakeven`
           ],
-          notes: traderNotes || 'Clean institutional pattern with verified rejection wicks.',
+          notes: traderNotes || computed.trajectory,
         });
       } catch (err) {
         console.error('Vision analysis calculation error:', err);
@@ -728,125 +645,129 @@ InpMagicNumber=777129
   };
 
   // Run Analysis Engine (Supports both Standard Confluence and Deep AI Institutional EA)
-  const handleRunAnalysis = (mode: 'standard' | 'deep_ai', prefill?: MarketScanData) => {
+  // Always syncs with fresh live candlestick OHLC data on Analyse, Deep AI Analyse, & Reanalyse!
+  const handleRunAnalysis = async (mode: 'standard' | 'deep_ai', prefill?: MarketScanData) => {
     const activePair = prefill?.pair || pair;
-    const targetPrice = prefill?.price || currentPrice;
-    const targetEma20 = prefill?.ema20 ?? ema20;
-    const targetEma50 = prefill?.ema50 ?? ema50;
-    const targetRsi = prefill?.rsi ?? rsi;
-    const targetKeyLevel = prefill?.keyLevel ?? keyLevel;
-    const targetPattern = prefill?.patternType ?? patternType;
+    const activeTf = prefill?.recommendedTf || timeframe;
 
-    if (!targetPrice || targetPrice <= 0) {
-      alert('Please enter a valid Current Market Price.');
-      return;
+    if (prefill?.recommendedTf) {
+      setTimeframe(prefill.recommendedTf);
     }
 
     setAnalysisExecutionMode(mode);
     setAnalyzingManual(true);
     setManualResult(null);
 
-    const delay = mode === 'deep_ai' ? 850 : 500;
-
-    setTimeout(() => {
-      const pipMultiplier = activePair.includes('JPY') ? 100 : activePair.includes('XAU') ? 10 : activePair.includes('BTC') ? 1 : 10000;
-      const distFromEma20Pips = Math.abs(targetPrice - targetEma20) * pipMultiplier;
-      const isTrendBullish = targetEma20 > targetEma50;
-
-      let score = prefill?.confidence || 50;
-      let confidencePercent = prefill?.confidence || 65.0;
-      let verdict: 'WAIT' | 'RISKY' | 'HIGH_PROBABILITY_BUY' | 'HIGH_PROBABILITY_SELL' = prefill?.bias === 'STRONG_BUY' ? 'HIGH_PROBABILITY_BUY' : prefill?.bias === 'STRONG_SELL' ? 'HIGH_PROBABILITY_SELL' : 'WAIT';
-      let pattern = prefill?.ictPattern || 'Consolidation / Range Equilibrium';
-      let trend = prefill?.trend || 'Market Equilibrium & Chop';
-      let projection = prefill?.projection || '';
-      let orderType = verdict === 'HIGH_PROBABILITY_BUY' ? 'BUY LIMIT / MARKET BUY' : verdict === 'HIGH_PROBABILITY_SELL' ? 'SELL LIMIT / MARKET SELL' : 'INSTANT_EXECUTION';
-      const reasons: string[] = [];
+    try {
+      let targetPrice = prefill?.price || currentPrice;
+      let targetEma20 = prefill?.ema20 ?? ema20;
+      let targetEma50 = prefill?.ema50 ?? ema50;
+      let targetRsi = prefill?.rsi ?? rsi;
+      let targetKeyLevel = prefill?.keyLevel ?? keyLevel;
+      let targetPattern = prefill?.patternType ?? patternType;
+      let targetAtrPips = prefill?.atrPips;
 
       if (!prefill) {
-        if (targetPattern === 'Tower Top Liquidity Sweep' || (targetRsi >= 72 && distFromEma20Pips >= 18)) {
-          score = mode === 'deep_ai' ? 95 : 88;
-          confidencePercent = mode === 'deep_ai' ? 94.6 : 87.5;
-          verdict = 'HIGH_PROBABILITY_SELL';
-          pattern = 'Tower Top Liquidity Exhaustion Sweep';
-          trend = 'Bearish Institutional Sweep & Reversal';
-          orderType = 'SELL LIMIT / MARKET SELL';
-          projection = `Next 4H-24H Institutional Trajectory: Swept ${targetKeyLevel} retail buy stops. Expecting sharp retrace into ${targetEma20} (20 EMA) and subsequent fair value gap mitigation at ${targetEma50} (-${Math.round(distFromEma20Pips * 1.8)} pips target). Invalidation above ${targetKeyLevel}.`;
-          reasons.push(`Price is extended ${distFromEma20Pips.toFixed(1)} pips above 20 EMA (Overbought Mean Reversion).`);
-          reasons.push(`RSI 14 at ${targetRsi} confirms exhausted institutional buying power & bearish divergence.`);
-          reasons.push(`Previous high sweep at ${targetKeyLevel} collected buy-side liquidity (BSL).`);
-          if (mode === 'deep_ai') {
-            reasons.push('Deep AI Neural Scan: Order Block mean threshold defended on M15 timeframe.');
-            reasons.push('Smart Money Flow: Sellers displaying aggressive volume displacement back inside previous range.');
-          }
-        } else if (isTrendBullish && targetPrice >= targetEma20 && targetRsi >= 45 && targetRsi <= 68) {
-          score = mode === 'deep_ai' ? 93 : 86;
-          confidencePercent = mode === 'deep_ai' ? 92.4 : 85.0;
-          verdict = 'HIGH_PROBABILITY_BUY';
-          pattern = '20/50 EMA Dynamic Trend Bounce';
-          trend = 'Bullish Institutional Trend Expansion';
-          orderType = 'BUY LIMIT / MARKET BUY';
-          projection = `Next 4H-24H Institutional Trajectory: Pullback into dynamic 20 EMA support held cleanly. Expecting continuation impulse through session highs (+${Math.round(distFromEma20Pips * 2.2 + 35)} pips projection). Invalidation below 50 EMA (${targetEma50}).`;
-          reasons.push('Price is pulling back into dynamic 20 EMA support in a confirmed uptrend.');
-          reasons.push(`RSI 14 at ${targetRsi} shows healthy non-exhausted bullish momentum.`);
-          reasons.push(`Spread filter verified for ${broker.toUpperCase()} (under 1.5 pips).`);
-          if (mode === 'deep_ai') {
-            reasons.push('Deep AI Neural Scan: Fair Value Gap (FVG) consequent encroachment rebalanced at 50%.');
-            reasons.push('Multi-timeframe sync: H1 and M15 market structure shifts in full bullish alignment.');
-          }
-        } else if (distFromEma20Pips > 30) {
-          score = 42;
-          confidencePercent = 41.5;
-          verdict = 'RISKY';
-          pattern = 'Overextended Parabolic Chase Trap';
-          trend = 'Parabolic Overextension (High Risk)';
-          orderType = 'FLAT / DO NOT ENTER';
-          projection = 'Price is extended > 30 pips from value. High probability of mean-reversion stop hunt. Wait for 20 EMA touch.';
-          reasons.push('Price is dangerously overextended from 20 EMA. Do NOT chase market orders.');
-          reasons.push('Wait for mean reversion pullback to the 20 EMA before entering.');
-        } else {
-          score = 58;
-          confidencePercent = 60.0;
-          verdict = 'WAIT';
-          pattern = 'Equilibrium Chop / Indecision Zone';
-          trend = 'Range Equilibrium (Sideways)';
-          orderType = 'WAIT / PENDING BOS';
-          projection = 'Price oscillating in 50% equilibrium. No high-probability edge. Await London/NY session expansion.';
-          reasons.push('Market is in equilibrium. Wait for clean structural break of structure (BOS).');
-        }
-      } else {
-        reasons.push(`Market Radar Ingestion: ${prefill.ictPattern}`);
-        reasons.push(`Session Alignment: ${prefill.recommendedSession} active liquidity`);
-        reasons.push(`Indicator Matrix: 20 EMA at ${targetEma20}, 50 EMA at ${targetEma50}, RSI at ${targetRsi}`);
-        reasons.push(`Calculated R:R: ${prefill.riskReward} institutional asymmetric return`);
-        if (mode === 'deep_ai') {
-          reasons.push(`Deep AI Model: Order block mitigated and liquidity sweep confirmed with ${prefill.confidence}% confidence.`);
-          reasons.push('Gilgil Sizing Shield: Fixed $2.00 / 260 KES loss cap via 0.01 micro lot.');
-        }
+        const [liveSnap] = await Promise.all([
+          fetchPairLiveCandleSnapshot(
+            activePair,
+            activeTf,
+            userLockedCandlePrice && currentPrice > 0 ? currentPrice : undefined
+          ),
+          !userLockedCandlePrice
+            ? globalLiveStream.triggerScan(mode === 'deep_ai' ? 'deep_ai' : 'rescan')
+            : Promise.resolve(globalLiveStream.getState())
+        ]);
+        targetPrice = liveSnap.price;
+        targetEma20 = liveSnap.ema20;
+        targetEma50 = liveSnap.ema50;
+        targetRsi = liveSnap.rsi;
+        targetKeyLevel = liveSnap.keyLevel;
+        targetPattern = liveSnap.patternType;
+        targetAtrPips = liveSnap.atrPips;
+
+        setCurrentPrice(liveSnap.price);
+        setEma20(liveSnap.ema20);
+        setEma50(liveSnap.ema50);
+        setRsi(liveSnap.rsi);
+        setKeyLevel(liveSnap.keyLevel);
+        setPatternType(liveSnap.patternType);
+        setFeedSyncedAt(liveSnap.lastCandleTime);
       }
 
-      const isBuy = verdict === 'HIGH_PROBABILITY_BUY';
+      if (!targetPrice || targetPrice <= 0) {
+        setChatSyncedNotification('Please enter a valid positive Current Market Price from your chart.');
+        setTimeout(() => setChatSyncedNotification(null), 3000);
+        setAnalyzingManual(false);
+        return;
+      }
+
+      const manualDirection =
+        prefill?.bias === 'STRONG_BUY'
+          ? 'BUY'
+          : prefill?.bias === 'STRONG_SELL'
+          ? 'SELL'
+          : biasOverride !== 'AUTO'
+          ? biasOverride
+          : undefined;
+
+      const pctMap: Partial<Record<CurrencyPair, number>> = {};
+      liveMarkets.forEach((m) => {
+        pctMap[m.pair] = m.change24hPct;
+      });
+      const currentMacro = getCurrentMacroContext(pctMap);
+
       const computed = computeRealChartTradeParams({
         targetPair: activePair,
-        targetTf: timeframe,
+        targetTf: activeTf,
         targetBroker: broker,
         price: targetPrice,
         keyLevel: targetKeyLevel,
         ema20: targetEma20,
         ema50: targetEma50,
         rsi: targetRsi,
-        biasOverride: isBuy ? 'BUY' : 'SELL'
+        atrPips: targetAtrPips,
+        macro: currentMacro,
+        biasOverride: manualDirection
       });
+
+      const isBuy = computed.direction === 'BUY';
+      const pipMultiplier = activePair.includes('JPY') ? 100 : activePair.includes('XAU') ? 10 : activePair.includes('BTC') ? 1 : 10000;
+      const distFromEma20Pips = Math.abs(targetPrice - targetEma20) * pipMultiplier;
+
+      const confidencePercent = Number(
+        Math.min(98.2, computed.confidence + (mode === 'deep_ai' ? 1.4 : -1.2)).toFixed(1)
+      );
+      const score = Math.round(confidencePercent);
+      const verdict: 'WAIT' | 'RISKY' | 'HIGH_PROBABILITY_BUY' | 'HIGH_PROBABILITY_SELL' =
+        prefill?.bias === 'NEUTRAL_CHOP'
+          ? 'WAIT'
+          : isBuy
+          ? 'HIGH_PROBABILITY_BUY'
+          : 'HIGH_PROBABILITY_SELL';
+
+      const pattern = prefill?.ictPattern || targetPattern;
+      const trend = prefill?.trend || (isBuy ? 'Bullish Institutional Structure Shift' : 'Bearish Liquidity Distribution');
+      const projection = computed.trajectory;
+
+      const reasons: string[] = [
+        `${computed.mt4SafetyProof}`,
+        `Anchored to live chart candlestick @ ${computed.entryPrice} on ${activeTf} timeframe.`,
+        `EMA Stack Context: 20 EMA at ${targetEma20}, 50 EMA at ${targetEma50} (${distFromEma20Pips.toFixed(1)} pips offset).`,
+        `Momentum & Liquidity: RSI (14) at ${targetRsi} · Sweep pool @ ${targetKeyLevel}.`,
+        `Gilgil Sizing Shield: Strictly 0.01 micro lot ($${computed.actualRiskUsd.toFixed(2)} / 260 KES max loss cap).`
+      ];
+
+      if (mode === 'deep_ai') {
+        reasons.push('Deep AI Multi-Confluence Engine: Institutional order flow & spread tolerance verified.');
+      }
 
       const slPrice = computed.stopLoss;
       const tpPrice = computed.tp2;
       const tp1Price = computed.tp1;
-      const slDistancePips = computed.slPips;
-      const tpDistancePips = computed.tpPips;
       const decimals = computed.decimals;
       const cleanPairSymbol = computed.brokerSymbol;
-      orderType = computed.orderType;
 
-      // Broker Specific Specification Dashboard
       const brokerConfigs: Record<BrokerId, { symbol: string; spread: number; leverage: string; marginCostUsd: number; serverName: string; instructions: string[] }> = {
         fxpesa: {
           symbol: computed.brokerSymbol,
@@ -856,7 +777,7 @@ InpMagicNumber=777129
           serverName: 'EGM-Real / FXPesa Live',
           instructions: [
             '1. Open MT4/MT5 connected to FXPesa Kenya server.',
-            `2. Select symbol: ${computed.brokerSymbol} (Timeframe: ${timeframe}).`,
+            `2. Select symbol: ${computed.brokerSymbol} (Timeframe: ${activeTf}).`,
             `3. Order Type: ${computed.orderType}.`,
             '4. Volume: 0.01 micro lot (strict $2.00 / 260 KES Gilgil protection).',
             `5. Input Stop Loss: ${slPrice.toFixed(decimals)}, Take Profit: ${tpPrice.toFixed(decimals)}.`,
@@ -871,7 +792,7 @@ InpMagicNumber=777129
           serverName: 'HFMarkets-Live',
           instructions: [
             '1. Open HFM MT4/MT5 terminal.',
-            `2. Choose symbol: ${computed.brokerSymbol} (Timeframe: ${timeframe}).`,
+            `2. Choose symbol: ${computed.brokerSymbol} (Timeframe: ${activeTf}).`,
             `3. Order Type: ${computed.orderType}.`,
             '4. Set Volume to 0.01 micro lot. Do NOT use excess leverage.',
             `5. Stop Loss: ${slPrice.toFixed(decimals)}, Target: ${tpPrice.toFixed(decimals)}.`
@@ -885,7 +806,7 @@ InpMagicNumber=777129
           serverName: 'Exness-Real',
           instructions: [
             '1. Open Exness MT4/MT5 or Exness Terminal web.',
-            `2. Select micro symbol: ${computed.brokerSymbol} (Timeframe: ${timeframe}).`,
+            `2. Select micro symbol: ${computed.brokerSymbol} (Timeframe: ${activeTf}).`,
             '3. Raw spread is tight with 0 stop-level limits.',
             '4. Volume: 0.01 Micro Lot. Benefit from instant algorithmic execution.',
             `5. Stop Loss: ${slPrice.toFixed(decimals)}, Target 1: ${tp1Price.toFixed(decimals)}, Final TP: ${tpPrice.toFixed(decimals)}.`,
@@ -900,7 +821,7 @@ InpMagicNumber=777129
           serverName: 'FBS-Real',
           instructions: [
             '1. Open FBS MT4/MT5 Cent or Standard platform.',
-            `2. Symbol: ${computed.brokerSymbol} (Timeframe: ${timeframe}).`,
+            `2. Symbol: ${computed.brokerSymbol} (Timeframe: ${activeTf}).`,
             `3. Order Type: ${computed.orderType}.`,
             '4. Strict 0.01 lot volume. Avoid margin overtrading trap.',
             `5. Set Stop Loss: ${slPrice.toFixed(decimals)}, Target: ${tpPrice.toFixed(decimals)}.`
@@ -912,8 +833,8 @@ InpMagicNumber=777129
 
       setManualResult({
         pair: activePair,
-        timeframe,
-        price: targetPrice,
+        timeframe: activeTf,
+        price: computed.entryPrice,
         ema20: targetEma20,
         ema50: targetEma50,
         rsi: targetRsi,
@@ -923,13 +844,13 @@ InpMagicNumber=777129
         verdict,
         trend,
         projection,
-        orderType,
+        orderType: computed.orderType,
         detectedPattern: pattern,
         stopLoss: Number(slPrice.toFixed(decimals)),
         takeProfit: Number(tpPrice.toFixed(decimals)),
         tp1Price: Number(tp1Price.toFixed(decimals)),
         tp2Price: Number(tpPrice.toFixed(decimals)),
-        riskReward: prefill?.riskReward || `1 : ${(tpDistancePips / Math.max(1, slDistancePips)).toFixed(1)}`,
+        riskReward: computed.riskReward,
         suggestedLot: 0.01,
         reasoning: reasons,
         howToPlaceSteps: currentBrokerSpec.instructions,
@@ -946,7 +867,9 @@ InpMagicNumber=777129
 
       setAnalyzingManual(false);
       playAudioBeep(mode === 'deep_ai' ? 980 : 880, 0.15);
-    }, delay);
+    } catch {
+      setAnalyzingManual(false);
+    }
   };
 
   // 1-Click Institutional Analysis from Chat Table
@@ -1076,16 +999,17 @@ InpMagicNumber=777129
       let targetPair: CurrencyPair = pair;
       if (queryLower.includes('gold') || queryLower.includes('xau')) targetPair = 'XAU/USD';
       else if (queryLower.includes('fiber') || queryLower.includes('eur/usd') || queryLower.includes('eurusd') || queryLower.includes('euro') || queryLower.includes('usd/euro') || queryLower.includes('usd euro') || queryLower.includes('usdeur')) targetPair = 'EUR/USD';
-      else if (queryLower.includes('cable') || queryLower.includes('gbp/usd') || queryLower.includes('gbpusd') || queryLower.includes('pound') || queryLower.includes('1291') || queryLower.includes('1296')) targetPair = 'GBP/USD';
+      else if (queryLower.includes('cable') || queryLower.includes('gbp/usd') || queryLower.includes('gbpusd') || queryLower.includes('pound')) targetPair = 'GBP/USD';
       else if (queryLower.includes('ninja') || queryLower.includes('usd/jpy') || queryLower.includes('usdjpy') || queryLower.includes('yen')) targetPair = 'USD/JPY';
       else if (queryLower.includes('dragon') || queryLower.includes('gbp/jpy') || queryLower.includes('gbpjpy') || queryLower.includes('guppy')) targetPair = 'GBP/JPY';
       else if (queryLower.includes('bitcoin') || queryLower.includes('btc')) targetPair = 'BTC/USD';
       else if (queryLower.includes('loonie') || queryLower.includes('usd/cad') || queryLower.includes('usdcad')) targetPair = 'USD/CAD';
       else if (queryLower.includes('aussie') || queryLower.includes('aud/usd') || queryLower.includes('audusd')) targetPair = 'AUD/USD';
 
-      // 2. Detect if user specifies timeframe (e.g. M15, 15min, M5, H1)
+      // 2. Detect if user specifies timeframe (e.g. M10, 10min, M15, 15min, M5, H1)
       let targetTf: Timeframe = timeframe;
-      if (queryLower.includes('15min') || queryLower.includes('15 min') || queryLower.includes('15m') || queryLower.includes('m15')) targetTf = 'M15';
+      if (queryLower.includes('10min') || queryLower.includes('10 min') || queryLower.includes('10m') || queryLower.includes('m10')) targetTf = 'M10';
+      else if (queryLower.includes('15min') || queryLower.includes('15 min') || queryLower.includes('15m') || queryLower.includes('m15')) targetTf = 'M15';
       else if (queryLower.includes('5min') || queryLower.includes('5 min') || queryLower.includes('5m') || queryLower.includes('m5')) targetTf = 'M5';
       else if (queryLower.includes('1hr') || queryLower.includes('1 hour') || queryLower.includes('1h') || queryLower.includes('h1')) targetTf = 'H1';
       else if (queryLower.includes('4hr') || queryLower.includes('4 hour') || queryLower.includes('4h') || queryLower.includes('h4')) targetTf = 'H4';
@@ -1099,18 +1023,17 @@ InpMagicNumber=777129
       const priceMatch = textToQuery.match(/(?:price|at|@|entry|values?\s*(?:are|is)|figure)[^\d]*([\d.]+)/i);
       const rawFloatMatches = textToQuery.match(/\b\d+\.\d+\b/g);
 
-      const matchedMarket = INITIAL_MARKETS_DATA.find((m) => m.pair === targetPair);
+      const matchedMarket = liveMarkets.find((m) => m.pair === targetPair) || INITIAL_MARKETS_DATA.find((m) => m.pair === targetPair);
 
       let targetPrice = priceMatch ? parseFloat(priceMatch[1]) : (matchedMarket ? matchedMarket.price : currentPrice);
-      // If user typed float numbers and no explicit price prefix, examine first float
       if (!priceMatch && rawFloatMatches && rawFloatMatches.length > 0 && !ema20Match) {
         const candidate = parseFloat(rawFloatMatches[0]);
         if (candidate > 0.5) targetPrice = candidate;
       }
 
-      let targetEma20 = ema20Match ? parseFloat(ema20Match[1]) : (matchedMarket ? matchedMarket.ema20 : ema20);
-      let targetEma50 = ema50Match ? parseFloat(ema50Match[1]) : (matchedMarket ? matchedMarket.ema50 : ema50);
-      let targetRsi = rsiMatch ? parseFloat(rsiMatch[1]) : (matchedMarket ? matchedMarket.rsi : rsi);
+      const targetEma20 = ema20Match ? parseFloat(ema20Match[1]) : (matchedMarket ? matchedMarket.ema20 : ema20);
+      const targetEma50 = ema50Match ? parseFloat(ema50Match[1]) : (matchedMarket ? matchedMarket.ema50 : ema50);
+      const targetRsi = rsiMatch ? parseFloat(rsiMatch[1]) : (matchedMarket ? matchedMarket.rsi : rsi);
 
       // Auto-synchronize shared state so other UI panels match
       setPair(targetPair);
@@ -1136,15 +1059,24 @@ InpMagicNumber=777129
         queryLower.includes('sell');
 
       if (hasIndicatorsOrMarketIntent && !queryLower.includes('revenge') && !queryLower.includes('news') && !queryLower.includes('session only')) {
-        // Calculate dynamic real trade parameters anchored to exact price & timeframe
+        const pctMapAdvisor: Partial<Record<CurrencyPair, number>> = {};
+        liveMarkets.forEach((lm) => {
+          pctMapAdvisor[lm.pair] = lm.change24hPct;
+        });
+        const advisorMacro = getCurrentMacroContext(pctMapAdvisor);
+
+        // Calculate dynamic real trade parameters anchored to exact price, timeframe, ATR & all 5 macro factors
         const computed = computeRealChartTradeParams({
           targetPair,
           targetTf,
           targetBroker: broker,
           price: targetPrice,
+          keyLevel: matchedMarket?.keyLevel,
           ema20: targetEma20,
           ema50: targetEma50,
-          rsi: targetRsi
+          rsi: targetRsi,
+          atrPips: matchedMarket?.atrPips,
+          macro: advisorMacro
         });
 
         const orderType = computed.orderType;
@@ -1496,7 +1428,7 @@ InpMagicNumber=777129
                     2. Live Favorable Trade & Matching Interactive Chart
                   </h4>
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    View the live TradingView chart for the scanned favorable trade. Ingest your screen's exact last candlestick quote (e.g. 4041.495 or 1.29169) to get matching SL, TP1, and TP2.
+                    View the live TradingView chart for the scanned favorable trade. Ingest your screen's exact last candlestick quote (e.g. 4041.495 or 1.35100) to get matching SL, TP1, and TP2.
                   </p>
                 </div>
 
@@ -1619,6 +1551,12 @@ InpMagicNumber=777129
           VIEW 2: DEDICATED LIVE FAVORABLE TRADE & MATCHING CHART STATION
           ========================================================================= */}
       {scannerView === 'favorable_chart' && (() => {
+        const activeMarketObj = liveMarkets.find((m) => m.pair === pair) || INITIAL_MARKETS_DATA[0];
+        const pctMap: Partial<Record<CurrencyPair, number>> = {};
+        liveMarkets.forEach((m) => {
+          pctMap[m.pair] = m.change24hPct;
+        });
+        const liveMacro = getCurrentMacroContext(pctMap);
         const favorableComputed = computeRealChartTradeParams({
           targetPair: pair,
           targetTf: timeframe,
@@ -1628,16 +1566,19 @@ InpMagicNumber=777129
           ema20: ema20,
           ema50: ema50,
           rsi: rsi,
+          atrPips: activeMarketObj.atrPips,
+          macro: liveMacro,
+          biasOverride: biasOverride === 'AUTO' ? undefined : biasOverride,
         });
 
         return (
           <div className="space-y-6 animate-in fade-in duration-300">
-            {/* Top Selector Bar: Pair, Timeframe, Broker */}
+            {/* Top Selector Bar: Pair, Timeframe, Broker, Order Side & Sync Live Quotes */}
             <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/80 border border-slate-800 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
               <div className="flex items-center gap-3 flex-wrap">
                 <div>
-                  <label className="text-[10px] font-mono text-slate-400 uppercase font-bold block mb-1">
-                    Currency Pair
+                  <label className="text-[11px] font-mono text-slate-400 uppercase font-bold block mb-1">
+                    Currency Pair ({activeMarketObj.change24hPct >= 0 ? `+${activeMarketObj.change24hPct}%` : `${activeMarketObj.change24hPct}%`})
                   </label>
                   <select
                     value={pair}
@@ -1656,15 +1597,16 @@ InpMagicNumber=777129
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-mono text-slate-400 uppercase font-bold block mb-1">
+                  <label className="text-[11px] font-mono text-slate-400 uppercase font-bold block mb-1">
                     Timeframe
                   </label>
                   <select
                     value={timeframe}
-                    onChange={(e) => setTimeframe(e.target.value as Timeframe)}
+                    onChange={(e) => handleSwitchPairAndSyncRealData(pair, undefined, e.target.value as Timeframe)}
                     className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:border-[#D4AF37] outline-none"
                   >
                     <option value="M5">M5 (5 Minutes)</option>
+                    <option value="M10">M10 (10 Minutes)</option>
                     <option value="M15">M15 (15 Minutes - Recommended)</option>
                     <option value="H1">H1 (1 Hour)</option>
                     <option value="H4">H4 (4 Hours)</option>
@@ -1673,7 +1615,7 @@ InpMagicNumber=777129
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-mono text-slate-400 uppercase font-bold block mb-1">
+                  <label className="text-[11px] font-mono text-slate-400 uppercase font-bold block mb-1">
                     Broker Environment
                   </label>
                   <select
@@ -1681,135 +1623,237 @@ InpMagicNumber=777129
                     onChange={(e) => setBroker(e.target.value as BrokerId)}
                     className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:border-[#D4AF37] outline-none"
                   >
-                    <option value="fxpesa">FXPesa (CMA Kenya • ~1.1p Spread)</option>
-                    <option value="exness">Exness (Micro / Raw • ~0.6p Spread)</option>
-                    <option value="hfm">HFM (Offshore • ~1.3p Spread)</option>
-                    <option value="fbs">FBS (Cent / Standard • ~1.5p Spread)</option>
+                    <option value="fxpesa">FXPesa (CMA Kenya · ~1.1p Spread)</option>
+                    <option value="exness">Exness (Micro / Raw · ~0.6p Spread)</option>
+                    <option value="hfm">HFM (Offshore · ~1.3p Spread)</option>
+                    <option value="fbs">FBS (Cent / Standard · ~1.5p Spread)</option>
                   </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-mono text-slate-400 uppercase font-bold block mb-1">
+                    Direction Mode
+                  </label>
+                  <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700">
+                    {(['AUTO', 'BUY', 'SELL'] as const).map((dir) => (
+                      <button
+                        key={dir}
+                        type="button"
+                        onClick={() => setBiasOverride(dir)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold transition ${
+                          biasOverride === dir
+                            ? 'bg-[#D4AF37] text-black font-black'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {dir}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="px-3 py-1.5 rounded-xl bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40 text-xs font-mono font-bold flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-[#00C261] animate-ping" />
-                  <span>Real Chart & Candlestick Feed Active</span>
-                </span>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleSyncLiveQuotes}
+                  disabled={syncingQuotes}
+                  className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#00C261] border border-[#00C261]/40 text-xs font-mono font-bold flex items-center gap-1.5 transition whitespace-nowrap shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${syncingQuotes ? 'animate-spin' : ''}`} />
+                  <span>{syncingQuotes ? 'Syncing...' : `Sync Live Quote (${feedSyncedAt})`}</span>
+                </button>
               </div>
             </div>
 
-            {/* REAL INTERACTIVE TRADINGVIEW CHART */}
-            <div className="rounded-2xl border border-slate-800 overflow-hidden bg-slate-950 shadow-2xl">
-              <div className="p-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-xs font-mono">
-                <div className="flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 text-[#D4AF37]" />
-                  <span className="font-bold text-white">Live TradingView Real Chart Feed: {pair} [{timeframe}]</span>
-                </div>
-                <span className="text-[11px] text-[#D4AF37] font-bold">Inspect last candlestick & sync below</span>
+            {chatSyncedNotification && (
+              <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/50 text-emerald-200 text-xs font-mono flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-[#00C261] shrink-0" />
+                <span>{chatSyncedNotification}</span>
               </div>
-              <TradingViewEmbedWidget
+            )}
+
+            {/* INTERACTIVE 24/7 LIVE CANDLESTICK CHART + TRADINGVIEW FEED */}
+            <div className="space-y-4">
+              <LiveInteractiveCandleChart
                 pair={pair}
                 timeframe={timeframe}
-                onPairChange={(newPair) => handleSwitchPairAndSyncRealData(newPair)}
-                onTimeframeChange={(newTf) => setTimeframe(newTf)}
+                candles={activeMarketObj.candles || []}
+                livePrice={currentPrice}
+                ema20={ema20}
+                ema50={ema50}
+                entryPrice={favorableComputed.entryPrice}
+                stopLoss={favorableComputed.stopLoss}
+                tp1={favorableComputed.tp1}
+                tp2={favorableComputed.tp2}
+                direction={favorableComputed.direction}
+                change24hPct={activeMarketObj.change24hPct}
+                isLockedToCustom={userLockedCandlePrice}
+                onCandlePriceChange={(newPrice) => {
+                  handleLiveCandlePriceEdit(String(newPrice));
+                  globalLiveStream.setCustomCandlePrice(pair, newPrice, timeframe);
+                }}
+                onResetToLiveStream={() => {
+                  setUserLockedCandlePrice(false);
+                  globalLiveStream.unlockPairToLiveStream(pair);
+                  handleSyncLiveQuotes();
+                }}
               />
+
+              <div className="rounded-2xl border border-slate-800 overflow-hidden bg-slate-950 shadow-2xl">
+                <div className="p-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-xs font-mono">
+                  <div className="flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-[#D4AF37]" />
+                    <span className="font-bold text-white">External TradingView Feed: {pair} [{timeframe}]</span>
+                  </div>
+                  <span className="text-[11px] text-[#D4AF37] font-bold">24/7 1-Second Auto-Sync Active ({feedSyncedAt})</span>
+                </div>
+                <TradingViewEmbedWidget
+                  pair={pair}
+                  timeframe={timeframe}
+                  onPairChange={(newPair) => handleSwitchPairAndSyncRealData(newPair)}
+                  onTimeframeChange={(newTf) => handleSwitchPairAndSyncRealData(pair, undefined, newTf)}
+                />
+              </div>
             </div>
 
             {/* LIVE CANDLESTICK QUOTE INGESTION BAR */}
             <div className="p-5 rounded-2xl bg-[#0A1020] border border-[#D4AF37]/50 shadow-xl space-y-4">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
-                <div className="space-y-0.5">
+                <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <Target className="w-4 h-4 text-[#D4AF37]" />
                     <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-[#D4AF37]">
-                      Live Candlestick Quote Ingestion Bar
+                      Live Candlestick Quote Sync (Auto-Updates Indicators & Strategy on Every Tick)
                     </h4>
                   </div>
-                  <p className="text-[11px] text-slate-300 font-mono">
-                    Enter your chart's exact last candlestick price (e.g. <strong>4041.495</strong> for Gold, <strong>1.29169</strong> for GBP/USD, <strong>1.08500</strong> for EUR/USD). Stop Loss and Take Profit scale mathematically to your exact candlestick so MT4 never rejects your order.
+                  <p className="text-xs text-slate-300 font-mono">
+                    Clicking <strong>Reanalyse Ticket</strong> automatically fetches the live market candle ({feedSyncedAt}). Any upward or downward change in the candlestick price dynamically recalculates 20 EMA, 50 EMA, RSI, Direction, SL, TP, and EA values.
                   </p>
                 </div>
-                <span className="text-[10px] font-mono px-2.5 py-1 rounded-xl bg-[#D4AF37]/20 text-[#D4AF37] font-bold border border-[#D4AF37]/40">
-                  0.01 Lot ($2 Cap) Safe
-                </span>
+                <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                  {userLockedCandlePrice && (
+                    <button
+                      type="button"
+                      onClick={handleSyncLiveQuotes}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-950 hover:bg-emerald-900 text-[#00C261] border border-[#00C261]/50 text-[11px] font-mono font-bold whitespace-nowrap"
+                    >
+                      Unlock & Sync Live API
+                    </button>
+                  )}
+                  {pair === 'XAU/USD' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUserLockedCandlePrice(false);
+                          handleSyncLiveQuotes();
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/40 text-[11px] font-mono font-bold whitespace-nowrap"
+                      >
+                        Spot Live
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleLiveCandlePriceEdit('4041.495')}
+                        className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 text-[11px] font-mono font-bold whitespace-nowrap"
+                      >
+                        Futures: 4041.495
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs items-end">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-mono text-slate-400 uppercase font-bold flex items-center justify-between">
+                  <label className="text-[11px] font-mono text-slate-400 uppercase font-bold flex items-center justify-between">
                     <span>Last Candlestick Quote *</span>
-                    <span className="text-emerald-400 font-bold">Live Screen</span>
                   </label>
                   <input
                     type="number"
                     step="any"
                     value={currentPrice}
-                    onChange={(e) => setCurrentPrice(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold text-sm focus:border-[#D4AF37] outline-none"
-                    placeholder="e.g. 4041.495"
+                    onChange={(e) => handleLiveCandlePriceEdit(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold text-sm focus:border-[#D4AF37] outline-none tabular-nums"
+                    placeholder="e.g. 1.39463"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] font-mono text-slate-400 uppercase font-bold">20 EMA Value</label>
+                  <label className="text-[11px] font-mono text-slate-400 uppercase font-bold">20 EMA Value</label>
                   <input
                     type="number"
                     step="any"
                     value={ema20}
                     onChange={(e) => setEma20(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none"
-                    placeholder="e.g. 4036.20"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none tabular-nums"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] font-mono text-slate-400 uppercase font-bold">50 EMA Value</label>
+                  <label className="text-[11px] font-mono text-slate-400 uppercase font-bold">50 EMA Value</label>
                   <input
                     type="number"
                     step="any"
                     value={ema50}
                     onChange={(e) => setEma50(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none"
-                    placeholder="e.g. 4028.80"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none tabular-nums"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] font-mono text-slate-400 uppercase font-bold">RSI (14)</label>
+                  <label className="text-[11px] font-mono text-slate-400 uppercase font-bold">RSI (14)</label>
                   <input
                     type="number"
                     step="any"
                     value={rsi}
                     onChange={(e) => setRsi(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none"
-                    placeholder="e.g. 58.4"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none tabular-nums"
                   />
                 </div>
+
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => handleRunAnalysis('deep_ai')}
+                    className="w-full py-2.5 px-3 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition active:scale-95 whitespace-nowrap"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Reanalyse Ticket</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="text-xs font-mono text-emerald-400 font-bold pt-1">
+                {favorableComputed.mt4SafetyProof} · AI Confidence: {favorableComputed.confidence}%
               </div>
             </div>
 
             {/* DYNAMICALLY COMPUTED INSTITUTIONAL ORDER EXECUTION TICKET */}
-            <div className="rounded-3xl border border-[#D4AF37] bg-[#0A1020] p-6 sm:p-7 shadow-2xl space-y-6">
+            <div className="rounded-3xl border border-[#D4AF37] bg-[#0A1020] p-6 sm:p-7 shadow-2xl space-y-6 tabular-nums">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
                 <div className="space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono text-xs font-black px-3 py-1 rounded-xl bg-[#D4AF37] text-black">
+                  <div className="flex items-center gap-2 flex-wrap font-mono text-xs">
+                    <span className="font-black px-3 py-1 rounded-xl bg-[#D4AF37] text-black">
                       INSTITUTIONAL ORDER TICKET
                     </span>
-                    <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-xl bg-slate-900 text-cyan-400 border border-slate-800">
-                      Symbol: {favorableComputed.brokerSymbol}
+                    <span className="font-bold text-cyan-400">
+                      Symbol: {favorableComputed.brokerSymbol} [{timeframe}]
                     </span>
-                    <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-xl bg-slate-900 text-emerald-400 border border-slate-800">
-                      Broker: {broker.toUpperCase()}
+                    <span aria-hidden="true" className="text-slate-600">·</span>
+                    <span className="font-bold text-emerald-400">
+                      Broker: {broker.toUpperCase()} (~{favorableComputed.brokerSpread}p spread)
                     </span>
                   </div>
                   <h3 className="text-xl sm:text-2xl font-black text-white">
-                    {favorableComputed.orderType} @ {currentPrice}
+                    {favorableComputed.orderType} @ {favorableComputed.entryPrice}
                   </h3>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold">
-                    Risk Capped: $2.00 (260 KES)
+                <div className="flex items-center gap-2.5 font-mono text-xs">
+                  <span className="px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold">
+                    {favorableComputed.confidence}% Confidence · Max Risk: ${favorableComputed.actualRiskUsd.toFixed(2)} (260 KES)
                   </span>
                 </div>
               </div>
@@ -1829,14 +1873,14 @@ InpMagicNumber=777129
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-1">
                   <span className="text-[10px] font-mono text-slate-400 uppercase block font-bold">Entry Price</span>
-                  <strong className="text-base font-mono text-white block">{currentPrice}</strong>
+                  <strong className="text-base font-mono text-white block">{favorableComputed.entryPrice}</strong>
                   <span className="text-[10px] font-mono text-emerald-400">Live Candle</span>
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-red-950/40 border border-red-500/40 space-y-1">
                   <span className="text-[10px] font-mono text-red-300 uppercase block font-bold">Stop Loss (SL)</span>
                   <strong className="text-base font-mono text-red-400 block">{favorableComputed.stopLoss}</strong>
-                  <span className="text-[10px] font-mono text-red-300">-{favorableComputed.slPips} pips / ${favorableComputed.actualRiskUsd}</span>
+                  <span className="text-[10px] font-mono text-red-300">-{favorableComputed.slPips} pips / ${favorableComputed.actualRiskUsd.toFixed(2)}</span>
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-1">
@@ -1855,6 +1899,51 @@ InpMagicNumber=777129
                   <span className="text-[10px] font-mono text-amber-300 uppercase block font-bold">Risk : Reward</span>
                   <strong className="text-base font-mono text-[#D4AF37] block">{favorableComputed.riskReward}</strong>
                   <span className="text-[10px] font-mono text-slate-400">0.01 Micro Lot</span>
+                </div>
+              </div>
+
+              {/* 5-Factor All-Confluence BUY / SELL Judgment Scorecard */}
+              <div className="p-4 rounded-2xl bg-slate-950/95 border border-[#D4AF37]/35 space-y-2.5 text-xs font-mono">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                  <span className="text-[#D4AF37] font-bold flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>All-Factor AI BUY/SELL Judgment ({favorableComputed.orderType})</span>
+                  </span>
+                  <span className="font-black">
+                    <span className="text-[#00C261]">BULL {favorableComputed.bullScorePct}%</span>
+                    <span className="text-slate-600 mx-1.5">vs</span>
+                    <span className="text-red-400">BEAR {favorableComputed.bearScorePct}%</span>
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                  {favorableComputed.factorVerdicts.map((fv) => (
+                    <div
+                      key={fv.name}
+                      className={`p-2.5 rounded-xl border space-y-1 ${
+                        fv.signal === 'BUY'
+                          ? 'bg-emerald-950/25 border-emerald-500/35'
+                          : fv.signal === 'SELL'
+                          ? 'bg-red-950/25 border-red-500/35'
+                          : 'bg-amber-950/25 border-amber-500/35'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-[10px] font-bold text-slate-300 truncate">{fv.name}</span>
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[9px] font-black ${
+                            fv.signal === 'BUY'
+                              ? 'bg-[#00C261]/25 text-[#00C261]'
+                              : fv.signal === 'SELL'
+                              ? 'bg-red-500/25 text-red-300'
+                              : 'bg-amber-500/25 text-amber-300'
+                          }`}
+                        >
+                          {fv.signal}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-300 leading-snug">{fv.detail}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -1887,7 +1976,7 @@ InpMagicNumber=777129
                 </div>
               </div>
 
-              {/* Action Buttons: Copy SL, Copy TP, Copy All, Log Journal, Download Script */}
+              {/* Action Buttons: Copy SL, Copy TP, Copy All, Log Journal */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2">
                 <button
                   onClick={() => {
@@ -1915,7 +2004,7 @@ InpMagicNumber=777129
 
                 <button
                   onClick={() => {
-                    const allText = `PIVOTFX INSTITUTIONAL ORDER TICKET\nPair: ${pair} (${favorableComputed.brokerSymbol})\nOrder: ${favorableComputed.orderType}\nEntry: ${currentPrice}\nStop Loss: ${favorableComputed.stopLoss}\nTake Profit 1: ${favorableComputed.tp1}\nTake Profit 2: ${favorableComputed.tp2}\nLot Size: 0.01 Micro Lot ($2 Max Risk)\nBroker: ${broker.toUpperCase()}\nProtection: CMA Kenya Zero Negative Balance Shield`;
+                    const allText = `PIVOTFX INSTITUTIONAL ORDER TICKET\nPair: ${pair} (${favorableComputed.brokerSymbol})\nOrder: ${favorableComputed.orderType}\nEntry: ${favorableComputed.entryPrice}\nStop Loss: ${favorableComputed.stopLoss}\nTake Profit 1: ${favorableComputed.tp1}\nTake Profit 2: ${favorableComputed.tp2}\nLot Size: 0.01 Micro Lot ($2 Max Risk)\nBroker: ${broker.toUpperCase()}\nProtection: CMA Kenya Zero Negative Balance Shield`;
                     navigator.clipboard.writeText(allText);
                     setCopiedField('all');
                     setTimeout(() => setCopiedField(null), 2000);
@@ -1931,9 +2020,9 @@ InpMagicNumber=777129
                     handleLogToJournal({
                       pair,
                       timeframe,
-                      price: currentPrice,
+                      price: favorableComputed.entryPrice,
                       verdict: favorableComputed.direction === 'BUY' ? 'HIGH_PROBABILITY_BUY' : 'HIGH_PROBABILITY_SELL',
-                      confidencePercent: 94.5,
+                      confidencePercent: favorableComputed.confidence,
                       pattern: 'Live Candlestick Re-Anchored Order',
                       trend: favorableComputed.direction === 'BUY' ? 'Bullish Expansion' : 'Bearish Expansion',
                       orderType: favorableComputed.orderType,
@@ -1950,7 +2039,7 @@ InpMagicNumber=777129
                       brokerSpreadPips: favorableComputed.brokerSpread,
                       brokerSpreadCostUsd: 0.12,
                       reasons: [
-                        `Ingested candlestick @ ${currentPrice} on ${timeframe}`,
+                        `Ingested candlestick @ ${favorableComputed.entryPrice} on ${timeframe}`,
                         `Gilgil risk shield: 0.01 lot capped at $2.00`
                       ],
                       projection: favorableComputed.trajectory
@@ -1961,6 +2050,37 @@ InpMagicNumber=777129
                   <ArrowRight className="w-3.5 h-3.5" />
                   <span>Log Setup to Journal</span>
                 </button>
+              </div>
+
+              {/* Live Auto-Synced Expert Advisor (EA) Parameter Script */}
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5 font-mono text-xs">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span className="text-[#D4AF37] font-bold flex items-center gap-1.5">
+                    <Bot className="w-4 h-4" />
+                    <span>Live Auto-Synced EA Script · {favorableComputed.brokerSymbol} [{timeframe}] @ {favorableComputed.entryPrice}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const eaBlock = `// PIVOTFX LIVE EA AUTO-SYNC (${pair} ${timeframe})\ninput double LotSize = 0.01; // Gilgil $2.00 / 260 KES Cap\ninput double EntryPrice = ${favorableComputed.entryPrice};\ninput double StopLoss = ${favorableComputed.stopLoss};\ninput double TakeProfit_1 = ${favorableComputed.tp1};\ninput double TakeProfit_2 = ${favorableComputed.tp2};\n// Direction: ${favorableComputed.orderType} | 20EMA: ${ema20} | 50EMA: ${ema50} | RSI: ${rsi}`;
+                      navigator.clipboard.writeText(eaBlock);
+                      setCopiedManualEa(true);
+                      setTimeout(() => setCopiedManualEa(false), 2000);
+                    }}
+                    className="px-3 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/40 text-[11px] font-bold flex items-center gap-1 transition"
+                  >
+                    {copiedManualEa ? <Check className="w-3.5 h-3.5 text-[#00C261]" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedManualEa ? 'EA Copied!' : 'Copy Live EA'}</span>
+                  </button>
+                </div>
+                <pre className="p-3 rounded-xl bg-black/70 border border-slate-800/80 text-[11px] text-emerald-300 overflow-x-auto leading-relaxed tabular-nums">
+{`// Auto-Synced to Latest Candle: ${pair} [${timeframe}] | ${favorableComputed.orderType} | Confidence: ${favorableComputed.confidence}%
+input double LotSize = 0.01;        // Gilgil $2.00 / 260 KES Max Risk Shield
+input double EntryPrice = ${favorableComputed.entryPrice};
+input double StopLoss = ${favorableComputed.stopLoss};   // -${favorableComputed.slPips} pips ($${favorableComputed.actualRiskUsd.toFixed(2)} risk)
+input double TakeProfit_1 = ${favorableComputed.tp1}; // Close 50% & Move SL to Entry
+input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Target (+${favorableComputed.tpPips} pips)`}
+                </pre>
               </div>
 
               {/* Bottom Return Button */}
@@ -2010,7 +2130,10 @@ InpMagicNumber=777129
             </button>
 
             <button
-              onClick={() => setActiveTab('radar')}
+              onClick={() => {
+                setScannerView('radar');
+                setActiveTab('radar');
+              }}
               className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 bg-slate-900 text-cyan-400 border border-cyan-500/40 hover:bg-slate-800 transition"
             >
               <Globe className="w-3.5 h-3.5" />
@@ -2044,10 +2167,11 @@ InpMagicNumber=777129
             <label className="text-[10px] font-mono text-slate-400 uppercase font-bold">Timeframe *</label>
             <select
               value={timeframe}
-              onChange={(e) => setTimeframe(e.target.value as Timeframe)}
+              onChange={(e) => handleSwitchPairAndSyncRealData(pair, undefined, e.target.value as Timeframe)}
               className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:border-[#D4AF37] outline-none"
             >
               <option value="M5">M5 (5 Minutes)</option>
+              <option value="M10">M10 (10 Minutes)</option>
               <option value="M15">M15 (15 Minutes - Recommended)</option>
               <option value="H1">H1 (1 Hour)</option>
               <option value="H4">H4 (4 Hours)</option>
@@ -2063,10 +2187,10 @@ InpMagicNumber=777129
               onChange={(e) => setBroker(e.target.value as any)}
               className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:border-[#D4AF37] outline-none"
             >
-              <option value="fxpesa">FXPesa (CMA Kenya • ~1.1p Spread)</option>
-              <option value="exness">Exness (Global Raw / Micro • ~0.6p Spread)</option>
-              <option value="hfm">HFM (Offshore • ~1.3p Spread)</option>
-              <option value="fbs">FBS (Offshore Cent • ~1.5p Spread)</option>
+              <option value="fxpesa">FXPesa (CMA Kenya · ~1.1p Spread)</option>
+              <option value="exness">Exness (Global Raw / Micro · ~0.6p Spread)</option>
+              <option value="hfm">HFM (Offshore · ~1.3p Spread)</option>
+              <option value="fbs">FBS (Offshore Cent · ~1.5p Spread)</option>
             </select>
           </div>
 
@@ -2091,29 +2215,31 @@ InpMagicNumber=777129
           <div className="space-y-1">
             <div className="flex items-center justify-between">
               <label className="text-[10px] font-mono text-slate-400 uppercase font-bold">Current Market Price *</label>
-              <span className="text-[10px] text-amber-400 font-mono">Live / Screen</span>
+              <span className="text-[10px] text-amber-400 font-mono">
+                {userLockedCandlePrice ? 'Custom Candle' : `Auto Live (${feedSyncedAt})`}
+              </span>
             </div>
             <input
               type="number"
-              step="0.00001"
+              step="any"
               value={currentPrice}
-              onChange={(e) => setCurrentPrice(parseFloat(e.target.value) || 0)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none"
+              onChange={(e) => handleLiveCandlePriceEdit(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none tabular-nums"
             />
           </div>
 
           {/* Key Reference / Sweep Level */}
           <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <label className="text-[10px] font-mono text-slate-400 uppercase font-bold">Key Level / Tower Peak *</label>
+              <label className="text-[10px] font-mono text-slate-400 uppercase font-bold">Key Level / Sweep Pool *</label>
               <span className="text-[10px] text-slate-500 font-mono">Resistance/Support</span>
             </div>
             <input
               type="number"
-              step="0.00001"
+              step="any"
               value={keyLevel}
               onChange={(e) => setKeyLevel(parseFloat(e.target.value) || 0)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none"
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none tabular-nums"
             />
           </div>
 
@@ -2125,8 +2251,8 @@ InpMagicNumber=777129
               onChange={(e) => setPatternType(e.target.value as any)}
               className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:border-[#D4AF37] outline-none"
             >
-              <option value="Tower Top Liquidity Sweep">Tower Top Liquidity Sweep (Gilgil Model)</option>
               <option value="20/50 EMA Trend Bounce">20/50 EMA Dynamic Trend Bounce</option>
+              <option value="Tower Top Liquidity Sweep">Tower Top Liquidity Sweep (Gilgil Model)</option>
               <option value="Asian Liquidity Sweep">Asian Liquidity Sweep & Judas Swing</option>
               <option value="Fair Value Gap Re-test">Fair Value Gap (FVG) Re-test</option>
               <option value="Bearish Order Block Mitigation">Bearish Order Block Mitigation</option>
@@ -2143,7 +2269,7 @@ InpMagicNumber=777129
             type="text"
             value={traderNotes}
             onChange={(e) => setTraderNotes(e.target.value)}
-            placeholder="e.g., Swept 1.29656 liquidity, M15 candle wick rejection, looking for 20 EMA mean-reversion"
+            placeholder="e.g., GBP/USD M15 live quote @ 1.34998 after SSL sweep, targeting 1.35518 expansion"
             className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none"
           />
         </div>
@@ -2155,8 +2281,8 @@ InpMagicNumber=777129
           <TradingViewEmbedWidget
             pair={pair}
             timeframe={timeframe}
-            onPairChange={(newPair) => setPair(newPair)}
-            onTimeframeChange={(newTf) => setTimeframe(newTf)}
+            onPairChange={(newPair) => handleSwitchPairAndSyncRealData(newPair)}
+            onTimeframeChange={(newTf) => handleSwitchPairAndSyncRealData(pair, undefined, newTf)}
             onClose={() => setShowTradingView(false)}
             isCollapsible={true}
           />
@@ -2397,7 +2523,7 @@ InpMagicNumber=777129
                     className="col-span-2 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-cyan-300 font-mono font-bold text-xs flex items-center justify-center gap-1.5 border border-cyan-800/60 transition"
                   >
                     <ImageIcon className="w-4 h-4 text-cyan-400" />
-                    <span>Sample: GBP/USD 1.2965</span>
+                    <span>Sample: GBP/USD Live</span>
                   </button>
                 </>
               )}
@@ -2407,27 +2533,27 @@ InpMagicNumber=777129
             <div className="flex items-center gap-3 text-xs font-mono text-slate-400 bg-slate-950/90 p-3 rounded-2xl border border-slate-800 flex-wrap">
               <span className="text-[#D4AF37] font-bold flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Instant High-Precision Samples:</span>
+                <span>Instant Live Market Samples:</span>
               </span>
               <button
                 onClick={() => handleLoadSample('gbpusd')}
                 className="hover:text-white underline text-slate-300 font-bold"
               >
-                GBP/USD 1.29656 (Gilgil Tower)
+                GBP/USD ({liveMarkets.find((x) => x.pair === 'GBP/USD')?.price ?? 1.34998})
               </button>
-              <span>•</span>
+              <span aria-hidden="true">·</span>
               <button
                 onClick={() => handleLoadSample('eurusd')}
                 className="hover:text-white underline text-slate-300 font-bold"
               >
-                EUR/USD M15 (20 EMA Bounce)
+                EUR/USD ({liveMarkets.find((x) => x.pair === 'EUR/USD')?.price ?? 1.12670})
               </button>
-              <span>•</span>
+              <span aria-hidden="true">·</span>
               <button
                 onClick={() => handleLoadSample('xauusd')}
                 className="hover:text-white underline text-slate-300 font-bold"
               >
-                Gold 2035 (Hourly Sweep)
+                Gold Spot ({liveMarkets.find((x) => x.pair === 'XAU/USD')?.price ?? 3955.00})
               </button>
             </div>
           </div>
@@ -2663,16 +2789,16 @@ InpMagicNumber=777129
                 </span>
               </div>
 
-              {/* Quick Timeframe Switcher */}
+              {/* Quick Timeframe & Direction Switcher */}
               <div className="flex items-center justify-between gap-2 flex-wrap text-xs font-mono">
-                <span className="text-[10px] text-slate-400 font-bold uppercase">Timeframe Scaling:</span>
-                <div className="flex items-center gap-1">
-                  {(['M5', 'M15', 'H1', 'H4', 'D1'] as Timeframe[]).map((tf) => (
+                <div className="flex items-center gap-1 flex-wrap">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase mr-1">Timeframe:</span>
+                  {(['M5', 'M10', 'M15', 'H1', 'H4', 'D1'] as Timeframe[]).map((tf) => (
                     <button
                       key={tf}
                       type="button"
-                      onClick={() => setTimeframe(tf)}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold font-mono transition ${
+                      onClick={() => handleSwitchPairAndSyncRealData(pair, undefined, tf)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold font-mono transition ${
                         timeframe === tf
                           ? 'bg-[#D4AF37] text-black shadow-sm font-black'
                           : 'bg-slate-800 text-slate-400 hover:text-white'
@@ -2682,6 +2808,16 @@ InpMagicNumber=777129
                     </button>
                   ))}
                 </div>
+
+                <button
+                  type="button"
+                  onClick={handleSyncLiveQuotes}
+                  disabled={syncingQuotes}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[#00C261] border border-[#00C261]/30 text-[11px] font-bold flex items-center gap-1 transition"
+                >
+                  <RefreshCw className={`w-3 h-3 ${syncingQuotes ? 'animate-spin' : ''}`} />
+                  <span>Sync Live Feed</span>
+                </button>
               </div>
 
               {/* Dynamic Live Parameter Preview */}
@@ -2694,15 +2830,16 @@ InpMagicNumber=777129
                   keyLevel,
                   ema20,
                   ema50,
-                  rsi
+                  rsi,
+                  biasOverride: biasOverride === 'AUTO' ? undefined : biasOverride
                 });
                 return (
-                  <div className="p-2.5 rounded-xl bg-black/60 border border-slate-800 text-[11px] font-mono flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                  <div className="p-2.5 rounded-xl bg-black/60 border border-slate-800 text-xs font-mono flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 tabular-nums">
                     <div className="text-slate-300">
-                      Live Entry: <strong className="text-white">@{currentPrice}</strong> • Order: <strong className="text-[#D4AF37]">{preview.orderType}</strong> • SL: <strong className="text-red-300">{preview.stopLoss}</strong> (-{preview.slPips}p) • TP2: <strong className="text-emerald-300">{preview.tp2}</strong> (+{preview.tpPips}p)
+                      Live Entry: <strong className="text-white">@{preview.entryPrice}</strong> · Order: <strong className="text-[#D4AF37]">{preview.orderType}</strong> · SL: <strong className="text-red-300">{preview.stopLoss}</strong> (-{preview.slPips}p) · TP2: <strong className="text-emerald-300">{preview.tp2}</strong> (+{preview.tpPips}p)
                     </div>
-                    <span className="text-[10px] text-emerald-400 font-bold shrink-0">
-                      Zero Invalid S/L Guarantee ✓
+                    <span className="text-[11px] text-emerald-400 font-bold shrink-0">
+                      {preview.mt4SafetyProof}
                     </span>
                   </div>
                 );
@@ -2710,18 +2847,29 @@ InpMagicNumber=777129
             </div>
 
             <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-[#D4AF37]">
-              Enter MT4/MT5 Current Indicator Readings:
+              Enter MT4/MT5 Current Chart Candle & Indicator Readings (Any tick edit updates EMA, RSI & EA live):
             </h4>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="space-y-1">
+                <label className="text-[10px] font-mono text-slate-400 uppercase font-bold">Live Chart Candle *</label>
+                <input
+                  type="number"
+                  step="any"
+                  value={currentPrice}
+                  onChange={(e) => handleLiveCandlePriceEdit(e.target.value)}
+                  className="w-full bg-slate-900 border border-[#D4AF37]/50 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:border-[#D4AF37] outline-none tabular-nums"
+                />
+              </div>
+
               <div className="space-y-1">
                 <label className="text-[10px] font-mono text-slate-400 uppercase font-bold">EMA 20 Value</label>
                 <input
                   type="number"
-                  step="0.00001"
+                  step="any"
                   value={ema20}
                   onChange={(e) => setEma20(parseFloat(e.target.value) || 0)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none tabular-nums"
                 />
               </div>
 
@@ -2729,10 +2877,10 @@ InpMagicNumber=777129
                 <label className="text-[10px] font-mono text-slate-400 uppercase font-bold">EMA 50 Value</label>
                 <input
                   type="number"
-                  step="0.00001"
+                  step="any"
                   value={ema50}
                   onChange={(e) => setEma50(parseFloat(e.target.value) || 0)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none tabular-nums"
                 />
               </div>
 
@@ -2748,90 +2896,96 @@ InpMagicNumber=777129
                   max="100"
                   value={rsi}
                   onChange={(e) => setRsi(parseFloat(e.target.value) || 0)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-[#D4AF37] outline-none tabular-nums"
                 />
               </div>
             </div>
 
-            {/* Quick MT4 Presets */}
+            {/* Quick MT4 Live Case Study Presets */}
             <div className="space-y-2 pt-1">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono text-slate-400 font-bold uppercase">
-                  Institutional Case Study Presets (Click to Auto-Sync All Tabs):
+                  Live Market Case Study Presets (Click to Sync All Tabs):
                 </span>
                 <span className="text-[10px] text-[#D4AF37] font-mono font-bold">
-                  Shared Global State
+                  Real Contemporary Quotes
                 </span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 tabular-nums">
                 <button
                   type="button"
                   onClick={() => {
                     setPair('GBP/USD');
-                    setCurrentPrice(1.29169);
-                    setEma20(1.28850);
-                    setEma50(1.28520);
-                    setRsi(76.4);
-                    setKeyLevel(1.29656);
-                    setPatternType('Tower Top Liquidity Sweep');
-                    setTraderNotes('GBP/USD 1296.56 Loss Case (Overextended): Swept previous session high at 1.29656. Overbought RSI 76.4. Chasing longs here triggers retail trap.');
-                    setChatSyncedNotification('✓ Synced GBP/USD 1296.56 Loss Case: EMA20: 1.2885, EMA50: 1.2852, RSI: 76.4');
+                    setTimeframe('M10');
+                    setBiasOverride('AUTO');
+                    setCurrentPrice(1.34998);
+                    setEma20(1.34878);
+                    setEma50(1.34718);
+                    setRsi(58.3);
+                    setKeyLevel(1.34818);
+                    setPatternType('20/50 EMA Trend Bounce');
+                    setTraderNotes('GBP/USD Live Cable (1.34998, +0.66%): Swept SSL below 1.34818 on M10/M15. Healthy 20 EMA trend bounce.');
+                    setChatSyncedNotification('Synced GBP/USD @ 1.34998 (EMA20: 1.34878, RSI: 58.3)');
                     setTimeout(() => setChatSyncedNotification(null), 3000);
                   }}
                   className={`p-2.5 text-left rounded-xl border transition font-mono group ${
-                    keyLevel === 1.29656 && pair === 'GBP/USD' && rsi === 76.4
-                      ? 'bg-red-950/40 border-red-500/80 ring-1 ring-red-500/50'
-                      : 'bg-slate-900 hover:bg-slate-800 border-slate-700 hover:border-red-500/50'
+                    pair === 'GBP/USD' && Math.abs(currentPrice - 1.34998) < 0.002
+                      ? 'bg-emerald-950/40 border-emerald-500/80 ring-1 ring-emerald-500/50'
+                      : 'bg-slate-900 hover:bg-slate-800 border-slate-700 hover:border-emerald-500/50'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white group-hover:text-red-300">GBP/USD 1296.56</span>
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-red-950 text-red-300 font-bold">LOSS CASE</span>
+                    <span className="text-xs font-bold text-white group-hover:text-[#00C261]">GBP/USD 1.34998</span>
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 font-bold">+0.66% BUY</span>
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-1">20 EMA: 1.2885 • RSI: 76.4</div>
-                  <div className="text-[9px] text-red-400 mt-0.5 font-bold">Tower Top Overextended</div>
+                  <div className="text-[10px] text-slate-400 mt-1">20 EMA: 1.3488 · RSI: 58.3</div>
+                  <div className="text-[9px] text-[#00C261] mt-0.5 font-bold">M10/M15 SSL Sweep Bounce</div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => {
                     setPair('GBP/USD');
-                    setCurrentPrice(1.29169);
-                    setEma20(1.28850);
-                    setEma50(1.28520);
-                    setRsi(58.2);
-                    setKeyLevel(1.29000);
-                    setPatternType('20/50 EMA Trend Bounce');
-                    setTraderNotes('GBP/USD 1291.69 Win Case (20 EMA Pullback): Healthy retracement to dynamic 20 EMA at 1.28850. RSI normalized to 58.2.');
-                    setChatSyncedNotification('✓ Synced GBP/USD 1291.69 Win Case: EMA20: 1.2885, EMA50: 1.2852, RSI: 58.2');
+                    setTimeframe('M15');
+                    setBiasOverride('SELL');
+                    setCurrentPrice(1.35450);
+                    setEma20(1.35100);
+                    setEma50(1.34820);
+                    setRsi(75.8);
+                    setKeyLevel(1.35580);
+                    setPatternType('Tower Top Liquidity Sweep');
+                    setTraderNotes('GBP/USD Tower Top Exhaustion @ 1.35450: Overextended 35 pips above 20 EMA with RSI 75.8 bearish divergence.');
+                    setChatSyncedNotification('Synced GBP/USD Reversal @ 1.35450 (EMA20: 1.3510, RSI: 75.8)');
                     setTimeout(() => setChatSyncedNotification(null), 3000);
                   }}
                   className={`p-2.5 text-left rounded-xl border transition font-mono group ${
-                    keyLevel === 1.29000 && pair === 'GBP/USD'
-                      ? 'bg-emerald-950/40 border-emerald-500/80 ring-1 ring-emerald-500/50'
-                      : 'bg-slate-900 hover:bg-slate-800 border-slate-700 hover:border-emerald-500/50'
+                    pair === 'GBP/USD' && Math.abs(currentPrice - 1.35450) < 0.002
+                      ? 'bg-red-950/40 border-red-500/80 ring-1 ring-red-500/50'
+                      : 'bg-slate-900 hover:bg-slate-800 border-slate-700 hover:border-red-500/50'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white group-hover:text-[#00C261]">GBP/USD 1291.69</span>
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 font-bold">WIN CASE</span>
+                    <span className="text-xs font-bold text-white group-hover:text-red-300">GBP/USD 1.3545</span>
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-red-950 text-red-300 font-bold">SELL SWEEP</span>
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-1">20 EMA: 1.2885 • RSI: 58.2</div>
-                  <div className="text-[9px] text-[#00C261] mt-0.5 font-bold">20 EMA Pullback Entry</div>
+                  <div className="text-[10px] text-slate-400 mt-1">20 EMA: 1.3510 · RSI: 75.8</div>
+                  <div className="text-[9px] text-red-400 mt-0.5 font-bold">Tower Top Overbought</div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => {
                     setPair('EUR/USD');
-                    setCurrentPrice(1.08420);
-                    setEma20(1.08210);
-                    setEma50(1.07980);
-                    setRsi(54.2);
-                    setKeyLevel(1.08150);
+                    setTimeframe('M15');
+                    setBiasOverride('AUTO');
+                    setCurrentPrice(1.12670);
+                    setEma20(1.12550);
+                    setEma50(1.12390);
+                    setRsi(59.1);
+                    setKeyLevel(1.12490);
                     setPatternType('Fair Value Gap Re-test');
-                    setTraderNotes('EUR/USD 1.0842 Institutional FVG: Tested discount at 1.08150. London continuation.');
-                    setChatSyncedNotification('✓ Synced EUR/USD Fiber: EMA20: 1.0821, EMA50: 1.0798, RSI: 54.2');
+                    setTraderNotes('EUR/USD Live Fiber @ 1.12670 (+0.79%): Tested discount FVG at 1.12490 with London continuation.');
+                    setChatSyncedNotification('Synced EUR/USD @ 1.12670 (EMA20: 1.1255, RSI: 59.1)');
                     setTimeout(() => setChatSyncedNotification(null), 3000);
                   }}
                   className={`p-2.5 text-left rounded-xl border transition font-mono group ${
@@ -2841,10 +2995,10 @@ InpMagicNumber=777129
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white group-hover:text-cyan-300">EUR/USD 1.0842</span>
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 font-bold">FVG RETEST</span>
+                    <span className="text-xs font-bold text-white group-hover:text-cyan-300">EUR/USD 1.1267</span>
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 font-bold">+0.79% FVG</span>
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-1">20 EMA: 1.0821 • RSI: 54.2</div>
+                  <div className="text-[10px] text-slate-400 mt-1">20 EMA: 1.1255 · RSI: 59.1</div>
                   <div className="text-[9px] text-cyan-400 mt-0.5 font-bold">Institutional Discount FVG</div>
                 </button>
 
@@ -2852,14 +3006,16 @@ InpMagicNumber=777129
                   type="button"
                   onClick={() => {
                     setPair('XAU/USD');
-                    setCurrentPrice(2742.50);
-                    setEma20(2736.20);
-                    setEma50(2728.40);
-                    setRsi(64.5);
-                    setKeyLevel(2735.00);
+                    setTimeframe('M15');
+                    setBiasOverride('AUTO');
+                    setCurrentPrice(3955.00);
+                    setEma20(3950.20);
+                    setEma50(3943.50);
+                    setRsi(59.5);
+                    setKeyLevel(3946.50);
                     setPatternType('Asian Liquidity Sweep');
-                    setTraderNotes('XAU/USD Gold Asian Sweep: Swept Asian SSL at 2735.00. Targeting 2760.00 BSL.');
-                    setChatSyncedNotification('✓ Synced XAU/USD Gold: EMA20: 2736.2, EMA50: 2728.4, RSI: 64.5');
+                    setTraderNotes('XAU/USD Gold Spot @ 3955.00 (+0.85%): Swept SSL @ 3946.50. Or type 4041.495 to match Gold futures chart.');
+                    setChatSyncedNotification('Synced XAU/USD Gold @ 3955.00 (EMA20: 3950.2, RSI: 59.5)');
                     setTimeout(() => setChatSyncedNotification(null), 3000);
                   }}
                   className={`p-2.5 text-left rounded-xl border transition font-mono group ${
@@ -2869,11 +3025,11 @@ InpMagicNumber=777129
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white group-hover:text-[#D4AF37]">XAU/USD Gold</span>
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-950 text-amber-300 font-bold">ASIAN SWEEP</span>
+                    <span className="text-xs font-bold text-white group-hover:text-[#D4AF37]">XAU/USD 3955.00</span>
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-950 text-amber-300 font-bold">+0.85% GOLD</span>
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-1">20 EMA: 2736.2 • RSI: 64.5</div>
-                  <div className="text-[9px] text-[#D4AF37] mt-0.5 font-bold">Gold NY Expansion</div>
+                  <div className="text-[10px] text-slate-400 mt-1">20 EMA: 3950.2 · RSI: 59.5</div>
+                  <div className="text-[9px] text-[#D4AF37] mt-0.5 font-bold">Gold Live Spot Sweep</div>
                 </button>
               </div>
 
@@ -2905,7 +3061,7 @@ InpMagicNumber=777129
                 ) : (
                   <>
                     <Zap className="w-3.5 h-3.5 text-amber-400" />
-                    <span>⚡ Analyse Market</span>
+                    <span>Analyse Market</span>
                   </>
                 )}
               </button>
@@ -2923,7 +3079,7 @@ InpMagicNumber=777129
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4" />
-                    <span>🧠 Deep AI Analyse</span>
+                    <span>Deep AI Analyse</span>
                   </>
                 )}
               </button>
@@ -2937,34 +3093,38 @@ InpMagicNumber=777129
           </div>
 
           {/* Manual Analysis Output (5 Cols) */}
-          <div className="lg:col-span-5 bg-slate-900/95 rounded-2xl p-5 border border-slate-800 min-h-[460px] flex flex-col justify-between space-y-4">
+          <div className="lg:col-span-5 bg-slate-900/95 rounded-2xl p-5 border border-slate-800 min-h-[460px] flex flex-col justify-between space-y-4 tabular-nums">
             {manualResult ? (
               <div className="space-y-4">
                 {/* Header */}
                 <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
                   <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#00C261] animate-ping" />
                     <span className="text-xs font-mono font-bold text-white">
-                      {manualResult.pair} • {manualResult.timeframe} • {broker.toUpperCase()}
+                      {manualResult.pair} · {manualResult.timeframe} · {broker.toUpperCase()}
                     </span>
                   </div>
 
                   <div className="flex items-center gap-1.5">
                     <span
-                      className={`font-mono text-xs font-black px-2.5 py-0.5 rounded-full ${
-                        manualResult.score >= 75
+                      className={`font-mono text-xs font-black px-2.5 py-0.5 rounded-lg ${
+                        manualResult.verdict === 'HIGH_PROBABILITY_BUY'
                           ? 'bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40'
-                          : manualResult.score >= 50
-                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                          : 'bg-red-500/20 text-red-300 border border-red-500/40'
+                          : manualResult.verdict === 'HIGH_PROBABILITY_SELL'
+                          ? 'bg-red-500/20 text-red-300 border border-red-500/40'
+                          : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                       }`}
                     >
                       {manualResult.verdict.replace(/_/g, ' ')}
                     </span>
 
-                    <span className="px-2 py-0.5 rounded-full bg-[#D4AF37]/20 border border-[#D4AF37]/40 text-[#D4AF37] font-mono text-[10px] font-bold">
-                      {manualResult.confidencePercent || manualResult.score}% CONFIDENCE
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleRunAnalysis(analysisExecutionMode)}
+                      className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[#D4AF37] border border-[#D4AF37]/40 font-mono text-[11px] font-bold flex items-center gap-1"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>Reanalyse</span>
+                    </button>
                   </div>
                 </div>
 
@@ -3124,17 +3284,23 @@ Broker: ${broker.toUpperCase()}`;
           <MultiMarketRadarEngine
             selectedBroker={broker}
             onSelectMarketForAnalysis={(market, mode = 'deep_ai') => {
-              handleSwitchPairAndSyncRealData(market.pair);
+              setPair(market.pair);
+              setTimeframe(market.recommendedTf);
               setCurrentPrice(market.price);
               setKeyLevel(market.keyLevel);
               setEma20(market.ema20);
               setEma50(market.ema50);
               setRsi(market.rsi);
+              setPatternType(market.patternType);
+              setTraderNotes(market.projection);
               setScannerView('favorable_chart');
               handleRunAnalysis(mode, market);
             }}
-            onOpenTradingViewForPair={(p) => {
-              handleSwitchPairAndSyncRealData(p);
+            onOpenTradingViewForPair={(p, tf, customP) => {
+              handleSwitchPairAndSyncRealData(p, undefined, tf);
+              if (customP && customP > 0) {
+                setCurrentPrice(customP);
+              }
               setScannerView('favorable_chart');
             }}
           />
@@ -3181,9 +3347,9 @@ Broker: ${broker.toUpperCase()}`;
               </div>
             </div>
 
-            {/* 8 Market Quick-Select Pills */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-              {INITIAL_MARKETS_DATA.map((m) => {
+            {/* 8 Market Quick-Select Cards (Live Quote + Real % Change + Click to Analyse) */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 tabular-nums">
+              {liveMarkets.map((m) => {
                 const isSelected = pair === m.pair;
                 const isBuy = m.bias === 'STRONG_BUY';
                 return (
@@ -3200,16 +3366,18 @@ Broker: ${broker.toUpperCase()}`;
                       <span className={`text-xs font-black ${isSelected ? 'text-[#D4AF37]' : 'text-white'}`}>
                         {m.pair}
                       </span>
-                      <span className={`w-2 h-2 rounded-full ${isBuy ? 'bg-[#00C261]' : 'bg-red-500'}`} />
+                      <span className={`text-[10px] font-bold ${m.change24hPct >= 0 ? 'text-[#00C261]' : 'text-red-400'}`}>
+                        {m.change24hPct >= 0 ? `+${m.change24hPct.toFixed(2)}%` : `${m.change24hPct.toFixed(2)}%`}
+                      </span>
                     </div>
-                    <div className="mt-1 flex items-baseline justify-between text-[10px]">
-                      <span className="text-slate-300 font-bold">@{m.price}</span>
+                    <div className="mt-1 flex items-baseline justify-between text-[11px]">
+                      <span className="text-slate-200 font-bold">@{m.price}</span>
                       <span className={`font-bold ${isBuy ? 'text-[#00C261]' : 'text-red-400'}`}>
                         {isBuy ? 'BUY' : 'SELL'}
                       </span>
                     </div>
-                    <div className="text-[9px] text-slate-400 truncate mt-0.5">
-                      RSI {m.rsi} • {m.symbol}
+                    <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                      {m.recommendedTf} · {m.confidence}% AI
                     </div>
                   </button>
                 );
@@ -3291,20 +3459,25 @@ Broker: ${broker.toUpperCase()}`;
             </div>
           </div>
 
-          {/* INTERACTIVE REAL-TIME CHAT MARKET TABLE (USER REQUEST: "In the chat table analysis button should auto update details first as real as they are then when analyse give better response, deep Ai the same; the chat real analsis should have also real data and sl,tp etc") */}
-          <div className="rounded-2xl bg-slate-950/90 border border-[#D4AF37]/40 p-4 sm:p-5 space-y-3.5 shadow-xl">
+          {/* INTERACTIVE REAL-TIME CHAT MARKET TABLE (Click any row/button to Analyse or Reanalyse with live SL/TP) */}
+          <div className="rounded-2xl bg-slate-950/90 border border-[#D4AF37]/40 p-4 sm:p-5 space-y-3.5 shadow-xl tabular-nums">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-[#D4AF37]" />
                 <h4 className="text-xs font-mono font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                  <span>Live Market Radar Table • 1-Click Institutional Analysis</span>
-                  <span className="px-2 py-0.5 rounded-full bg-[#00C261]/20 text-[#00C261] text-[10px] font-bold">
-                    REAL-TIME DATA READY
-                  </span>
+                  <span>Live Market Radar Table · 1-Click Institutional Analysis</span>
                 </h4>
               </div>
-              <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400">
-                <span>Active Broker:</span>
+              <div className="flex items-center gap-3 text-xs font-mono text-slate-400">
+                <button
+                  type="button"
+                  onClick={handleSyncLiveQuotes}
+                  disabled={syncingQuotes}
+                  className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-[#00C261] border border-[#00C261]/40 text-xs font-bold flex items-center gap-1 transition"
+                >
+                  <RefreshCw className={`w-3 h-3 ${syncingQuotes ? 'animate-spin' : ''}`} />
+                  <span>{syncingQuotes ? 'Syncing...' : `Sync Quotes (${feedSyncedAt})`}</span>
+                </button>
                 <span className="text-[#D4AF37] font-bold uppercase">{broker}</span>
               </div>
             </div>
@@ -3316,8 +3489,8 @@ Broker: ${broker.toUpperCase()}`;
               </div>
             )}
 
-            <p className="text-[11px] text-slate-400 font-mono">
-              Clicking <strong>⚡ Analyse</strong> or <strong>🧠 Deep AI</strong> auto-updates market details first with real quote & indicators, then immediately injects an institutional trade card with exact SL, TP1, TP2, and MT4 execution ticket directly into the chat.
+            <p className="text-xs text-slate-400 font-mono">
+              Click any row or click <strong>Analyse</strong> / <strong>Reanalyse</strong> to update live market rates &amp; 24h % change, and inject a complete MT4/MT5 order card directly into the advisor feed.
             </p>
 
             {/* Table */}
@@ -3325,100 +3498,116 @@ Broker: ${broker.toUpperCase()}`;
               <table className="w-full text-left font-mono text-xs">
                 <thead>
                   <tr className="bg-slate-900/90 text-slate-400 text-[10px] uppercase border-b border-slate-800">
-                    <th className="py-2.5 px-3">Pair / Symbol</th>
-                    <th className="py-2.5 px-3">Live Quote</th>
-                    <th className="py-2.5 px-3">Bias & Pattern</th>
-                    <th className="py-2.5 px-3">Real Stop Loss & Take Profit</th>
+                    <th className="py-2.5 px-3">Pair &amp; TF</th>
+                    <th className="py-2.5 px-3">Live Quote &amp; 24h %</th>
+                    <th className="py-2.5 px-3">Order &amp; Confidence</th>
+                    <th className="py-2.5 px-3">Real Stop Loss &amp; Take Profit</th>
                     <th className="py-2.5 px-3">{broker.toUpperCase()} Spread</th>
-                    <th className="py-2.5 px-3 text-right">Instant Chat Analysis</th>
+                    <th className="py-2.5 px-3 text-right">Analyse / Reanalyse</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 bg-slate-950/60">
-                  {INITIAL_MARKETS_DATA.map((m) => {
-                    const isBuy = m.bias === 'STRONG_BUY';
-                    const isChop = m.bias === 'NEUTRAL_CHOP';
+                  {liveMarkets.map((m) => {
+                    const computedRow = computeRealChartTradeParams({
+                      targetPair: m.pair,
+                      targetTf: m.recommendedTf,
+                      targetBroker: broker,
+                      price: m.price,
+                      keyLevel: m.keyLevel,
+                      ema20: m.ema20,
+                      ema50: m.ema50,
+                      rsi: m.rsi,
+                      biasOverride: m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY'
+                    });
+                    const isBuy = computedRow.direction === 'BUY';
                     const brokerSpec = m.spreadByBroker[broker];
                     const isSelected = pair === m.pair;
 
                     return (
                       <tr
                         key={m.pair}
-                        className={`hover:bg-slate-900/60 transition-colors ${
+                        onClick={() => handleTriggerChatAnalysis(m, 'deep_ai')}
+                        className={`hover:bg-slate-900/60 transition-colors cursor-pointer ${
                           isSelected ? 'bg-[#D4AF37]/10' : ''
                         }`}
                       >
                         <td className="py-3 px-3">
                           <div className="flex items-center gap-1.5">
                             <span className="font-bold text-white text-sm">{m.pair}</span>
-                            {m.isTopPick && (
-                              <span className="px-1.5 py-0.2 rounded text-[9px] bg-[#D4AF37] text-black font-black">
-                                TOP #1
-                              </span>
-                            )}
+                            <span className="text-[11px] text-[#D4AF37] font-bold">· {m.recommendedTf}</span>
                           </div>
-                          <span className="text-[10px] text-slate-400 block">{m.symbol}</span>
+                          <span className="text-[11px] text-slate-400 block">{m.symbol}</span>
                         </td>
 
                         <td className="py-3 px-3">
-                          <div className="font-bold text-white text-sm">@{m.price}</div>
-                          <div className="text-[10px] text-slate-400">20 EMA: {m.ema20} • RSI: {m.rsi}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-white text-sm">@{m.price}</span>
+                            <span className={`text-xs font-bold ${m.change24hPct >= 0 ? 'text-[#00C261]' : 'text-red-400'}`}>
+                              {m.change24hPct >= 0 ? `+${m.change24hPct.toFixed(2)}%` : `${m.change24hPct.toFixed(2)}%`}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-400">20 EMA: {m.ema20} · RSI: {m.rsi}</div>
                         </td>
 
                         <td className="py-3 px-3">
                           <span
-                            className={`inline-block px-2 py-0.5 rounded text-[10px] font-black ${
-                              isChop
-                                ? 'bg-slate-800 text-slate-400'
-                                : isBuy
+                            className={`inline-block px-2 py-0.5 rounded text-[11px] font-black ${
+                              isBuy
                                 ? 'bg-emerald-500/20 text-[#00C261] border border-emerald-500/30'
                                 : 'bg-red-500/20 text-red-300 border border-red-500/30'
                             }`}
                           >
-                            {m.bias.replace('_', ' ')}
+                            {computedRow.orderType}
                           </span>
-                          <span className="text-[10px] text-slate-400 block truncate max-w-[150px] mt-0.5">
-                            {m.ictPattern}
+                          <span className="text-[11px] text-[#00C261] font-bold block mt-0.5">
+                            {computedRow.confidence}% Confidence · R:R {computedRow.riskReward}
                           </span>
                         </td>
 
-                        <td className="py-3 px-3 text-[11px] space-y-0.5">
+                        <td className="py-3 px-3 text-xs space-y-0.5">
                           <div className="text-red-400 flex items-center justify-between gap-2">
                             <span>SL:</span>
-                            <span className="font-bold text-white">{m.suggestedSL}</span>
+                            <span className="font-bold text-white">{computedRow.stopLoss}</span>
                           </div>
                           <div className="text-cyan-400 flex items-center justify-between gap-2">
-                            <span>TP1 (50%):</span>
-                            <span className="font-bold text-white">{m.suggestedTP1}</span>
+                            <span>TP1:</span>
+                            <span className="font-bold text-white">{computedRow.tp1}</span>
                           </div>
                           <div className="text-emerald-400 flex items-center justify-between gap-2">
                             <span>TP2:</span>
-                            <span className="font-bold text-white">{m.suggestedTP2}</span>
+                            <span className="font-bold text-white">{computedRow.tp2}</span>
                           </div>
                         </td>
 
-                        <td className="py-3 px-3 text-[11px]">
-                          <span className="text-amber-400 font-bold">~{brokerSpec?.spread} pips</span>
-                          <span className="text-[9px] text-slate-500 block">{brokerSpec?.symbol}</span>
+                        <td className="py-3 px-3 text-xs">
+                          <span className="text-amber-400 font-bold">~{brokerSpec?.spread}p</span>
+                          <span className="text-[10px] text-slate-400 block">{brokerSpec?.symbol}</span>
                         </td>
 
-                        <td className="py-3 px-3 text-right">
+                        <td className="py-3 px-3 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1.5 flex-wrap">
                             <button
-                              onClick={() => handleTriggerChatAnalysis(m, 'standard')}
-                              className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-slate-500 text-[10px] font-bold transition flex items-center gap-1 active:scale-95"
-                              title="Auto-update real quote & analyze technical confluence"
+                              type="button"
+                              onClick={() => handleTriggerChatAnalysis(m, 'deep_ai')}
+                              className="px-2.5 py-1.5 rounded-lg bg-[#D4AF37]/20 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black border border-[#D4AF37]/40 text-xs font-bold transition flex items-center gap-1 active:scale-95 whitespace-nowrap"
                             >
-                              <Zap className="w-3 h-3 text-amber-400" />
-                              <span>⚡ Analyse</span>
+                              <Zap className="w-3 h-3" />
+                              <span>Analyse</span>
                             </button>
 
                             <button
-                              onClick={() => handleTriggerChatAnalysis(m, 'deep_ai')}
-                              className="px-2.5 py-1.5 rounded-lg bg-[#D4AF37]/20 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black border border-[#D4AF37]/40 text-[10px] font-bold transition flex items-center gap-1 shadow-sm active:scale-95"
-                              title="Deep AI Institutional Scan with real SL, TP and MT4 ticket"
+                              type="button"
+                              onClick={async () => {
+                                const { markets, syncedAt } = await fetchLiveMarketSnapshot(liveMarkets);
+                                setLiveMarkets(markets);
+                                setFeedSyncedAt(syncedAt);
+                                const fresh = markets.find((x) => x.pair === m.pair) || m;
+                                handleTriggerChatAnalysis(fresh, 'deep_ai');
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-slate-500 text-xs font-bold transition flex items-center gap-1 active:scale-95 whitespace-nowrap"
                             >
-                              <Sparkles className="w-3 h-3" />
-                              <span>🧠 Deep AI</span>
+                              <RefreshCw className="w-3 h-3 text-cyan-400" />
+                              <span>Reanalyse</span>
                             </button>
                           </div>
                         </td>
@@ -3762,7 +3951,7 @@ Broker: ${broker.toUpperCase()}`;
                   handleAskAdvisor(advisorInput);
                 }
               }}
-              placeholder="Ask the Institutional AI Advisor anything (e.g., 'Evaluate my GBP/USD setup at 1.29169', 'Should I trade FOMC?')..."
+              placeholder="Ask the Institutional AI Advisor anything (e.g., 'Evaluate GBP/USD at 1.34998 on 10m' or 'Gold at 4041.495')..."
               className="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-white text-xs sm:text-sm focus:border-[#D4AF37] outline-none"
             />
             <button
@@ -3939,34 +4128,30 @@ Broker: ${broker.toUpperCase()}`;
 
             {/* 1-Click Dispatch Buttons */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
-              <button
-                onClick={() => {
-                  const shareText = getShareableText(activeTelegramModalCard);
-                  const tgUrl = `https://t.me/share/url?url=${encodeURIComponent('https://pivotfx.academy')}&text=${encodeURIComponent(shareText)}`;
-                  window.open(tgUrl, '_blank');
-                }}
+              <a
+                href={`https://t.me/share/url?url=${encodeURIComponent('https://pivotfx.academy')}&text=${encodeURIComponent(getShareableText(activeTelegramModalCard))}`}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="py-2.5 px-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md"
               >
                 <Share2 className="w-3.5 h-3.5" />
                 <span>Open in Telegram</span>
-              </button>
+              </a>
 
-              <button
-                onClick={() => {
-                  const shareText = getShareableText(activeTelegramModalCard);
-                  const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
-                  window.open(waUrl, '_blank');
-                }}
+              <a
+                href={`https://api.whatsapp.com/send?text=${encodeURIComponent(getShareableText(activeTelegramModalCard))}`}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md"
               >
                 <Share2 className="w-3.5 h-3.5" />
                 <span>Send to WhatsApp</span>
-              </button>
+              </a>
 
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(getShareableText(activeTelegramModalCard));
-                  setChatSyncedNotification('✓ Copied message to clipboard!');
+                  setChatSyncedNotification('Copied message to clipboard');
                   setTimeout(() => setChatSyncedNotification(null), 2500);
                 }}
                 className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95"

@@ -15,7 +15,8 @@ import {
   X,
   Home,
   Sparkles,
-  Lock
+  Lock,
+  Globe
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -80,6 +81,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: '/psychology', label: 'P6: Psychology', shortLabel: 'P6 Mindset', icon: <Brain className="w-3.5 h-3.5" /> },
     { id: '/live-pulse', label: 'P7: Live Pulse', shortLabel: 'P7 Pulse', icon: <Activity className="w-3.5 h-3.5" /> },
     { id: '/growth-lab', label: 'P8: Growth Lab', shortLabel: 'P8 Funded', icon: <Award className="w-3.5 h-3.5" /> },
+    { id: '/macro-safety', label: 'P9: Macro Safety', shortLabel: 'P9 Safety', icon: <Globe className="w-3.5 h-3.5" /> },
   ];
 
   const isLocked = killSwitchUntil && killSwitchUntil > Date.now();

@@ -22,32 +22,32 @@ export const FxAcademyInteractiveTools: React.FC = () => {
   const [activeTrend, setActiveTrend] = useState<'uptrend' | 'downtrend' | 'range'>('uptrend');
 
   const uptrendCandles: CandleData[] = [
-    { id: 1, open: 1.0800, high: 1.0825, low: 1.0795, close: 1.0820, label: 'Higher Low 1' },
-    { id: 2, open: 1.0820, high: 1.0845, low: 1.0815, close: 1.0840, label: 'Higher High 1' },
-    { id: 3, open: 1.0840, high: 1.0842, low: 1.0825, close: 1.0828, label: 'Pullback' },
-    { id: 4, open: 1.0828, high: 1.0855, low: 1.0826, close: 1.0850, label: 'Higher Low 2' },
-    { id: 5, open: 1.0850, high: 1.0880, low: 1.0848, close: 1.0875, label: 'Higher High 2' },
-    { id: 6, open: 1.0875, high: 1.0878, low: 1.0858, close: 1.0862, label: 'Higher Low 3' },
-    { id: 7, open: 1.0862, high: 1.0910, low: 1.0860, close: 1.0905, label: 'Higher High 3' },
+    { id: 1, open: 1.1220, high: 1.1245, low: 1.1215, close: 1.1240, label: 'Higher Low 1' },
+    { id: 2, open: 1.1240, high: 1.1265, low: 1.1235, close: 1.1260, label: 'Higher High 1' },
+    { id: 3, open: 1.1260, high: 1.1262, low: 1.1245, close: 1.1248, label: 'Pullback' },
+    { id: 4, open: 1.1248, high: 1.1275, low: 1.1246, close: 1.1270, label: 'Higher Low 2' },
+    { id: 5, open: 1.1270, high: 1.1300, low: 1.1268, close: 1.1295, label: 'Higher High 2' },
+    { id: 6, open: 1.1295, high: 1.1298, low: 1.1278, close: 1.1282, label: 'Higher Low 3' },
+    { id: 7, open: 1.1282, high: 1.1330, low: 1.1280, close: 1.1325, label: 'Higher High 3' },
   ];
 
   const downtrendCandles: CandleData[] = [
-    { id: 1, open: 1.0920, high: 1.0930, low: 1.0895, close: 1.0900, label: 'Lower High 1' },
-    { id: 2, open: 1.0900, high: 1.0905, low: 1.0865, close: 1.0870, label: 'Lower Low 1' },
-    { id: 3, open: 1.0870, high: 1.0888, low: 1.0868, close: 1.0885, label: 'Pullback Rally' },
-    { id: 4, open: 1.0885, high: 1.0890, low: 1.0840, close: 1.0845, label: 'Lower High 2' },
-    { id: 5, open: 1.0845, high: 1.0850, low: 1.0810, close: 1.0815, label: 'Lower Low 2' },
-    { id: 6, open: 1.0815, high: 1.0832, low: 1.0812, close: 1.0828, label: 'Lower High 3' },
-    { id: 7, open: 1.0828, high: 1.0830, low: 1.0770, close: 1.0775, label: 'Lower Low 3' },
+    { id: 1, open: 1.1340, high: 1.1350, low: 1.1315, close: 1.1320, label: 'Lower High 1' },
+    { id: 2, open: 1.1320, high: 1.1325, low: 1.1285, close: 1.1290, label: 'Lower Low 1' },
+    { id: 3, open: 1.1290, high: 1.1308, low: 1.1288, close: 1.1305, label: 'Pullback Rally' },
+    { id: 4, open: 1.1305, high: 1.1310, low: 1.1260, close: 1.1265, label: 'Lower High 2' },
+    { id: 5, open: 1.1265, high: 1.1270, low: 1.1230, close: 1.1235, label: 'Lower Low 2' },
+    { id: 6, open: 1.1235, high: 1.1252, low: 1.1232, close: 1.1248, label: 'Lower High 3' },
+    { id: 7, open: 1.1248, high: 1.1250, low: 1.1190, close: 1.1195, label: 'Lower Low 3' },
   ];
 
   const rangeCandles: CandleData[] = [
-    { id: 1, open: 1.0820, high: 1.0850, low: 1.0818, close: 1.0845, label: 'Resistance Test' },
-    { id: 2, open: 1.0845, high: 1.0848, low: 1.0820, close: 1.0822, label: 'Support Drop' },
-    { id: 3, open: 1.0822, high: 1.0852, low: 1.0820, close: 1.0848, label: 'Resistance Bounce' },
-    { id: 4, open: 1.0848, high: 1.0850, low: 1.0821, close: 1.0824, label: 'Support Test' },
-    { id: 5, open: 1.0824, high: 1.0851, low: 1.0820, close: 1.0846, label: 'Range High' },
-    { id: 6, open: 1.0846, high: 1.0848, low: 1.0819, close: 1.0821, label: 'Range Low' },
+    { id: 1, open: 1.1240, high: 1.1270, low: 1.1238, close: 1.1265, label: 'Resistance Test' },
+    { id: 2, open: 1.1265, high: 1.1268, low: 1.1240, close: 1.1242, label: 'Support Drop' },
+    { id: 3, open: 1.1242, high: 1.1272, low: 1.1240, close: 1.1268, label: 'Resistance Bounce' },
+    { id: 4, open: 1.1268, high: 1.1270, low: 1.1241, close: 1.1244, label: 'Support Test' },
+    { id: 5, open: 1.1244, high: 1.1271, low: 1.1240, close: 1.1266, label: 'Range High' },
+    { id: 6, open: 1.1266, high: 1.1268, low: 1.1239, close: 1.1241, label: 'Range Low' },
   ];
 
   const patterns = [
@@ -57,14 +57,14 @@ export const FxAcademyInteractiveTools: React.FC = () => {
       type: 'Bullish Reversal',
       description: 'Small real body near the top of the candle with a long lower wick at least 2 to 3 times the body size. Indicates sellers pushed price down, but aggressive institutional buyers rejected the lows.',
       candles: [
-        { id: 1, open: 1.0850, high: 1.0852, low: 1.0820, close: 1.0825, label: 'Downtrend' },
-        { id: 2, open: 1.0825, high: 1.0830, low: 1.0790, close: 1.0828, label: 'Hammer (Rejection Wick)', annotation: 'Buy Signal', annotationType: 'entry' as const },
-        { id: 3, open: 1.0828, high: 1.0865, low: 1.0825, close: 1.0860, label: 'Bullish Confirmation' },
+        { id: 1, open: 1.1270, high: 1.1272, low: 1.1240, close: 1.1245, label: 'Downtrend' },
+        { id: 2, open: 1.1245, high: 1.1250, low: 1.1210, close: 1.1248, label: 'Hammer (Rejection Wick)', annotation: 'Buy Signal', annotationType: 'entry' as const },
+        { id: 3, open: 1.1248, high: 1.1285, low: 1.1245, close: 1.1280, label: 'Bullish Confirmation' },
       ],
       trendType: 'bullish' as const,
-      entry: 1.0830,
-      sl: 1.0788,
-      tp: 1.0880,
+      entry: 1.1250,
+      sl: 1.1208,
+      tp: 1.1300,
     },
     {
       id: 'shooting-star',
@@ -72,14 +72,14 @@ export const FxAcademyInteractiveTools: React.FC = () => {
       type: 'Bearish Reversal',
       description: 'Small body at the bottom with a tall upper wick. This is the hallmark of the Gilgil Tower Top! Buyers sprinted upward, but hit an institutional sell wall and collapsed before candle close.',
       candles: [
-        { id: 1, open: 1.2900, high: 1.2945, low: 1.2895, close: 1.2940, label: 'Rally' },
-        { id: 2, open: 1.2940, high: 1.2985, low: 1.2935, close: 1.2938, label: 'Shooting Star', annotation: 'Sell Signal', annotationType: 'warning' as const },
-        { id: 3, open: 1.2938, high: 1.2940, low: 1.2890, close: 1.2895, label: 'Bearish Drop' },
+        { id: 1, open: 1.3500, high: 1.3545, low: 1.3495, close: 1.3540, label: 'Rally' },
+        { id: 2, open: 1.3540, high: 1.3585, low: 1.3535, close: 1.3538, label: 'Shooting Star', annotation: 'Sell Signal', annotationType: 'warning' as const },
+        { id: 3, open: 1.3538, high: 1.3540, low: 1.3490, close: 1.3495, label: 'Bearish Drop' },
       ],
       trendType: 'bearish' as const,
-      entry: 1.2935,
-      sl: 1.2990,
-      tp: 1.2840,
+      entry: 1.3535,
+      sl: 1.3590,
+      tp: 1.3440,
     },
     {
       id: 'bullish-engulfing',
@@ -87,14 +87,14 @@ export const FxAcademyInteractiveTools: React.FC = () => {
       type: 'Bullish Continuation / Reversal',
       description: 'A small red candle is completely swallowed (engulfed) from head to toe by a large, powerful green candle. Signals an overwhelming takeover by buyers.',
       candles: [
-        { id: 1, open: 154.20, high: 154.25, low: 153.95, close: 154.00, label: 'Red Candle' },
-        { id: 2, open: 153.98, high: 154.50, low: 153.92, close: 154.45, label: 'Engulfing Green', annotation: 'Strong Long', annotationType: 'entry' as const },
-        { id: 3, open: 154.45, high: 154.80, low: 154.40, close: 154.75, label: 'Continuation' },
+        { id: 1, open: 158.20, high: 158.25, low: 157.95, close: 158.00, label: 'Red Candle' },
+        { id: 2, open: 157.98, high: 158.50, low: 157.92, close: 158.45, label: 'Engulfing Green', annotation: 'Strong Long', annotationType: 'entry' as const },
+        { id: 3, open: 158.45, high: 158.80, low: 158.40, close: 158.75, label: 'Continuation' },
       ],
       trendType: 'bullish' as const,
-      entry: 154.45,
-      sl: 153.88,
-      tp: 155.20,
+      entry: 158.45,
+      sl: 157.88,
+      tp: 159.20,
     },
   ];
 
@@ -225,25 +225,25 @@ export const FxAcademyInteractiveTools: React.FC = () => {
                 {/* HIGH Callout */}
                 <circle cx="110" cy="30" r="5" fill="#FACC15" className="cursor-pointer" onClick={() => setSelectedPart('high')} />
                 <text x="125" y="34" fill="#FACC15" fontSize="11" fontFamily="monospace" fontWeight="bold">
-                  HIGH (1.0890)
+                  HIGH (1.1310)
                 </text>
 
                 {/* CLOSE or OPEN Top */}
                 <circle cx="110" cy="90" r="4.5" fill="#FFFFFF" className="cursor-pointer" onClick={() => setSelectedPart(selectedCandleType === 'bullish' ? 'close' : 'open')} />
                 <text x="125" y="94" fill="#FFFFFF" fontSize="11" fontFamily="monospace" fontWeight="bold">
-                  {selectedCandleType === 'bullish' ? 'CLOSE (1.0870)' : 'OPEN (1.0870)'}
+                  {selectedCandleType === 'bullish' ? 'CLOSE (1.1290)' : 'OPEN (1.1290)'}
                 </text>
 
                 {/* OPEN or CLOSE Bottom */}
                 <circle cx="110" cy="230" r="4.5" fill="#FFFFFF" className="cursor-pointer" onClick={() => setSelectedPart(selectedCandleType === 'bullish' ? 'open' : 'close')} />
                 <text x="125" y="234" fill="#FFFFFF" fontSize="11" fontFamily="monospace" fontWeight="bold">
-                  {selectedCandleType === 'bullish' ? 'OPEN (1.0830)' : 'CLOSE (1.0830)'}
+                  {selectedCandleType === 'bullish' ? 'OPEN (1.1250)' : 'CLOSE (1.1250)'}
                 </text>
 
                 {/* LOW Callout */}
                 <circle cx="110" cy="290" r="5" fill="#38BDF8" className="cursor-pointer" onClick={() => setSelectedPart('low')} />
                 <text x="125" y="294" fill="#38BDF8" fontSize="11" fontFamily="monospace" fontWeight="bold">
-                  LOW (1.0810)
+                  LOW (1.1230)
                 </text>
 
                 {/* Upper Wick label */}
@@ -440,13 +440,13 @@ export const FxAcademyInteractiveTools: React.FC = () => {
             trendType={activeTrend === 'uptrend' ? 'bullish' : activeTrend === 'downtrend' ? 'bearish' : 'range'}
             trendline={
               activeTrend === 'uptrend'
-                ? { startIndex: 0, startPrice: 1.0795, endIndex: 5, endPrice: 1.0858, label: 'Trendline Dynamic Support' }
+                ? { startIndex: 0, startPrice: 1.1215, endIndex: 5, endPrice: 1.1278, label: 'Trendline Dynamic Support' }
                 : activeTrend === 'downtrend'
-                ? { startIndex: 0, startPrice: 1.0930, endIndex: 5, endPrice: 1.0832, label: 'Trendline Dynamic Resistance' }
+                ? { startIndex: 0, startPrice: 1.1350, endIndex: 5, endPrice: 1.1252, label: 'Trendline Dynamic Resistance' }
                 : undefined
             }
-            supportLevel={activeTrend === 'range' ? 1.0820 : undefined}
-            resistanceLevel={activeTrend === 'range' ? 1.0850 : undefined}
+            supportLevel={activeTrend === 'range' ? 1.1240 : undefined}
+            resistanceLevel={activeTrend === 'range' ? 1.1270 : undefined}
           />
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
