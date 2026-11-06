@@ -832,6 +832,23 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
         <div className="flex items-center gap-2 flex-wrap shrink-0">
           <button
             type="button"
+            onClick={() => {
+              const fullPacket = `${computed.brokerSymbol} ${existingOrder ? existingOrder.direction : computed.direction} | Entry: ${existingOrder ? existingOrder.entryPrice : computed.entryPrice} | SL: ${existingOrder ? existingOrder.stopLoss : computed.stopLoss} | TP1: ${existingOrder ? existingOrder.tp1 : computed.tp1} | TP2: ${existingOrder ? existingOrder.tp2 : computed.tp2} | Lot: 0.01 (Max Risk: $${computed.actualRiskUsd})`;
+              copyValue(fullPacket, `top-full-${pair}`);
+              flashNotice(`COPIED FULL MT4/MT5 TICKET · ${computed.brokerSymbol} ${existingOrder ? existingOrder.direction : computed.direction}`);
+            }}
+            className="px-3.5 py-2 rounded-xl bg-[#D4AF37] hover:bg-amber-400 text-black text-xs font-black flex items-center gap-1.5 transition whitespace-nowrap shadow-md"
+          >
+            {copiedKey === `top-full-${pair}` ? (
+              <Check className="w-3.5 h-3.5" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" />
+            )}
+            <span>{copiedKey === `top-full-${pair}` ? 'Full Ticket Copied ✓' : 'Copy Full MT4/MT5 Ticket'}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() =>
               copyValue(String(existingOrder ? existingOrder.stopLoss : computed.stopLoss), `top-sl-${pair}`)
             }
