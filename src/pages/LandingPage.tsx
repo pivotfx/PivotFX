@@ -7,9 +7,7 @@ import {
   ActiveMarketOrder,
   globalLiveStream,
   computeRealChartTradeParams,
-  computeLiveOrderMetrics,
   computeCandleSwingLevels,
-  evaluatePairKenyaTiming,
   getCurrentMacroContext
 } from '../utils/liveMarketEngine';
 import { ActiveMarketOrderPanel } from '../components/tools/ActiveMarketOrderPanel';
@@ -31,7 +29,11 @@ import {
   Sparkles,
   Copy,
   Check,
-  ClipboardList
+  ClipboardList,
+  Camera,
+  Shield,
+  Zap,
+  Bell
 } from 'lucide-react';
 
 interface LandingPageProps {
@@ -54,16 +56,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   );
   const [syncedAt, setSyncedAt] = useState<string>(() => globalLiveStream.getState().syncedAt);
   const [heroImgFailed, setHeroImgFailed] = useState<boolean>(false);
-  const [copiedLandingKey, setCopiedLandingKey] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  const copyLandingLevel = (val: string | number, key: string) => {
+  const handleCopy = (text: string, key: string) => {
     try {
-      navigator.clipboard.writeText(String(val));
+      navigator.clipboard.writeText(text);
     } catch {}
-    setCopiedLandingKey(key);
+    setCopiedKey(key);
     setTimeout(() => {
-      setCopiedLandingKey((prev) => (prev === key ? null : prev));
-    }, 1500);
+      setCopiedKey((prev) => (prev === key ? null : prev));
+    }, 2000);
   };
 
   useEffect(() => {
@@ -84,39 +86,84 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     return getCurrentMacroContext(pctMap);
   })();
 
+  // Compute live trade params for the #1 trending mover
+  const topMover = allMarkets[0];
+  const topMoverTrade = (() => {
+    if (!topMover) return null;
+    const sideBias: 'BUY' | 'SELL' = topMover.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
+    const cardSwings = computeCandleSwingLevels(topMover.candles);
+    const computed = computeRealChartTradeParams({
+      targetPair: topMover.pair,
+      targetTf: topMover.recommendedTf,
+      targetBroker: 'fxpesa',
+      price: topMover.price,
+      keyLevel: topMover.keyLevel,
+      ema20: topMover.ema20,
+      ema50: topMover.ema50,
+      rsi: topMover.rsi,
+      atrPips: topMover.atrPips,
+      swingLow: cardSwings.swingLow,
+      swingHigh: cardSwings.swingHigh,
+      macro: macroContext,
+      biasOverride: sideBias,
+      previousDirection: sideBias,
+      previousTrendDirection: topMover.trendDirection,
+      h1TrendDirection: topMover.h1TrendDirection
+    });
+    return {
+      topMover,
+      computed,
+      isBuy: computed.direction === 'BUY',
+      pctPos: topMover.change24hPct >= 0,
+      ticket: `${topMover.pair} ${computed.direction} | Entry: ${computed.entryPrice} | SL: ${computed.stopLoss} | TP1: ${computed.tp1} | TP2: ${computed.tp2} | Lot: ${computed.lotSize} (Risk: $${computed.actualRiskUsd})`
+    };
+  })();
+
   const getPillarIcon = (number: string) => {
     switch (number) {
       case '01':
-        return <GraduationCap className="w-5 h-5 text-[#D4AF37]" />;
+        return <GraduationCap className="w-6 h-6 text-[#D4AF37]" />;
       case '02':
-        return <CandlestickChart className="w-5 h-5 text-[#D4AF37]" />;
+        return <CandlestickChart className="w-6 h-6 text-[#D4AF37]" />;
       case '03':
-        return <Target className="w-5 h-5 text-[#D4AF37]" />;
+        return <Target className="w-6 h-6 text-[#D4AF37]" />;
       case '04':
-        return <Scan className="w-5 h-5 text-[#D4AF37]" />;
+        return <Scan className="w-6 h-6 text-[#D4AF37]" />;
       case '05':
-        return <ShieldCheck className="w-5 h-5 text-[#D4AF37]" />;
+        return <ShieldCheck className="w-6 h-6 text-[#D4AF37]" />;
       case '06':
-        return <Brain className="w-5 h-5 text-[#D4AF37]" />;
+        return <Brain className="w-6 h-6 text-[#D4AF37]" />;
       case '07':
-        return <Activity className="w-5 h-5 text-[#D4AF37]" />;
+        return <Activity className="w-6 h-6 text-[#D4AF37]" />;
       case '08':
-        return <Award className="w-5 h-5 text-[#D4AF37]" />;
+        return <Award className="w-6 h-6 text-[#D4AF37]" />;
       default:
-        return <Globe className="w-5 h-5 text-[#D4AF37]" />;
+        return <Globe className="w-6 h-6 text-[#D4AF37]" />;
     }
   };
 
+  const handleOpenMarketRadar = () => {
+    onSelectPillar('/ai-scanner');
+  };
+
+  const handleOpenCameraScanner = () => {
+    globalLiveStream.requestOpenScannerView('camera');
+  };
+
+  const handleOpenTradeLog = () => {
+    globalLiveStream.requestOpenScannerView('trade_log');
+  };
+
   return (
-    <div className="space-y-12 pb-20">
-      {/* 1. 2-COLUMN STRETCHED INSTITUTIONAL HERO */}
-      <section className="rounded-3xl bg-[#0B101E] border border-slate-800 overflow-hidden">
+    <div className="space-y-10 pb-24">
+      {/* 1. INSTITUTIONAL HERO SECTION */}
+      <section className="rounded-3xl bg-[#0B101E] border border-slate-800 overflow-hidden shadow-2xl">
         <div className="grid grid-cols-1 lg:grid-cols-12 items-stretch">
-          {/* Left Narrative & 2 Focused Actions */}
+          {/* Left Narrative & High-Priority Actions */}
           <div className="lg:col-span-7 p-6 sm:p-10 lg:p-12 flex flex-col justify-between space-y-8">
             <div className="space-y-4">
               <div className="flex items-center gap-2 text-xs font-mono text-[#D4AF37] flex-wrap tabular-nums">
-                <span>PivotFx Prop Firm &amp; Forex Academy</span>
+                <span className="font-bold">PivotFx Prop Firm &amp; Forex Academy</span>
                 <span aria-hidden="true" className="text-slate-600">·</span>
                 <span className="text-slate-300">Nairobi EAT Live Sync ({syncedAt})</span>
               </div>
@@ -126,40 +173,53 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </h1>
 
               <p className="text-sm sm:text-base text-slate-300 max-w-xl leading-relaxed">
-                Grow small capital into funded prop firm accounts. Instant AI multi-market scans ranked from Top % to Least %, locked multi-factor BUY/SELL projections, and live Nairobi session countdowns.
+                Transform personal capital into funded institutional accounts. Live multi-market scans, sustainable 8-factor confluence projections, Gilgil Shield $2.80 risk discipline, and real-time Nairobi session countdowns.
               </p>
             </div>
 
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-2">
               <button
                 type="button"
-                onClick={() => onSelectPillar('/ai-scanner')}
-                className="px-6 py-3.5 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition active:scale-95 whitespace-nowrap shrink-0"
+                onClick={handleOpenMarketRadar}
+                className="px-6 py-4 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition active:scale-95 whitespace-nowrap shrink-0 shadow-[0_0_24px_rgba(212,175,55,0.3)]"
               >
-                <span>Open AI Market Radar (Top % → Least)</span>
+                <span>Launch Super AI Radar (Pillar 04)</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
 
               <button
                 type="button"
-                onClick={() => onSelectPillar('/macro-safety')}
-                className="px-5 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-100 font-bold text-xs border border-slate-700 hover:border-[#D4AF37] transition flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
+                onClick={handleOpenCameraScanner}
+                className="px-5 py-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-100 font-bold text-xs border border-slate-700 hover:border-[#D4AF37] transition flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
               >
-                <Clock className="w-4 h-4 text-[#D4AF37]" />
-                <span>Today &amp; Hourly Safety Timer</span>
+                <Camera className="w-4 h-4 text-[#D4AF37]" />
+                <span>Camera Chart Scanner</span>
               </button>
             </div>
           </div>
 
-          {/* Right 16:9 Desk Visual Panel with Measured Contrast Scrim */}
-          <div className="lg:col-span-5 relative min-h-[240px] lg:min-h-full bg-[#080C15] border-t lg:border-t-0 lg:border-l border-slate-800 overflow-hidden">
+          {/* Right Visual Panel with Architectural Neon Building Signage */}
+          <div className="lg:col-span-5 relative min-h-[260px] lg:min-h-full bg-[#080C15] border-t lg:border-t-0 lg:border-l border-slate-800 overflow-hidden flex items-center justify-center">
+            {/* Glowing Architectural Building Signage inside Prop Floor */}
+            <div className="absolute top-4 left-4 z-20 flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-slate-950/90 backdrop-blur-md border border-[#D4AF37]/90 shadow-[0_0_24px_rgba(212,175,55,0.55)]">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#00C261] animate-pulse shadow-[0_0_8px_#00C261]" />
+              <div className="flex flex-col">
+                <span className="font-mono text-[11px] font-black tracking-widest text-[#D4AF37] uppercase leading-none">
+                  PIVOT FX PROP TRADING FLOOR
+                </span>
+                <span className="font-mono text-[9px] text-slate-400 leading-tight mt-0.5">
+                  NAIROBI FINANCIAL DISTRICT · 36.82° E
+                </span>
+              </div>
+            </div>
+
             {!heroImgFailed ? (
               <img
                 src={heroDeskImg}
-                alt="Institutional multi-asset quantitative execution terminal with brass desk instruments"
+                alt="Institutional multi-asset quantitative trading floor with illuminated building displays"
                 referrerPolicy="no-referrer"
                 onError={() => setHeroImgFailed(true)}
-                className="w-full h-full lg:h-full object-cover object-center opacity-90"
+                className="w-full h-full lg:h-full object-cover object-center brightness-110 contrast-105 opacity-95 transition duration-500"
               />
             ) : (
               <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-gradient-to-br from-slate-900 to-slate-950">
@@ -168,71 +228,186 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 <span className="text-xs text-slate-400 font-mono">Multi-Asset Order Flow &amp; Risk Engine</span>
               </div>
             )}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent pointer-events-none" />
-            <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between gap-2 text-xs font-mono text-slate-200 tabular-nums flex-wrap">
-              <span>0.01 Micro Lot Shield · Max $2.00 / 260 KES</span>
-              <span className="text-[#D4AF37] font-bold">CMA KE Ready</span>
+            <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-black/15 pointer-events-none" />
+            <div className="absolute bottom-4 left-4 right-4 z-20 flex items-center justify-between gap-2 text-xs font-mono text-slate-200 tabular-nums flex-wrap">
+              <span className="inline-flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-[#00C261]" />
+                <span>Gilgil Shield · Max $2.80 / 364 KES per 0.01 Lot</span>
+              </span>
+              <span className="text-[#D4AF37] font-bold">CMA KE Standard</span>
             </div>
           </div>
         </div>
       </section>
 
-      {/* 2. TODAY & THIS HOUR GLOBAL MACRO FAVORABILITY + NAIROBI COUNTDOWN */}
-      <section className="rounded-2xl p-5 sm:p-6 bg-[#0B1120] border border-[#D4AF37]/40 flex flex-col lg:flex-row lg:items-center justify-between gap-4 font-mono tabular-nums">
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2 text-xs text-[#D4AF37] font-bold flex-wrap">
-            <Sparkles className="w-4 h-4 shrink-0" />
-            <span>Today &amp; Current Hour Global AI Projection · {macroContext.sessionWindowName}</span>
-          </div>
-          <h2 className="text-base sm:text-xl font-black text-white">
-            {dailyMacroDirective.headline}
-          </h2>
-          <p className="text-xs text-slate-300 font-sans leading-relaxed max-w-3xl">
-            {dailyMacroDirective.hourlyOutlook}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3 flex-wrap shrink-0">
-          <div className="px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
-            <span className="text-[10px] text-slate-400 block">Nairobi Time (EAT)</span>
-            <strong className="text-sm text-white block">{macroContext.eatTimeString}</strong>
-            <span
-              className={`text-[11px] font-bold ${
-                macroContext.overallDaySafety === 'FAVOURABLE_BUY'
-                  ? 'text-[#00C261]'
-                  : macroContext.overallDaySafety === 'FAVOURABLE_SELL'
-                  ? 'text-red-400'
-                  : 'text-amber-300'
-              }`}
-            >
-              {macroContext.overallDaySafety === 'FAVOURABLE_BUY'
-                ? 'FAVOURABLE BUY WINDOW'
-                : macroContext.overallDaySafety === 'FAVOURABLE_SELL'
-                ? 'FAVOURABLE SELL WINDOW'
-                : 'SELECTIVE CAUTION WINDOW'}
+      {/* 2. TODAY & THIS HOUR — SINGLE STREAMLINED NOTIFICATION CARD */}
+      <section className="rounded-2xl bg-gradient-to-r from-[#0B1120] via-[#0E1528] to-[#0B1120] border border-[#D4AF37]/50 shadow-[0_0_25px_rgba(212,175,55,0.12)] p-5 sm:p-6 space-y-4 font-mono tabular-nums">
+        {/* Top Notification Status Header */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <span className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00C261] opacity-75" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-[#00C261]" />
+            </span>
+            <span className="text-xs font-black tracking-wider text-[#D4AF37] uppercase">
+              LIVE SESSION DIRECTIVE · {macroContext.sessionWindowName}
+            </span>
+            <span className="text-slate-600">|</span>
+            <span className="text-xs text-slate-300">
+              EAT {macroContext.eatTimeString}
             </span>
           </div>
 
-          <button
-            type="button"
-            onClick={() => globalLiveStream.requestOpenScannerView('trade_log')}
-            className="px-4 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 font-bold text-xs inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition"
-          >
-            <ClipboardList className="w-3.5 h-3.5" />
-            <span>Trade Log &amp; Orders</span>
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span
+              className={`px-3 py-1 rounded-lg text-[11px] font-black tracking-wide border ${
+                macroContext.overallDaySafety === 'FAVOURABLE_BUY'
+                  ? 'bg-emerald-950/60 text-[#00C261] border-[#00C261]/60 shadow-[0_0_12px_rgba(0,194,97,0.2)]'
+                  : macroContext.overallDaySafety === 'FAVOURABLE_SELL'
+                  ? 'bg-red-950/60 text-red-400 border-red-500/60 shadow-[0_0_12px_rgba(239,68,68,0.2)]'
+                  : 'bg-amber-950/60 text-amber-300 border-amber-500/60'
+              }`}
+            >
+              {macroContext.overallDaySafety === 'FAVOURABLE_BUY'
+                ? 'FAVOURABLE BUY REGIME'
+                : macroContext.overallDaySafety === 'FAVOURABLE_SELL'
+                ? 'FAVOURABLE SELL REGIME'
+                : 'SELECTIVE CAUTION REGIME'}
+            </span>
 
-          <button
-            type="button"
-            onClick={() => onSelectPillar('/ai-scanner')}
-            className="px-4 py-3 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider whitespace-nowrap shrink-0"
-          >
-            Deep AI Scan All 10
-          </button>
+            <span className="text-xs text-slate-400">
+              {macroContext.riskRegime}
+            </span>
+          </div>
         </div>
+
+        {/* Middle Directive Headline & Context */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
+          <div className="lg:col-span-8 space-y-1.5 font-sans">
+            <h2 className="text-base sm:text-xl font-black text-white leading-snug">
+              {dailyMacroDirective.headline}
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+              {dailyMacroDirective.hourlyOutlook}
+            </p>
+          </div>
+
+          {/* Quick Pillar 04 Navigation & Tools */}
+          <div className="lg:col-span-4 flex flex-row lg:flex-col gap-2 justify-end font-mono">
+            <button
+              type="button"
+              onClick={handleOpenMarketRadar}
+              className="flex-1 lg:w-full px-4 py-2.5 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition active:scale-95"
+            >
+              <span>View All 10 in Pillar 04</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleOpenCameraScanner}
+                className="flex-1 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-[#D4AF37] font-bold text-xs inline-flex items-center justify-center gap-1.5 transition"
+              >
+                <Camera className="w-3.5 h-3.5 text-[#D4AF37]" />
+                <span>Camera Scan</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenTradeLog}
+                className="flex-1 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 font-bold text-xs inline-flex items-center justify-center gap-1.5 transition"
+              >
+                <ClipboardList className="w-3.5 h-3.5" />
+                <span>Trade Log</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* High-Confluence #1 Trending Market Directive Strip */}
+        {topMoverTrade && (
+          <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="px-2.5 py-1 rounded-md bg-[#D4AF37]/15 text-[#D4AF37] font-black text-[10px] tracking-wider border border-[#D4AF37]/30">
+                #1 TRENDING MOVER
+              </span>
+              <span className="text-base font-black text-white">
+                {topMoverTrade.topMover.pair}
+              </span>
+              <span
+                className={`inline-flex items-center gap-0.5 font-bold ${
+                  topMoverTrade.pctPos ? 'text-[#00C261]' : 'text-red-400'
+                }`}
+              >
+                {topMoverTrade.pctPos ? (
+                  <TrendingUp className="w-3.5 h-3.5" />
+                ) : (
+                  <TrendingDown className="w-3.5 h-3.5" />
+                )}
+                {topMoverTrade.pctPos
+                  ? `+${topMoverTrade.topMover.change24hPct.toFixed(2)}%`
+                  : `${topMoverTrade.topMover.change24hPct.toFixed(2)}%`}
+              </span>
+              <span className="text-slate-600">·</span>
+              <span
+                className={`font-black ${
+                  topMoverTrade.isBuy ? 'text-[#00C261]' : 'text-red-400'
+                }`}
+              >
+                {topMoverTrade.computed.direction} @ {topMoverTrade.computed.entryPrice}
+              </span>
+              <span className="text-slate-400">
+                SL: <strong className="text-red-300">{topMoverTrade.computed.stopLoss}</strong> · TP1: <strong className="text-[#00C261]">{topMoverTrade.computed.tp1}</strong> · TP2: <strong className="text-[#00C261]">{topMoverTrade.computed.tp2}</strong>
+              </span>
+              <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-[10px] text-slate-300 font-mono">
+                Lot: {topMoverTrade.computed.lotSize} (Risk: ${topMoverTrade.computed.actualRiskUsd})
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() =>
+                  handleCopy(
+                    topMoverTrade.ticket,
+                    `top-mover-ticket-${topMoverTrade.topMover.pair}`
+                  )
+                }
+                className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-[#D4AF37] text-xs font-bold inline-flex items-center gap-1.5 transition"
+                title="Copy complete ticket for MT4/MT5"
+              >
+                {copiedKey === `top-mover-ticket-${topMoverTrade.topMover.pair}` ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-[#00C261]" />
+                    <span className="text-[#00C261]">Ticket Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-[#D4AF37]" />
+                    <span>Copy MT4/MT5 Ticket</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (onOpenPairWorkspace) {
+                    onOpenPairWorkspace(topMoverTrade.topMover.pair);
+                  } else {
+                    handleOpenMarketRadar();
+                  }
+                }}
+                className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-[#D4AF37] hover:text-black text-[#D4AF37] border border-[#D4AF37]/50 text-xs font-bold inline-flex items-center gap-1 transition"
+              >
+                <span>Inspect in Radar</span>
+                <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
-      {/* LIVE LOADED MARKET ORDERS MONITOR (SYNCS ACROSS CARDS & BROKERS PAGE) */}
+      {/* 3. ACTIVE BROKER ORDERS SUMMARY BANNER (Live broker order progress monitor) */}
       <ActiveMarketOrderPanel
         mode="summary_banner"
         broker={globalLiveStream.getState().activeBroker}
@@ -241,217 +416,69 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         }
       />
 
-      {/* 3. ALL 10 LIVE MARKETS SORTED TOP % TO LEAST % (Click Any Card for Independent Chart & AI Rescan) */}
-      <section className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-2 text-xs font-mono text-slate-400 flex-wrap tabular-nums">
-            <span className="text-[#D4AF37] font-bold">All 10 Live Markets (Top % → Least %)</span>
-            <span aria-hidden="true">·</span>
-            <span>H1/M15 Trend Lock Active ({syncedAt})</span>
-            <span aria-hidden="true">·</span>
-            <span>Click any card to open independent chart, Rescan &amp; Super AI</span>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => onSelectPillar('/ai-scanner')}
-            className="text-xs font-mono font-bold text-[#D4AF37] hover:text-white transition inline-flex items-center gap-1 whitespace-nowrap shrink-0 self-start sm:self-auto"
-          >
-            <span>Open Full Multi-Market Scanner</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 tabular-nums">
-          {allMarkets.map((m, idx) => {
-            const sideBias: 'BUY' | 'SELL' = m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
-            const cardSwings = computeCandleSwingLevels(m.candles);
-            const computed = computeRealChartTradeParams({
-              targetPair: m.pair,
-              targetTf: m.recommendedTf,
-              targetBroker: 'fxpesa',
-              price: m.price,
-              keyLevel: m.keyLevel,
-              ema20: m.ema20,
-              ema50: m.ema50,
-              rsi: m.rsi,
-              atrPips: m.atrPips,
-              swingLow: cardSwings.swingLow,
-              swingHigh: cardSwings.swingHigh,
-              macro: macroContext,
-              biasOverride: sideBias,
-              previousDirection: sideBias,
-              previousTrendDirection: m.trendDirection,
-              h1TrendDirection: m.h1TrendDirection
-            });
-            const timing = evaluatePairKenyaTiming(m.pair);
-            const isBuy = computed.direction === 'BUY';
-            const pctPos = m.change24hPct >= 0;
-            const loadedOrder = activeOrders[m.pair];
-            const orderMetrics = loadedOrder ? computeLiveOrderMetrics(loadedOrder, m.price, m.atrPips) : null;
-            const cardSl = loadedOrder ? loadedOrder.stopLoss : computed.stopLoss;
-            const cardTp = loadedOrder ? loadedOrder.tp2 : computed.tp2;
-
-            return (
-              <div
-                key={m.pair}
-                role="button"
-                tabIndex={0}
-                onClick={() =>
-                  onOpenPairWorkspace ? onOpenPairWorkspace(m.pair) : onSelectPillar('/ai-scanner')
-                }
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    if (onOpenPairWorkspace) {
-                      onOpenPairWorkspace(m.pair);
-                    } else {
-                      onSelectPillar('/ai-scanner');
-                    }
-                  }
-                }}
-                className={`p-4 rounded-2xl bg-[#0B101E] border transition-colors text-left flex flex-col justify-between space-y-3 font-mono cursor-pointer ${
-                  loadedOrder
-                    ? 'border-[#00C261] shadow-[0_0_16px_rgba(0,194,97,0.14)]'
-                    : 'border-slate-800 hover:border-[#D4AF37]'
-                }`}
-              >
-                <div className="flex items-center justify-between text-[11px] text-slate-400 w-full">
-                  <span>
-                    #{idx + 1} · {m.recommendedTf} · {computed.confidence}% AI
-                  </span>
-                  <span className={isBuy ? 'text-[#00C261] font-bold' : 'text-red-400 font-bold'}>
-                    {computed.trendDirection} · {computed.direction}
-                  </span>
-                </div>
-
-                <div className="flex items-baseline justify-between gap-2 w-full">
-                  <span className="text-lg font-black text-white">{m.pair}</span>
-                  <span className="text-sm font-black text-[#D4AF37]">@ {m.price}</span>
-                  <span
-                    className={`inline-flex items-center gap-0.5 text-xs font-bold ${
-                      pctPos ? 'text-[#00C261]' : 'text-red-400'
-                    }`}
-                  >
-                    {pctPos ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                    {pctPos ? `+${m.change24hPct.toFixed(2)}%` : `${m.change24hPct.toFixed(2)}%`}
-                  </span>
-                </div>
-
-                {loadedOrder && orderMetrics && (
-                  <div className="px-2.5 py-1.5 rounded-lg bg-emerald-950/50 border border-[#00C261]/50 flex items-center justify-between text-[10px] font-black text-[#00C261]">
-                    <span>{loadedOrder.direction} PLACED ON BROKER</span>
-                    <span>
-                      {orderMetrics.floatingPips >= 0 ? `+${orderMetrics.floatingPips}p` : `${orderMetrics.floatingPips}p`} ·{' '}
-                      {orderMetrics.netProfitUsd >= 0
-                        ? `+$${orderMetrics.netProfitUsd.toFixed(2)}`
-                        : `-$${Math.abs(orderMetrics.netProfitUsd).toFixed(2)}`}
-                    </span>
-                  </div>
-                )}
-
-                <div
-                  onClick={(e) => e.stopPropagation()}
-                  className="grid grid-cols-2 gap-1.5 text-[11px] text-slate-300 pt-2 border-t border-slate-800/80 w-full"
-                >
-                  <div className="flex items-center justify-between gap-1 bg-slate-950/80 px-2 py-1 rounded-lg border border-slate-800/80">
-                    <span className="truncate">SL {cardSl}</span>
-                    <button
-                      type="button"
-                      onClick={() => copyLandingLevel(cardSl, `land-sl-${m.pair}`)}
-                      className="p-1 rounded bg-slate-900 hover:bg-red-950 text-red-300 shrink-0"
-                      title="Copy Stop Loss"
-                    >
-                      {copiedLandingKey === `land-sl-${m.pair}` ? (
-                        <Check className="w-3 h-3 text-[#00C261]" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                    </button>
-                  </div>
-                  <div className="flex items-center justify-between gap-1 bg-slate-950/80 px-2 py-1 rounded-lg border border-slate-800/80">
-                    <span className="text-[#00C261] truncate">TP {cardTp}</span>
-                    <button
-                      type="button"
-                      onClick={() => copyLandingLevel(cardTp, `land-tp-${m.pair}`)}
-                      className="p-1 rounded bg-slate-900 hover:bg-emerald-950 text-[#00C261] shrink-0"
-                      title="Copy Take Profit"
-                    >
-                      {copiedLandingKey === `land-tp-${m.pair}` ? (
-                        <Check className="w-3 h-3 text-[#00C261]" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between text-[10px] w-full pt-1">
-                  <span
-                    className={`inline-flex items-center gap-1 font-bold truncate ${
-                      timing.windowStatusCode === 'OPEN'
-                        ? 'text-[#00C261]'
-                        : timing.windowStatusCode === 'OPENING_SOON'
-                        ? 'text-amber-300'
-                        : 'text-red-300'
-                    }`}
-                  >
-                    <Clock className="w-3 h-3 shrink-0" />
-                    <span className="truncate">{timing.windowBadgeShort}</span>
-                  </span>
-                  <span className="text-[#D4AF37] font-bold shrink-0">
-                    {loadedOrder ? 'Manage →' : 'Inspect →'}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* 4. NINE INDEPENDENT ACADEMY PILLAR CARDS */}
-      <section className="space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 border-b border-slate-800 pb-4">
+      {/* 4. NINE INDEPENDENT CLICKABLE ACADEMY PILLARS (Primary Centerpiece) */}
+      <section className="space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-slate-800 pb-4">
           <div className="space-y-1">
-            <span className="text-xs font-mono text-[#D4AF37] font-bold block">
-              9 Independent Execution Masterclasses
-            </span>
-            <h2 className="text-2xl sm:text-3xl font-black text-white">
-              Select an Academy to Enter
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[#D4AF37]" />
+              <span className="text-xs font-mono text-[#D4AF37] font-black uppercase tracking-wider">
+                9 Institutional Academy Pillars
+              </span>
+            </div>
+            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white">
+              Pillar Workstations &amp; Prop Curriculum
             </h2>
           </div>
-          <span className="text-xs font-mono text-slate-400">
-            Each card opens an uncongested workstation &amp; curriculum chamber
-          </span>
+          <p className="text-xs font-mono text-slate-400 max-w-md">
+            Click any pillar to enter its dedicated workstation, live tools, and institutional curriculum chamber.
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {PILLARS_MASTERCLASS_DATA.map((pillar) => (
             <button
               key={pillar.id}
               type="button"
               onClick={() => onSelectPillar(pillar.id)}
-              className="group flex flex-col justify-between p-6 rounded-2xl bg-[#0B101E] border border-slate-800 hover:border-[#D4AF37] transition-colors text-left space-y-5"
+              className="group relative flex flex-col justify-between p-6 sm:p-7 rounded-2xl bg-[#0B101E] border border-slate-800 hover:border-[#D4AF37] transition-all duration-300 hover:shadow-[0_0_30px_rgba(212,175,55,0.18)] hover:-translate-y-1 text-left space-y-5"
             >
+              {/* Header with Pillar number and Category Badge */}
               <div className="flex items-center justify-between w-full">
-                <span className="text-xs font-mono text-[#D4AF37] font-bold">
-                  Pillar {pillar.number} · {pillar.lessons.length} Lessons
-                </span>
-                {getPillarIcon(pillar.number)}
+                <div className="flex items-center gap-2.5">
+                  <span className="px-2.5 py-1 rounded-md bg-slate-900 border border-slate-800 text-xs font-mono font-black text-[#D4AF37]">
+                    Pillar {pillar.number}
+                  </span>
+                  <span className="text-[11px] font-mono text-slate-400">
+                    {pillar.lessons.length} Lessons
+                  </span>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-900/80 border border-slate-800/80 group-hover:border-[#D4AF37]/40 transition-colors">
+                  {getPillarIcon(pillar.number)}
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <h3 className="text-lg font-bold text-white group-hover:text-[#D4AF37] transition-colors leading-snug">
+              {/* Title & Description */}
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-[#D4AF37]/10 text-[#D4AF37] border border-[#D4AF37]/20">
+                    {pillar.badge}
+                  </span>
+                </div>
+                <h3 className="text-xl font-black text-white group-hover:text-[#D4AF37] transition-colors leading-snug">
                   {pillar.title}
                 </h3>
-                <p className="text-xs text-slate-400 leading-relaxed line-clamp-2">
+                <p className="text-xs text-slate-400 leading-relaxed line-clamp-3">
                   {pillar.oneLineHook}
                 </p>
               </div>
 
-              <div className="pt-3 border-t border-slate-800/80 w-full flex items-center justify-between text-xs font-mono font-bold text-[#D4AF37] group-hover:text-white transition-colors">
-                <span>Enter Academy</span>
-                <ArrowRight className="w-4 h-4" />
+              {/* Action Button */}
+              <div className="pt-4 border-t border-slate-800/80 w-full flex items-center justify-between text-xs font-mono font-black text-[#D4AF37] group-hover:text-white transition-colors">
+                <span>Enter Workstation</span>
+                <div className="flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                  <ArrowRight className="w-4 h-4" />
+                </div>
               </div>
             </button>
           ))}

@@ -820,24 +820,49 @@ export function evaluateAllTradeFactors(p: {
   }
 
   // FACTOR 3: 14-Period Wilder RSI Momentum & Exhaustion (20 pts max)
+  const isUptrendStructure = effectiveH1 === 'UPTREND' || p.ema20 >= p.ema50;
   if (p.rsi >= 72) {
-    bearWeight += 14;
-    bullWeight += 4;
-    verdicts.push({
-      name: '3. RSI (14) Momentum',
-      signal: 'CAUTION',
-      weight: '14%',
-      detail: `RSI ${p.rsi} Overbought zone — avoid chasing high; wait 20 EMA retest`
-    });
+    if (isUptrendStructure) {
+      // Powerful bullish momentum surge: maintain bullish trend bias with trailing SL caution
+      bullWeight += 14;
+      bearWeight += 6;
+      verdicts.push({
+        name: '3. RSI (14) Momentum',
+        signal: 'BUY',
+        weight: '14%',
+        detail: `RSI ${p.rsi} Bullish Momentum Surge (Overbought 72+) — strong trend expansion; ride longs with trailing SL (lock profit)`
+      });
+    } else {
+      bearWeight += 14;
+      bullWeight += 4;
+      verdicts.push({
+        name: '3. RSI (14) Momentum',
+        signal: 'CAUTION',
+        weight: '14%',
+        detail: `RSI ${p.rsi} Bearish divergence / overbought retest — resistance ceiling in downtrend`
+      });
+    }
   } else if (p.rsi <= 28) {
-    bullWeight += 14;
-    bearWeight += 4;
-    verdicts.push({
-      name: '3. RSI (14) Momentum',
-      signal: 'CAUTION',
-      weight: '14%',
-      detail: `RSI ${p.rsi} Oversold zone — avoid chasing lows; wait 20 EMA retest`
-    });
+    if (!isUptrendStructure) {
+      // Powerful bearish momentum surge: maintain bearish trend bias with trailing SL caution
+      bearWeight += 14;
+      bullWeight += 6;
+      verdicts.push({
+        name: '3. RSI (14) Momentum',
+        signal: 'SELL',
+        weight: '14%',
+        detail: `RSI ${p.rsi} Bearish Momentum Surge (Oversold 28-) — strong trend distribution; ride shorts with trailing SL (lock profit)`
+      });
+    } else {
+      bullWeight += 14;
+      bearWeight += 4;
+      verdicts.push({
+        name: '3. RSI (14) Momentum',
+        signal: 'CAUTION',
+        weight: '14%',
+        detail: `RSI ${p.rsi} Bullish oversold retest — potential discount floor in uptrend`
+      });
+    }
   } else if (p.rsi >= 51) {
     bullWeight += 18;
     bearWeight += 2;
@@ -1109,10 +1134,15 @@ export function evaluateAllTradeFactors(p: {
       p.livePrice > (p.ema50 ?? p.livePrice);
     isBuy = confirmedBullReversal;
   } else {
-    // Initial evaluation with structural H1 tie-breaker
-    isBuy = bullScorePct !== bearScorePct
-      ? bullScorePct > bearScorePct
-      : effectiveH1 === 'UPTREND';
+    // Initial evaluation with structural H1 trend primacy:
+    // If H1 higher-timeframe trend is UPTREND, project BUY unless confirmed bear majority >= 60%
+    if (effectiveH1 === 'UPTREND') {
+      isBuy = bearScorePct < 60;
+    } else if (effectiveH1 === 'DOWNTREND') {
+      isBuy = bullScorePct >= 60;
+    } else {
+      isBuy = bullScorePct >= bearScorePct;
+    }
   }
 
   const dominantPct = isBuy ? bullScorePct : bearScorePct;
