@@ -3,11 +3,16 @@ import { CurrencyPair, PageTab } from '../types';
 import { PILLARS_MASTERCLASS_DATA } from '../data/pillarsMasterclassData';
 import {
   MarketScanData,
+  DailyMacroAiDirective,
+  ActiveMarketOrder,
   globalLiveStream,
   computeRealChartTradeParams,
+  computeLiveOrderMetrics,
+  computeCandleSwingLevels,
   evaluatePairKenyaTiming,
   getCurrentMacroContext
 } from '../utils/liveMarketEngine';
+import { ActiveMarketOrderPanel } from '../components/tools/ActiveMarketOrderPanel';
 import heroDeskImg from '../assets/images/hero_desk_telemetry_1793873187661.jpg';
 import {
   GraduationCap,
@@ -22,7 +27,11 @@ import {
   Clock,
   Globe,
   TrendingUp,
-  TrendingDown
+  TrendingDown,
+  Sparkles,
+  Copy,
+  Check,
+  ClipboardList
 } from 'lucide-react';
 
 interface LandingPageProps {
@@ -34,15 +43,34 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onSelectPillar,
   onOpenPairWorkspace,
 }) => {
-  const [topMarkets, setTopMarkets] = useState<MarketScanData[]>(() =>
-    globalLiveStream.getState().markets.slice(0, 4)
+  const [allMarkets, setAllMarkets] = useState<MarketScanData[]>(
+    () => globalLiveStream.getState().markets
+  );
+  const [dailyMacroDirective, setDailyMacroDirective] = useState<DailyMacroAiDirective>(
+    () => globalLiveStream.getState().dailyMacroDirective
+  );
+  const [activeOrders, setActiveOrders] = useState<Partial<Record<CurrencyPair, ActiveMarketOrder>>>(
+    () => globalLiveStream.getState().activeOrders
   );
   const [syncedAt, setSyncedAt] = useState<string>(() => globalLiveStream.getState().syncedAt);
   const [heroImgFailed, setHeroImgFailed] = useState<boolean>(false);
+  const [copiedLandingKey, setCopiedLandingKey] = useState<string | null>(null);
+
+  const copyLandingLevel = (val: string | number, key: string) => {
+    try {
+      navigator.clipboard.writeText(String(val));
+    } catch {}
+    setCopiedLandingKey(key);
+    setTimeout(() => {
+      setCopiedLandingKey((prev) => (prev === key ? null : prev));
+    }, 1500);
+  };
 
   useEffect(() => {
     const unsubscribe = globalLiveStream.subscribe((streamState) => {
-      setTopMarkets(streamState.markets.slice(0, 4));
+      setAllMarkets(streamState.markets);
+      setDailyMacroDirective(streamState.dailyMacroDirective);
+      setActiveOrders(streamState.activeOrders);
       setSyncedAt(streamState.syncedAt);
     });
     return () => unsubscribe();
@@ -50,7 +78,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
   const macroContext = (() => {
     const pctMap: Partial<Record<CurrencyPair, number>> = {};
-    topMarkets.forEach((m) => {
+    allMarkets.forEach((m) => {
       pctMap[m.pair] = m.change24hPct;
     });
     return getCurrentMacroContext(pctMap);
@@ -98,17 +126,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </h1>
 
               <p className="text-sm sm:text-base text-slate-300 max-w-xl leading-relaxed">
-                Grow small capital into verified prop firm funding. Master institutional order flow, real-time candlestick execution, Kenya session timing, and global trade safety across 9 independent academies.
+                Grow small capital into funded prop firm accounts. Instant AI multi-market scans ranked from Top % to Least %, locked multi-factor BUY/SELL projections, and live Nairobi session countdowns.
               </p>
             </div>
 
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-2">
               <button
                 type="button"
-                onClick={() => onSelectPillar('/fx-academy')}
+                onClick={() => onSelectPillar('/ai-scanner')}
                 className="px-6 py-3.5 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition active:scale-95 whitespace-nowrap shrink-0"
               >
-                <span>Explore 9 Masterclasses</span>
+                <span>Open AI Market Radar (Top % → Least)</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
 
@@ -117,8 +145,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 onClick={() => onSelectPillar('/macro-safety')}
                 className="px-5 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-100 font-bold text-xs border border-slate-700 hover:border-[#D4AF37] transition flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
               >
-                <Globe className="w-4 h-4 text-[#D4AF37]" />
-                <span>Check Today&apos;s Market Safety</span>
+                <Clock className="w-4 h-4 text-[#D4AF37]" />
+                <span>Today &amp; Hourly Safety Timer</span>
               </button>
             </div>
           </div>
@@ -141,7 +169,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </div>
             )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent pointer-events-none" />
-            <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between text-xs font-mono text-slate-200 tabular-nums">
+            <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between gap-2 text-xs font-mono text-slate-200 tabular-nums flex-wrap">
               <span>0.01 Micro Lot Shield · Max $2.00 / 260 KES</span>
               <span className="text-[#D4AF37] font-bold">CMA KE Ready</span>
             </div>
@@ -149,15 +177,79 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </div>
       </section>
 
-      {/* 2. LIVE TOP 4 MARKET OPPORTUNITIES STRIP (1-Click Jump to Live Chart & AI Scanner) */}
+      {/* 2. TODAY & THIS HOUR GLOBAL MACRO FAVORABILITY + NAIROBI COUNTDOWN */}
+      <section className="rounded-2xl p-5 sm:p-6 bg-[#0B1120] border border-[#D4AF37]/40 flex flex-col lg:flex-row lg:items-center justify-between gap-4 font-mono tabular-nums">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 text-xs text-[#D4AF37] font-bold flex-wrap">
+            <Sparkles className="w-4 h-4 shrink-0" />
+            <span>Today &amp; Current Hour Global AI Projection · {macroContext.sessionWindowName}</span>
+          </div>
+          <h2 className="text-base sm:text-xl font-black text-white">
+            {dailyMacroDirective.headline}
+          </h2>
+          <p className="text-xs text-slate-300 font-sans leading-relaxed max-w-3xl">
+            {dailyMacroDirective.hourlyOutlook}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3 flex-wrap shrink-0">
+          <div className="px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
+            <span className="text-[10px] text-slate-400 block">Nairobi Time (EAT)</span>
+            <strong className="text-sm text-white block">{macroContext.eatTimeString}</strong>
+            <span
+              className={`text-[11px] font-bold ${
+                macroContext.overallDaySafety === 'FAVOURABLE_BUY'
+                  ? 'text-[#00C261]'
+                  : macroContext.overallDaySafety === 'FAVOURABLE_SELL'
+                  ? 'text-red-400'
+                  : 'text-amber-300'
+              }`}
+            >
+              {macroContext.overallDaySafety === 'FAVOURABLE_BUY'
+                ? 'FAVOURABLE BUY WINDOW'
+                : macroContext.overallDaySafety === 'FAVOURABLE_SELL'
+                ? 'FAVOURABLE SELL WINDOW'
+                : 'SELECTIVE CAUTION WINDOW'}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => globalLiveStream.requestOpenScannerView('trade_log')}
+            className="px-4 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 font-bold text-xs inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition"
+          >
+            <ClipboardList className="w-3.5 h-3.5" />
+            <span>Trade Log &amp; Orders</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectPillar('/ai-scanner')}
+            className="px-4 py-3 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider whitespace-nowrap shrink-0"
+          >
+            Deep AI Scan All 10
+          </button>
+        </div>
+      </section>
+
+      {/* LIVE LOADED MARKET ORDERS MONITOR (SYNCS ACROSS CARDS & BROKERS PAGE) */}
+      <ActiveMarketOrderPanel
+        mode="summary_banner"
+        broker={globalLiveStream.getState().activeBroker}
+        onInspectPairCard={(targetPair) =>
+          onOpenPairWorkspace ? onOpenPairWorkspace(targetPair) : onSelectPillar('/ai-scanner')
+        }
+      />
+
+      {/* 3. ALL 10 LIVE MARKETS SORTED TOP % TO LEAST % (Click Any Card for Independent Chart & AI Rescan) */}
       <section className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
           <div className="flex items-center gap-2 text-xs font-mono text-slate-400 flex-wrap tabular-nums">
-            <span className="text-[#D4AF37] font-bold">Live Top Setups</span>
+            <span className="text-[#D4AF37] font-bold">All 10 Live Markets (Top % → Least %)</span>
             <span aria-hidden="true">·</span>
-            <span>Auto-Synced Every 0.5s ({syncedAt})</span>
+            <span>H1/M15 Trend Lock Active ({syncedAt})</span>
             <span aria-hidden="true">·</span>
-            <span>Click any pair to open chart &amp; SL/TP levels</span>
+            <span>Click any card to open independent chart, Rescan &amp; Super AI</span>
           </div>
 
           <button
@@ -165,14 +257,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             onClick={() => onSelectPillar('/ai-scanner')}
             className="text-xs font-mono font-bold text-[#D4AF37] hover:text-white transition inline-flex items-center gap-1 whitespace-nowrap shrink-0 self-start sm:self-auto"
           >
-            <span>Open All 8 Pairs in Scanner</span>
+            <span>Open Full Multi-Market Scanner</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 tabular-nums">
-          {topMarkets.map((m, idx) => {
+          {allMarkets.map((m, idx) => {
             const sideBias: 'BUY' | 'SELL' = m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
+            const cardSwings = computeCandleSwingLevels(m.candles);
             const computed = computeRealChartTradeParams({
               targetPair: m.pair,
               targetTf: m.recommendedTf,
@@ -183,6 +276,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               ema50: m.ema50,
               rsi: m.rsi,
               atrPips: m.atrPips,
+              swingLow: cardSwings.swingLow,
+              swingHigh: cardSwings.swingHigh,
               macro: macroContext,
               biasOverride: sideBias,
               previousDirection: sideBias,
@@ -192,15 +287,34 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             const timing = evaluatePairKenyaTiming(m.pair);
             const isBuy = computed.direction === 'BUY';
             const pctPos = m.change24hPct >= 0;
+            const loadedOrder = activeOrders[m.pair];
+            const orderMetrics = loadedOrder ? computeLiveOrderMetrics(loadedOrder, m.price, m.atrPips) : null;
+            const cardSl = loadedOrder ? loadedOrder.stopLoss : computed.stopLoss;
+            const cardTp = loadedOrder ? loadedOrder.tp2 : computed.tp2;
 
             return (
-              <button
+              <div
                 key={m.pair}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() =>
                   onOpenPairWorkspace ? onOpenPairWorkspace(m.pair) : onSelectPillar('/ai-scanner')
                 }
-                className="p-4 rounded-2xl bg-[#0B101E] border border-slate-800 hover:border-[#D4AF37] transition-colors text-left flex flex-col justify-between space-y-3 font-mono"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (onOpenPairWorkspace) {
+                      onOpenPairWorkspace(m.pair);
+                    } else {
+                      onSelectPillar('/ai-scanner');
+                    }
+                  }
+                }}
+                className={`p-4 rounded-2xl bg-[#0B101E] border transition-colors text-left flex flex-col justify-between space-y-3 font-mono cursor-pointer ${
+                  loadedOrder
+                    ? 'border-[#00C261] shadow-[0_0_16px_rgba(0,194,97,0.14)]'
+                    : 'border-slate-800 hover:border-[#D4AF37]'
+                }`}
               >
                 <div className="flex items-center justify-between text-[11px] text-slate-400 w-full">
                   <span>
@@ -224,9 +338,52 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between text-[11px] text-slate-300 pt-2 border-t border-slate-800/80 w-full">
-                  <span>SL {computed.stopLoss}</span>
-                  <span className="text-[#00C261]">TP {computed.tp2}</span>
+                {loadedOrder && orderMetrics && (
+                  <div className="px-2.5 py-1.5 rounded-lg bg-emerald-950/50 border border-[#00C261]/50 flex items-center justify-between text-[10px] font-black text-[#00C261]">
+                    <span>{loadedOrder.direction} PLACED ON BROKER</span>
+                    <span>
+                      {orderMetrics.floatingPips >= 0 ? `+${orderMetrics.floatingPips}p` : `${orderMetrics.floatingPips}p`} ·{' '}
+                      {orderMetrics.netProfitUsd >= 0
+                        ? `+$${orderMetrics.netProfitUsd.toFixed(2)}`
+                        : `-$${Math.abs(orderMetrics.netProfitUsd).toFixed(2)}`}
+                    </span>
+                  </div>
+                )}
+
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="grid grid-cols-2 gap-1.5 text-[11px] text-slate-300 pt-2 border-t border-slate-800/80 w-full"
+                >
+                  <div className="flex items-center justify-between gap-1 bg-slate-950/80 px-2 py-1 rounded-lg border border-slate-800/80">
+                    <span className="truncate">SL {cardSl}</span>
+                    <button
+                      type="button"
+                      onClick={() => copyLandingLevel(cardSl, `land-sl-${m.pair}`)}
+                      className="p-1 rounded bg-slate-900 hover:bg-red-950 text-red-300 shrink-0"
+                      title="Copy Stop Loss"
+                    >
+                      {copiedLandingKey === `land-sl-${m.pair}` ? (
+                        <Check className="w-3 h-3 text-[#00C261]" />
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between gap-1 bg-slate-950/80 px-2 py-1 rounded-lg border border-slate-800/80">
+                    <span className="text-[#00C261] truncate">TP {cardTp}</span>
+                    <button
+                      type="button"
+                      onClick={() => copyLandingLevel(cardTp, `land-tp-${m.pair}`)}
+                      className="p-1 rounded bg-slate-900 hover:bg-emerald-950 text-[#00C261] shrink-0"
+                      title="Copy Take Profit"
+                    >
+                      {copiedLandingKey === `land-tp-${m.pair}` ? (
+                        <Check className="w-3 h-3 text-[#00C261]" />
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between text-[10px] w-full pt-1">
@@ -242,15 +399,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     <Clock className="w-3 h-3 shrink-0" />
                     <span className="truncate">{timing.windowBadgeShort}</span>
                   </span>
-                  <span className="text-[#D4AF37] font-bold shrink-0">Inspect →</span>
+                  <span className="text-[#D4AF37] font-bold shrink-0">
+                    {loadedOrder ? 'Manage →' : 'Inspect →'}
+                  </span>
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
       </section>
 
-      {/* 3. NINE INDEPENDENT ACADEMY PILLAR CARDS */}
+      {/* 4. NINE INDEPENDENT ACADEMY PILLAR CARDS */}
       <section className="space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 border-b border-slate-800 pb-4">
           <div className="space-y-1">

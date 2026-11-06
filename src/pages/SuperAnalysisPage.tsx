@@ -777,7 +777,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
           <div className="glass-panel rounded-3xl p-6 sm:p-8 border border-slate-800 space-y-5">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#00C261]" />
+                <SlidersHorizontal className="w-4 h-4 text-[#00C261]" />
                 MT4 / MT5 Chart Parameters
               </h3>
               <button
@@ -858,7 +858,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-cyan-400" /> EMA 20 (Cyan)
+                    <span className="w-3 h-0.5 bg-cyan-400 inline-block" /> EMA 20 (Cyan)
                   </span>
                   <span className="text-[10px] text-slate-400 font-mono">Fast MA</span>
                 </label>
@@ -875,7 +875,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-amber-400" /> EMA 50 (Orange)
+                    <span className="w-3 h-0.5 bg-amber-400 inline-block" /> EMA 50 (Orange)
                   </span>
                   <span className="text-[10px] text-slate-400 font-mono">Slow MA</span>
                 </label>

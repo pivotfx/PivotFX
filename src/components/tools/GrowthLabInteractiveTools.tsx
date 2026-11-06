@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { JournalTrade, CurrencyPair } from '../../types';
+import { globalLiveStream } from '../../utils/liveMarketEngine';
 import {
   BookOpenCheck,
   Plus,
@@ -17,7 +18,8 @@ import {
   Wallet,
   Percent,
   BarChart3,
-  RefreshCw
+  RefreshCw,
+  ClipboardList
 } from 'lucide-react';
 
 const INITIAL_DEMO_TRADES: JournalTrade[] = [
@@ -83,6 +85,28 @@ export const GrowthLabInteractiveTools: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('pivotfx_prop_trades', JSON.stringify(trades));
   }, [trades]);
+
+  useEffect(() => {
+    const syncFromStorage = () => {
+      try {
+        const saved = localStorage.getItem('pivotfx_prop_trades');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            setTrades(parsed);
+          }
+        }
+      } catch {
+        // Ignore storage errors
+      }
+    };
+    window.addEventListener('pivotfx:prop-trades-updated', syncFromStorage);
+    window.addEventListener('storage', syncFromStorage);
+    return () => {
+      window.removeEventListener('pivotfx:prop-trades-updated', syncFromStorage);
+      window.removeEventListener('storage', syncFromStorage);
+    };
+  }, []);
 
   // Form State
   const [pair, setPair] = useState<CurrencyPair>('EUR/USD');
@@ -194,40 +218,51 @@ export const GrowthLabInteractiveTools: React.FC = () => {
           </p>
         </div>
 
-        {/* Tab Buttons */}
-        <div className="flex flex-wrap items-center p-1 rounded-xl bg-slate-900 border border-slate-800 text-xs font-bold font-mono gap-1">
+        {/* Tab Buttons + Live Trade Log Jump */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center p-1 rounded-xl bg-slate-900 border border-slate-800 text-xs font-bold font-mono gap-1">
+            <button
+              onClick={() => setActiveTab('logger')}
+              className={`px-3 py-2 rounded-lg transition flex items-center gap-1.5 ${
+                activeTab === 'logger' ? 'bg-[#D4AF37] text-black shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <span>1. Trade Ledger</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('audit')}
+              className={`px-3 py-2 rounded-lg transition flex items-center gap-1.5 ${
+                activeTab === 'audit' ? 'bg-[#D4AF37] text-black shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <span>2. Weekly Audit</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('roadmap')}
+              className={`px-3 py-2 rounded-lg transition flex items-center gap-1.5 ${
+                activeTab === 'roadmap' ? 'bg-[#D4AF37] text-black shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <span>3. Funded Roadmap</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('mpesa')}
+              className={`px-3 py-2 rounded-lg transition flex items-center gap-1.5 ${
+                activeTab === 'mpesa' ? 'bg-[#D4AF37] text-black shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+              <span>4. 🇰🇪 M-Pesa Shield</span>
+            </button>
+          </div>
+
           <button
-            onClick={() => setActiveTab('logger')}
-            className={`px-3 py-2 rounded-lg transition flex items-center gap-1.5 ${
-              activeTab === 'logger' ? 'bg-[#D4AF37] text-black shadow-md' : 'text-slate-400 hover:text-white'
-            }`}
+            type="button"
+            onClick={() => globalLiveStream.requestOpenScannerView('trade_log')}
+            className="px-3.5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 text-xs font-mono font-bold inline-flex items-center gap-1.5 transition whitespace-nowrap shrink-0"
           >
-            <span>1. Trade Ledger</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('audit')}
-            className={`px-3 py-2 rounded-lg transition flex items-center gap-1.5 ${
-              activeTab === 'audit' ? 'bg-[#D4AF37] text-black shadow-md' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <span>2. Weekly Audit</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('roadmap')}
-            className={`px-3 py-2 rounded-lg transition flex items-center gap-1.5 ${
-              activeTab === 'roadmap' ? 'bg-[#D4AF37] text-black shadow-md' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <span>3. Funded Roadmap</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('mpesa')}
-            className={`px-3 py-2 rounded-lg transition flex items-center gap-1.5 ${
-              activeTab === 'mpesa' ? 'bg-[#D4AF37] text-black shadow-md' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Wallet className="w-3.5 h-3.5 text-emerald-400" />
-            <span>4. 🇰🇪 M-Pesa Shield</span>
+            <ClipboardList className="w-3.5 h-3.5" />
+            <span>Open Live Suggested &amp; Placed Trade Log</span>
           </button>
         </div>
       </div>
@@ -359,6 +394,12 @@ export const GrowthLabInteractiveTools: React.FC = () => {
                   <option value="GBP/USD">GBP/USD</option>
                   <option value="USD/JPY">USD/JPY</option>
                   <option value="XAU/USD">XAU/USD</option>
+                  <option value="USD/CAD">USD/CAD</option>
+                  <option value="USD/CHF">USD/CHF</option>
+                  <option value="GBP/JPY">GBP/JPY</option>
+                  <option value="EUR/JPY">EUR/JPY</option>
+                  <option value="AUD/USD">AUD/USD</option>
+                  <option value="BTC/USD">BTC/USD</option>
                 </select>
               </div>
 
@@ -555,7 +596,7 @@ export const GrowthLabInteractiveTools: React.FC = () => {
               </span>
               <h5 className="text-sm font-bold text-white">Foundation & Academy Mastery</h5>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Complete all 8 Pillars of PivotFx. Practice on an FXPesa demo account strictly using 0.01 micro lots and the $2.00 survival rule.
+                Complete all 9 Pillars of PivotFx. Practice on an FXPesa demo account strictly using 0.01 micro lots and the $2.00 survival rule.
               </p>
             </div>
 

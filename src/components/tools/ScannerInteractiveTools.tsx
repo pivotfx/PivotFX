@@ -3,11 +3,15 @@ import { CurrencyPair, Timeframe, ScannerAnalysisResult, BrokerId } from '../../
 import { TradingViewEmbedWidget } from './TradingViewEmbedWidget';
 import { MultiMarketRadarEngine } from './MultiMarketRadarEngine';
 import { LiveInteractiveCandleChart } from './LiveInteractiveCandleChart';
+import { ActiveMarketOrderPanel } from './ActiveMarketOrderPanel';
+import { TradeLogAndNotificationsView } from './TradeLogAndNotificationsView';
 import {
   MarketScanData,
+  ScannerWorkspaceTab,
   INITIAL_MARKETS_DATA,
   globalLiveStream,
   computeRealChartTradeParams,
+  computeCandleSwingLevels,
   fetchLiveMarketSnapshot,
   fetchPairLiveCandleSnapshot,
   evaluateCandleSeriesAndTick,
@@ -57,7 +61,8 @@ import {
   Smartphone,
   Download,
   X,
-  Crosshair
+  Crosshair,
+  ClipboardList
 } from 'lucide-react';
 
 interface ScannerInteractiveToolsProps {
@@ -108,13 +113,33 @@ interface AdvisorMessage {
 
 export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = ({ onLogTrade }) => {
   const initialStreamState = globalLiveStream.getState();
-  const initialPair = initialStreamState.selectedPair || 'GBP/USD';
+  const pendingPairInit = (() => {
+    try {
+      const p = window.sessionStorage.getItem('pivotfx_pending_scanner_pair') as CurrencyPair | null;
+      if (p) {
+        window.sessionStorage.removeItem('pivotfx_pending_scanner_pair');
+      }
+      return p;
+    } catch {
+      return null;
+    }
+  })();
+  const initialPair = pendingPairInit || initialStreamState.selectedPair || 'GBP/USD';
   const initialMarketMatch =
     initialStreamState.markets.find((m) => m.pair === initialPair) || initialStreamState.markets[0];
 
-  const [scannerView, setScannerView] = useState<'hub' | 'radar' | 'favorable_chart' | 'manual' | 'advisor' | 'camera'>(() =>
-    initialStreamState.selectedPair ? 'favorable_chart' : 'hub'
-  );
+  const [scannerView, setScannerView] = useState<ScannerWorkspaceTab>(() => {
+    try {
+      const pendingView = window.sessionStorage.getItem(
+        'pivotfx_pending_scanner_view'
+      ) as ScannerWorkspaceTab | null;
+      if (pendingView) {
+        window.sessionStorage.removeItem('pivotfx_pending_scanner_view');
+        return pendingView;
+      }
+    } catch {}
+    return 'radar';
+  });
   const [liveMarkets, setLiveMarkets] = useState<MarketScanData[]>(initialStreamState.markets);
   const [feedSyncedAt, setFeedSyncedAt] = useState<string>(initialStreamState.syncedAt);
   const [superAiAuto, setSuperAiAuto] = useState<boolean>(initialStreamState.superAiAutoEnabled);
@@ -123,7 +148,7 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
   const [userLockedCandlePrice, setUserLockedCandlePrice] = useState<boolean>(false);
 
   // Shared Required Data Ingestion State
-  const [broker, setBroker] = useState<BrokerId>('fxpesa');
+  const [broker, setBroker] = useState<BrokerId>(initialStreamState.activeBroker || 'fxpesa');
   const [pair, setPair] = useState<CurrencyPair>(initialPair);
   const [showTradingView, setShowTradingView] = useState<boolean>(false);
   const [analysisExecutionMode, setAnalysisExecutionMode] = useState<'standard' | 'deep_ai'>('deep_ai');
@@ -222,6 +247,7 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
       setFeedSyncedAt(streamState.syncedAt);
       setSuperAiAuto(streamState.superAiAutoEnabled);
       setSuperAiNotes(streamState.superAiNotes);
+      setBroker(streamState.activeBroker);
 
       const activeTarget = streamState.selectedPair || selectedPairRef.current;
       const match =
@@ -229,7 +255,6 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
       if (match) {
         if (streamState.selectedPair && streamState.selectedPair !== selectedPairRef.current) {
           setPair(streamState.selectedPair);
-          setScannerView('favorable_chart');
         }
         const liveAiNote = streamState.superAiNotes[match.pair];
         setLiveAutoNotes(liveAiNote ? `${liveAiNote.headline}: ${liveAiNote.note}` : match.projection);
@@ -244,7 +269,25 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
         }
       }
     });
-    return () => unsubscribe();
+    const handleOpenScannerViewEvt = (ev: Event) => {
+      const customEv = ev as CustomEvent<{ view?: ScannerWorkspaceTab; pair?: CurrencyPair }>;
+      if (customEv.detail?.pair) {
+        setPair(customEv.detail.pair);
+      }
+      if (customEv.detail?.view) {
+        setScannerView(customEv.detail.view);
+      }
+      try {
+        window.sessionStorage.removeItem('pivotfx_pending_scanner_view');
+        window.sessionStorage.removeItem('pivotfx_pending_scanner_pair');
+      } catch {}
+    };
+
+    window.addEventListener('pivotfx:open-scanner-view', handleOpenScannerViewEvt);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('pivotfx:open-scanner-view', handleOpenScannerViewEvt);
+    };
   }, []);
 
   const handleSyncLiveQuotes = async () => {
@@ -764,6 +807,8 @@ InpMagicNumber=777129
         pctMap[m.pair] = m.change24hPct;
       });
       const currentMacro = getCurrentMacroContext(pctMap);
+      const matchedMktForSwing = prefill || liveMarkets.find((m) => m.pair === activePair);
+      const swings = computeCandleSwingLevels(matchedMktForSwing?.candles);
 
       const computed = computeRealChartTradeParams({
         targetPair: activePair,
@@ -774,7 +819,9 @@ InpMagicNumber=777129
         ema20: targetEma20,
         ema50: targetEma50,
         rsi: targetRsi,
-        atrPips: targetAtrPips,
+        atrPips: targetAtrPips ?? matchedMktForSwing?.atrPips,
+        swingLow: swings.swingLow,
+        swingHigh: swings.swingHigh,
         macro: currentMacro,
         biasOverride: manualDirection
       });
@@ -788,7 +835,7 @@ InpMagicNumber=777129
       );
       const score = Math.round(confidencePercent);
       const verdict: 'WAIT' | 'RISKY' | 'HIGH_PROBABILITY_BUY' | 'HIGH_PROBABILITY_SELL' =
-        prefill?.bias === 'NEUTRAL_CHOP'
+        prefill?.bias === 'NEUTRAL_CHOP' || computed.isExtendedZone
           ? 'WAIT'
           : isBuy
           ? 'HIGH_PROBABILITY_BUY'
@@ -805,6 +852,10 @@ InpMagicNumber=777129
         `Momentum & Liquidity: RSI (14) at ${targetRsi} · Sweep pool @ ${targetKeyLevel}.`,
         `Gilgil Sizing Shield: Strictly 0.01 micro lot ($${computed.actualRiskUsd.toFixed(2)} / 260 KES max loss cap).`
       ];
+
+      if (computed.isExtendedZone && computed.entryTimingWarning) {
+        reasons.unshift(computed.entryTimingWarning);
+      }
 
       if (mode === 'deep_ai') {
         reasons.push('Deep AI Multi-Confluence Engine: Institutional order flow & spread tolerance verified.');
@@ -1040,6 +1091,8 @@ InpMagicNumber=777129
       // 1. Detect if user specifies pair
       let targetPair: CurrencyPair = pair;
       if (queryLower.includes('gold') || queryLower.includes('xau')) targetPair = 'XAU/USD';
+      else if (queryLower.includes('eur/jpy') || queryLower.includes('eurjpy') || queryLower.includes('euppy')) targetPair = 'EUR/JPY';
+      else if (queryLower.includes('usd/chf') || queryLower.includes('usdchf') || queryLower.includes('swissy') || queryLower.includes('franc')) targetPair = 'USD/CHF';
       else if (queryLower.includes('fiber') || queryLower.includes('eur/usd') || queryLower.includes('eurusd') || queryLower.includes('euro') || queryLower.includes('usd/euro') || queryLower.includes('usd euro') || queryLower.includes('usdeur')) targetPair = 'EUR/USD';
       else if (queryLower.includes('cable') || queryLower.includes('gbp/usd') || queryLower.includes('gbpusd') || queryLower.includes('pound')) targetPair = 'GBP/USD';
       else if (queryLower.includes('ninja') || queryLower.includes('usd/jpy') || queryLower.includes('usdjpy') || queryLower.includes('yen')) targetPair = 'USD/JPY';
@@ -1107,7 +1160,7 @@ InpMagicNumber=777129
         });
         const advisorMacro = getCurrentMacroContext(pctMapAdvisor);
 
-        // Calculate dynamic real trade parameters anchored to exact price, timeframe, ATR & all 5 macro factors
+        const swingsAdvisor = computeCandleSwingLevels(matchedMarket?.candles);
         const computed = computeRealChartTradeParams({
           targetPair,
           targetTf,
@@ -1118,6 +1171,8 @@ InpMagicNumber=777129
           ema50: targetEma50,
           rsi: targetRsi,
           atrPips: matchedMarket?.atrPips,
+          swingLow: swingsAdvisor.swingLow,
+          swingHigh: swingsAdvisor.swingHigh,
           macro: advisorMacro
         });
 
@@ -1230,40 +1285,58 @@ InpMagicNumber=777129
       playAudioBeep(750, 0.1);
   };
 
-  // Transfer Scanned Trade Directly into Pillar 8 Trade Journal
+  // Transfer Scanned Trade Directly into Real Suggested Markets Trade Log & Pillar 8 Journal
   const handleLogToJournal = (data: any) => {
     try {
+      const targetPair = (data.pair || pair) as CurrencyPair;
+      const dir: 'BUY' | 'SELL' = data.verdict?.includes('BUY') || data.direction === 'BUY' ? 'BUY' : 'SELL';
+      const entryVal = Number(data.entryPrice || data.price);
+      const slVal = Number(data.suggestedSL || data.stopLoss);
+      const tpVal = Number(data.suggestedTP || data.takeProfit || data.tp2);
+
+      globalLiveStream.logSuggestedSetup({
+        pair: targetPair,
+        timeframe: (data.timeframe || timeframe) as Timeframe,
+        broker,
+        direction: dir,
+        customEntryPrice: !isNaN(entryVal) && entryVal > 0 ? entryVal : undefined,
+        customStopLoss: !isNaN(slVal) && slVal > 0 ? slVal : undefined,
+        customTp: !isNaN(tpVal) && tpVal > 0 ? tpVal : undefined,
+        reasonSummary: data.projection || data.pattern || `${dir} Setup Logged from AI Scanner`
+      });
+
       const saved = localStorage.getItem('pivotfx_prop_trades');
       const existing = saved ? JSON.parse(saved) : [];
       const newTrade = {
         id: `scan-${Date.now()}`,
         timestamp: `${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })} EAT`,
-        pair: data.pair,
-        type: data.verdict?.includes('BUY') ? 'BUY' : 'SELL',
+        pair: targetPair,
+        type: dir,
         lotSize: data.suggestedLot || 0.01,
-        entryPrice: data.entryPrice || data.price,
-        exitPrice: data.suggestedTP || data.takeProfit,
+        entryPrice: entryVal,
+        exitPrice: tpVal,
         pnlUsd: data.potentialGainUsd || 5.0,
-        status: 'PENDING',
+        status: 'OPEN',
         setupName: data.pattern || data.detectedPattern || 'AI Scanner Setup',
         mistakeTag: 'AI Algorithmic Confluence',
-        notes: `Logged from AI Scanner (${data.score}/100 Confluence). Broker: ${broker.toUpperCase()}. Session: ${session}.`
+        notes: `Logged from AI Scanner (${data.score || 88}/100 Confluence). Broker: ${broker.toUpperCase()}. Session: ${session}.`
       };
 
       const updated = [newTrade, ...existing];
       localStorage.setItem('pivotfx_prop_trades', JSON.stringify(updated));
-      setLoggedSuccess(`Trade for ${data.pair} successfully logged to Pillar 8 Trade Journal!`);
+      window.dispatchEvent(new CustomEvent('pivotfx:prop-trades-updated', { detail: newTrade }));
+      setLoggedSuccess(`Setup for ${targetPair} (${dir}) saved to Real Suggested Trade Log & Journal!`);
       playAudioBeep(980, 0.15);
 
       setTimeout(() => {
         setLoggedSuccess(null);
-      }, 4000);
+      }, 4500);
 
       if (onLogTrade) {
         onLogTrade(newTrade);
       }
     } catch (e) {
-      console.error('Failed to log trade to localStorage:', e);
+      console.error('Failed to log trade:', e);
     }
   };
 
@@ -1327,27 +1400,33 @@ InpMagicNumber=777129
           <button
             type="button"
             onClick={() => {
-              setScannerView('hub');
+              setScannerView('radar');
               globalLiveStream.setSelectedPair(null);
             }}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] hover:text-white border border-slate-700 text-xs font-mono font-bold transition whitespace-nowrap shrink-0"
           >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back to Scanner Hub</span>
+            <Globe className="w-4 h-4" />
+            <span>All 10 Market Cards (Top % → Least)</span>
           </button>
 
           <div className="flex items-center gap-1.5 flex-wrap">
             {([
-              { id: 'radar', label: '1. Radar', icon: <Globe className="w-3.5 h-3.5" /> },
-              { id: 'favorable_chart', label: '2. Live Chart & Ticket', icon: <BarChart3 className="w-3.5 h-3.5" /> },
-              { id: 'advisor', label: '3. AI Advisor', icon: <Bot className="w-3.5 h-3.5" /> },
-              { id: 'camera', label: '4. Camera OCR', icon: <Camera className="w-3.5 h-3.5" /> },
-              { id: 'manual', label: '5. Manual EA', icon: <SlidersHorizontal className="w-3.5 h-3.5" /> }
+              { id: 'radar', label: '1. Radar Cards', icon: <Globe className="w-3.5 h-3.5" /> },
+              { id: 'favorable_chart', label: '2. Order Ticket', icon: <BarChart3 className="w-3.5 h-3.5" /> },
+              { id: 'trade_log', label: '3. Trade Log & Orders', icon: <ClipboardList className="w-3.5 h-3.5" /> },
+              { id: 'advisor', label: '4. AI Advisor', icon: <Bot className="w-3.5 h-3.5" /> },
+              { id: 'camera', label: '5. Camera OCR', icon: <Camera className="w-3.5 h-3.5" /> },
+              { id: 'manual', label: '6. Manual EA', icon: <SlidersHorizontal className="w-3.5 h-3.5" /> }
             ] as const).map((tabItem) => (
               <button
                 key={tabItem.id}
                 type="button"
-                onClick={() => setScannerView(tabItem.id)}
+                onClick={() => {
+                  setScannerView(tabItem.id);
+                  if (tabItem.id === 'radar') {
+                    globalLiveStream.setSelectedPair(null);
+                  }
+                }}
                 className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                   scannerView === tabItem.id
                     ? 'bg-[#D4AF37] text-black font-black'
@@ -1364,9 +1443,18 @@ InpMagicNumber=777129
 
       {/* SUCCESS BANNER WHEN TRADE LOGGED */}
       {loggedSuccess && (
-        <div className="p-3.5 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 text-xs font-mono flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>{loggedSuccess}</span>
+        <div className="p-3.5 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 text-xs font-mono flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{loggedSuccess}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setScannerView('trade_log')}
+            className="px-3 py-1 rounded-lg bg-[#00C261] text-black font-black text-[11px]"
+          >
+            View Trade Log &amp; Broker Orders →
+          </button>
         </div>
       )}
 
@@ -1381,7 +1469,7 @@ InpMagicNumber=777129
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-xs font-mono text-cyan-400">
                   <Globe className="w-5 h-5 text-[#D4AF37]" />
-                  <span>8 Markets Monitored · 0.5s Sync</span>
+                  <span>10 Markets Monitored · Real-Time Sync</span>
                 </div>
 
                 <div className="space-y-1">
@@ -1389,7 +1477,7 @@ InpMagicNumber=777129
                     1. Live Multi-Market Radar &amp; Opportunities
                   </h4>
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    Scans 8 FX pairs, gold, and crypto simultaneously. Pinpoints liquidity sweeps, order blocks, and broker spreads across FXPesa, Exness, HFM, and FBS.
+                    Scans 10 FX majors, JPY/CHF crosses, gold, and crypto simultaneously. Pinpoints liquidity sweeps, order blocks, and broker spreads across FXPesa, Exness, HFM, and FBS.
                   </p>
                 </div>
 
@@ -1403,7 +1491,10 @@ InpMagicNumber=777129
 
               <button
                 type="button"
-                onClick={() => setScannerView('radar')}
+                onClick={() => {
+                  setScannerView('radar');
+                  globalLiveStream.setSelectedPair(null);
+                }}
                 className="w-full py-3 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition whitespace-nowrap"
               >
                 <span>Open Multi-Market Radar</span>
@@ -1577,6 +1668,8 @@ InpMagicNumber=777129
                     <option value="XAU/USD">XAU/USD (Gold Spot)</option>
                     <option value="USD/JPY">USD/JPY (Ninja)</option>
                     <option value="GBP/JPY">GBP/JPY (Dragon)</option>
+                    <option value="EUR/JPY">EUR/JPY (Euppy Cross)</option>
+                    <option value="USD/CHF">USD/CHF (Swissy)</option>
                     <option value="BTC/USD">BTC/USD (Bitcoin Spot)</option>
                     <option value="USD/CAD">USD/CAD (Loonie)</option>
                     <option value="AUD/USD">AUD/USD (Aussie)</option>
@@ -1607,7 +1700,11 @@ InpMagicNumber=777129
                   </label>
                   <select
                     value={broker}
-                    onChange={(e) => setBroker(e.target.value as BrokerId)}
+                    onChange={(e) => {
+                      const next = e.target.value as BrokerId;
+                      setBroker(next);
+                      globalLiveStream.setActiveBroker(next);
+                    }}
                     className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:border-[#D4AF37] outline-none"
                   >
                     <option value="fxpesa">FXPesa (CMA Kenya · ~1.1p Spread)</option>
@@ -1932,6 +2029,15 @@ InpMagicNumber=777129
                 </p>
               </div>
 
+              {/* Go-Ahead Assurance, Instant Copy SL/TP & Live Market Order Tracker */}
+              <ActiveMarketOrderPanel
+                mode="full"
+                pair={pair}
+                direction={favorableComputed.direction}
+                timeframe={timeframe}
+                broker={broker}
+              />
+
               {/* Grid of 5 Essential Numerical Execution Values */}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-1">
@@ -2244,7 +2350,10 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
 
             <button
               type="button"
-              onClick={() => setScannerView('radar')}
+              onClick={() => {
+                setScannerView('radar');
+                globalLiveStream.setSelectedPair(null);
+              }}
               className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 bg-slate-900 text-cyan-400 border border-slate-700 hover:bg-slate-800 transition whitespace-nowrap"
             >
               <Globe className="w-3.5 h-3.5" />
@@ -2267,6 +2376,8 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
               <option value="USD/JPY">USD/JPY (Ninja)</option>
               <option value="XAU/USD">XAU/USD (Gold Spot)</option>
               <option value="GBP/JPY">GBP/JPY (Dragon / Guppy)</option>
+              <option value="EUR/JPY">EUR/JPY (Euppy Cross)</option>
+              <option value="USD/CHF">USD/CHF (Swissy)</option>
               <option value="BTC/USD">BTC/USD (Bitcoin Spot)</option>
               <option value="USD/CAD">USD/CAD (Loonie)</option>
               <option value="AUD/USD">AUD/USD (Aussie)</option>
@@ -2295,7 +2406,11 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
             <label className="text-[10px] font-mono text-slate-400 uppercase font-bold">Broker Environment *</label>
             <select
               value={broker}
-              onChange={(e) => setBroker(e.target.value as any)}
+              onChange={(e) => {
+                const next = e.target.value as BrokerId;
+                setBroker(next);
+                globalLiveStream.setActiveBroker(next);
+              }}
               className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:border-[#D4AF37] outline-none"
             >
               <option value="fxpesa">FXPesa (CMA Kenya · ~1.1p Spread)</option>
@@ -4257,6 +4372,18 @@ Broker: ${broker.toUpperCase()}`;
             </button>
           </div>
         </div>
+      )}
+
+      {/* =========================================================================
+          VIEW 6: REAL SUGGESTED MARKETS TRADE LOG & PLACED BROKER ORDERS
+          ========================================================================= */}
+      {scannerView === 'trade_log' && (
+        <TradeLogAndNotificationsView
+          onSelectPairForChart={(targetPair) => {
+            handleSwitchPairAndSyncRealData(targetPair);
+            setScannerView('favorable_chart');
+          }}
+        />
       )}
       {/* ======================================================== */}
       {/* MODAL 1: MT4/MT5 EA SCRIPT & .SET PRESET EXPORTER       */}

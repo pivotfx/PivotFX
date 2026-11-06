@@ -1,4 +1,12 @@
-import { BrokerId, CurrencyPair, Timeframe } from '../types';
+import {
+  BrokerId,
+  CurrencyPair,
+  SuggestedSignalLogEntry,
+  Timeframe,
+  TradeNotification
+} from '../types';
+
+export type { SuggestedSignalLogEntry, TradeNotification };
 
 export type PatternCategory =
   | 'Tower Top Liquidity Sweep'
@@ -30,6 +38,10 @@ export interface MacroContextSnapshot {
   isRolloverWindow: boolean;
   isUsReleaseWindow: boolean;
   eatHour: number;
+  eatTimeString: string;
+  sessionWindowName: string;
+  overallDaySafety: 'FAVOURABLE_BUY' | 'FAVOURABLE_SELL' | 'SELECTIVE_CAUTION';
+  overallHeadline: string;
 }
 
 export interface TrajectoryHorizonStep {
@@ -104,6 +116,8 @@ export interface MarketScanData {
     | 'REVERSAL SELL PLAN (CONFIRM BELOW 20 EMA)';
   profitOutlookText?: string;
   isFavourableOrder?: boolean;
+  isExtendedZone?: boolean;
+  entryTimingWarning?: string;
   spreadByBroker: Record<BrokerId, { symbol: string; spread: number; notes: string }>;
 }
 
@@ -139,6 +153,8 @@ export interface ComputedTradeParams {
     | 'REVERSAL SELL PLAN (CONFIRM BELOW 20 EMA)';
   profitOutlookText: string;
   isFavourableOrder: boolean;
+  isExtendedZone: boolean;
+  entryTimingWarning?: string;
   brokerSymbol: string;
   brokerSpread: number;
   decimals: number;
@@ -146,6 +162,16 @@ export interface ComputedTradeParams {
   bullScorePct: number;
   bearScorePct: number;
   factorVerdicts: FactorJudgmentItem[];
+  alignedFactorsCount: number;
+  totalFactorsCount: number;
+  goAheadAssurance:
+    | 'GO-AHEAD ASSURANCE: STRONG BUY APPROVED'
+    | 'GO-AHEAD ASSURANCE: STRONG SELL APPROVED'
+    | 'GO-AHEAD ASSURANCE: BUY BY MARKET'
+    | 'GO-AHEAD ASSURANCE: SELL BY MARKET'
+    | 'WAIT PULLBACK TO 20 EMA — EXTENDED ENTRY ZONE'
+    | 'SELECTIVE BUY — ENTER ON 20 EMA CONFIRMATION'
+    | 'SELECTIVE SELL — ENTER ON 20 EMA CONFIRMATION';
   trajectory: string;
   trajectoryHorizons: TrajectoryHorizonStep[];
   trendDirection: 'UPTREND' | 'DOWNTREND' | 'RANGING';
@@ -154,6 +180,73 @@ export interface ComputedTradeParams {
   humanCheckNote: string;
   mt4SafetyProof: string;
   cmaProtection: string;
+}
+
+export interface ActiveMarketOrder {
+  id: string;
+  pair: CurrencyPair;
+  direction: 'BUY' | 'SELL';
+  lotSize: number;
+  broker: BrokerId;
+  timeframe: Timeframe;
+  entryPrice: number;
+  stopLoss: number;
+  tp1: number;
+  tp2: number;
+  tp3: number;
+  initialStopLoss: number;
+  initialTp2: number;
+  loadedAtEat: string;
+  loadedTimestamp: number;
+  autoTrailEnabled: boolean;
+  slUpdatesCount: number;
+  peakProfitUsd: number;
+}
+
+export interface ClosedOrderHistoryEntry {
+  id: string;
+  pair: CurrencyPair;
+  direction: 'BUY' | 'SELL';
+  lotSize: number;
+  broker: BrokerId;
+  timeframe: Timeframe;
+  entryPrice: number;
+  closePrice: number;
+  finalStopLoss: number;
+  finalTp: number;
+  realizedPips: number;
+  realizedUsd: number;
+  realizedKes: number;
+  slUpdatesCount: number;
+  loadedAtEat: string;
+  closedAtEat: string;
+  outcome: 'PROFIT' | 'BREAKEVEN' | 'STOP_LOSS' | 'MANUAL_CLOSE';
+}
+
+export interface LiveOrderMetrics {
+  floatingPips: number;
+  grossUsd: number;
+  spreadCostUsd: number;
+  netProfitUsd: number;
+  netProfitKes: number;
+  isInProfit: boolean;
+  isBreakevenLocked: boolean;
+  hitTp1: boolean;
+  hitTp2: boolean;
+  hitTp3: boolean;
+  hitSl: boolean;
+  slToTpProgressPct: number;
+  pipsRemainingToTp1: number;
+  pipsRemainingToTp2: number;
+  pipsDistanceAboveSl: number;
+  suggestedBreakevenSl: number;
+  suggestedLockProfitSl: number;
+  suggestedExpandedTp1: number;
+  suggestedExpandedTp2: number;
+  suggestedExpandedTp3: number;
+  projectedProfitAtUpdatedTpUsd: number;
+  projectedProfitAtUpdatedTpKes: number;
+  decimals: number;
 }
 
 export interface MacroFactorFlags {
@@ -229,6 +322,127 @@ export function getPairSpecs(targetPair: CurrencyPair) {
   const pipValPerStandardLot = isGold ? 10.0 : isJpy ? 6.5 : isBtc ? 1.0 : 10.0;
 
   return { isJpy, isGold, isBtc, pipMultiplier, decimals, pipValPerStandardLot };
+}
+
+export function computeLiveOrderMetrics(
+  order: ActiveMarketOrder,
+  livePrice: number,
+  atrPips = 24
+): LiveOrderMetrics {
+  const { isJpy, isGold, isBtc, pipMultiplier, decimals } = getPairSpecs(order.pair);
+  const isBuy = order.direction === 'BUY';
+  const rawSignedPips = isBuy
+    ? (livePrice - order.entryPrice) * pipMultiplier
+    : (order.entryPrice - livePrice) * pipMultiplier;
+  const floatingPips = Number(rawSignedPips.toFixed(1));
+
+  const lotScale = Math.max(0.01, order.lotSize || 0.01) / 0.01;
+  const pipValPerMicroLot = isGold ? 0.1 : isJpy ? 0.065 : isBtc ? 0.01 : 0.1;
+  const brokerSpread = isGold ? 2.2 : isJpy ? 1.4 : isBtc ? 25.0 : 1.1;
+
+  const grossUsd = Number((floatingPips * pipValPerMicroLot * lotScale).toFixed(2));
+  const spreadCostUsd = Number((brokerSpread * pipValPerMicroLot * lotScale).toFixed(2));
+  const netProfitUsd = Number((grossUsd - spreadCostUsd).toFixed(2));
+  const netProfitKes = Math.round(netProfitUsd * 130);
+
+  const isInProfit = floatingPips > 0.5;
+  const isBreakevenLocked = isBuy
+    ? order.stopLoss >= order.entryPrice
+    : order.stopLoss <= order.entryPrice;
+
+  const hitTp1 = isBuy ? livePrice >= order.tp1 : livePrice <= order.tp1;
+  const hitTp2 = isBuy ? livePrice >= order.tp2 : livePrice <= order.tp2;
+  const hitTp3 = isBuy ? livePrice >= order.tp3 : livePrice <= order.tp3;
+  const hitSl = isBuy ? livePrice <= order.stopLoss : livePrice >= order.stopLoss;
+
+  const totalRange = Math.max(1 / pipMultiplier, Math.abs(order.tp2 - order.stopLoss));
+  const rawProgress = isBuy
+    ? ((livePrice - order.stopLoss) / totalRange) * 100
+    : ((order.stopLoss - livePrice) / totalRange) * 100;
+  const slToTpProgressPct = Number(Math.max(0, Math.min(100, rawProgress)).toFixed(1));
+
+  const pipsRemainingToTp1 = Number(
+    (isBuy ? (order.tp1 - livePrice) * pipMultiplier : (livePrice - order.tp1) * pipMultiplier).toFixed(1)
+  );
+  const pipsRemainingToTp2 = Number(
+    (isBuy ? (order.tp2 - livePrice) * pipMultiplier : (livePrice - order.tp2) * pipMultiplier).toFixed(1)
+  );
+  const pipsDistanceAboveSl = Number(
+    (isBuy ? (livePrice - order.stopLoss) * pipMultiplier : (order.stopLoss - livePrice) * pipMultiplier).toFixed(1)
+  );
+
+  // Breakeven SL: Entry +/- 1 pip in profit direction (capped safely behind livePrice by at least 2 pips)
+  const beBuffer = (isGold ? 5 : isBtc ? 45 : 1.2) / pipMultiplier;
+  const minLiveBuffer = (isGold ? 8 : isBtc ? 80 : 2.5) / pipMultiplier;
+  const suggestedBreakevenSl = isBuy
+    ? Number(Math.min(livePrice - minLiveBuffer, Math.max(order.stopLoss, order.entryPrice + beBuffer)).toFixed(decimals))
+    : Number(Math.max(livePrice + minLiveBuffer, Math.min(order.stopLoss, order.entryPrice - beBuffer)).toFixed(decimals));
+
+  // Lock ~55% of current unrealized move when in profit, or tighten SL 35% closer to entry if flat/early
+  const suggestedLockProfitSl = isBuy
+    ? Number(
+        (floatingPips > 5
+          ? Math.max(
+              order.stopLoss,
+              Math.min(livePrice - minLiveBuffer, order.entryPrice + (livePrice - order.entryPrice) * 0.55)
+            )
+          : Math.max(order.stopLoss, order.entryPrice - (order.entryPrice - order.stopLoss) * 0.65)
+        ).toFixed(decimals)
+      )
+    : Number(
+        (floatingPips > 5
+          ? Math.min(
+              order.stopLoss,
+              Math.max(livePrice + minLiveBuffer, order.entryPrice - (order.entryPrice - livePrice) * 0.55)
+            )
+          : Math.min(order.stopLoss, order.entryPrice + (order.stopLoss - order.entryPrice) * 0.65)
+        ).toFixed(decimals)
+      );
+
+  // Expanded TP targets based on live price + ATR momentum
+  const expandBoostOffset = (Math.max(12, atrPips * 0.85)) / pipMultiplier;
+  const suggestedExpandedTp2 = isBuy
+    ? Number((Math.max(order.tp2, livePrice + expandBoostOffset * 1.45) + expandBoostOffset * 0.65).toFixed(decimals))
+    : Number((Math.min(order.tp2, livePrice - expandBoostOffset * 1.45) - expandBoostOffset * 0.65).toFixed(decimals));
+  const suggestedExpandedTp1 = isBuy
+    ? Number((order.entryPrice + (suggestedExpandedTp2 - order.entryPrice) * 0.55).toFixed(decimals))
+    : Number((order.entryPrice - (order.entryPrice - suggestedExpandedTp2) * 0.55).toFixed(decimals));
+  const suggestedExpandedTp3 = isBuy
+    ? Number((order.entryPrice + (suggestedExpandedTp2 - order.entryPrice) * 1.65).toFixed(decimals))
+    : Number((order.entryPrice - (order.entryPrice - suggestedExpandedTp2) * 1.65).toFixed(decimals));
+
+  const expandedTpPips = Math.abs(suggestedExpandedTp2 - order.entryPrice) * pipMultiplier;
+  const projectedProfitAtUpdatedTpUsd = Math.max(
+    0.5,
+    Number((expandedTpPips * pipValPerMicroLot * lotScale - spreadCostUsd).toFixed(2))
+  );
+  const projectedProfitAtUpdatedTpKes = Math.round(projectedProfitAtUpdatedTpUsd * 130);
+
+  return {
+    floatingPips,
+    grossUsd,
+    spreadCostUsd,
+    netProfitUsd,
+    netProfitKes,
+    isInProfit,
+    isBreakevenLocked,
+    hitTp1,
+    hitTp2,
+    hitTp3,
+    hitSl,
+    slToTpProgressPct,
+    pipsRemainingToTp1,
+    pipsRemainingToTp2,
+    pipsDistanceAboveSl,
+    suggestedBreakevenSl,
+    suggestedLockProfitSl,
+    suggestedExpandedTp1,
+    suggestedExpandedTp2,
+    suggestedExpandedTp3,
+    projectedProfitAtUpdatedTpUsd,
+    projectedProfitAtUpdatedTpKes,
+    decimals
+  };
 }
 
 /**
@@ -309,12 +523,20 @@ export function getCurrentMacroContext(
   const gbpPct = pctByPair?.['GBP/USD'] ?? 0;
   const audPct = pctByPair?.['AUD/USD'] ?? 0;
   const jpyPct = pctByPair?.['USD/JPY'] ?? 0;
+  const chfPct = pctByPair?.['USD/CHF'] ?? 0;
   const cadPct = pctByPair?.['USD/CAD'] ?? 0;
   const goldPct = pctByPair?.['XAU/USD'] ?? 0;
   const btcPct = pctByPair?.['BTC/USD'] ?? 0;
 
   const dxyPressurePct = Number(
-    (-0.45 * eurPct - 0.18 * gbpPct - 0.10 * audPct + 0.17 * jpyPct + 0.10 * cadPct).toFixed(2)
+    (
+      -0.42 * eurPct -
+      0.16 * gbpPct -
+      0.08 * audPct +
+      0.16 * jpyPct +
+      0.09 * chfPct +
+      0.09 * cadPct
+    ).toFixed(2)
   );
   const riskScore =
     (btcPct > 0.6 ? 1 : btcPct < -0.8 ? -1 : 0) +
@@ -340,24 +562,65 @@ export function getCurrentMacroContext(
       ? `USD Basket softening (${dxyPressurePct}%)`
       : `USD Basket balanced (${dxyPressurePct >= 0 ? `+${dxyPressurePct}%` : `${dxyPressurePct}%`})`;
 
+  const isRolloverWindow = eatHour >= 22 || eatHour <= 2;
+  const isUsReleaseWindow = eatHour === 15 && eatMin >= 20 && eatMin <= 50;
+  const eatTimeString = `${now.toLocaleTimeString('en-GB', {
+    timeZone: 'Africa/Nairobi',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  })} EAT`;
+
+  const sessionWindowName = isRolloverWindow
+    ? 'Rollover Spread-Widening Window'
+    : eatHour >= 3 && eatHour < 10
+    ? 'Tokyo / Asian Range Window'
+    : eatHour >= 10 && eatHour < 15
+    ? 'London Open (Prime Liquidity)'
+    : eatHour >= 15 && eatHour < 19
+    ? 'London–NY Overlap (Peak Window)'
+    : 'New York PM Continuation Window';
+
+  const overallDaySafety: MacroContextSnapshot['overallDaySafety'] =
+    isRolloverWindow || isUsReleaseWindow
+      ? 'SELECTIVE_CAUTION'
+      : dxyPressurePct <= -0.05 || (eurPct >= 0 && gbpPct >= 0)
+      ? 'FAVOURABLE_BUY'
+      : dxyPressurePct >= 0.05
+      ? 'FAVOURABLE_SELL'
+      : 'SELECTIVE_CAUTION';
+
+  const overallHeadline =
+    overallDaySafety === 'FAVOURABLE_BUY'
+      ? `TODAY & THIS HOUR: FAVOURABLE BUYING ON NON-USD PAIRS & GOLD (${dxySummary})`
+      : overallDaySafety === 'FAVOURABLE_SELL'
+      ? `TODAY & THIS HOUR: FAVOURABLE SELLING EUR/GBP/AUD · LONG USD (${dxySummary})`
+      : `TODAY & THIS HOUR: SELECTIVE DISCIPLINED ENTRIES — ${sessionWindowName.toUpperCase()}`;
+
   return {
     dxyPressurePct,
     dxySummary,
     riskRegime,
     safeHavenSurge: goldPct >= 0.85 && jpyPct <= -0.12,
-    isRolloverWindow: eatHour >= 22 || eatHour <= 2,
-    isUsReleaseWindow: eatHour === 15 && eatMin >= 20 && eatMin <= 50,
-    eatHour
+    isRolloverWindow,
+    isUsReleaseWindow,
+    eatHour,
+    eatTimeString,
+    sessionWindowName,
+    overallDaySafety,
+    overallHeadline
   };
 }
 
 /**
- * Evaluates ALL 5 Institutional Trading Factors simultaneously to judge BUY vs SELL:
+ * Evaluates ALL 6 Institutional Trading Factors simultaneously to judge BUY vs SELL:
  * 1. Live Candlestick Price Action & Liquidity Sweep
- * 2. 20/50 EMA Dynamic Trend Stack & Overextension Guard
+ * 2. 20/50 EMA Dynamic Trend Stack & Pullback Timing Guard
  * 3. 14-Period Wilder RSI Momentum & Exhaustion
  * 4. Global Macro & Live USD Basket (DXY) / Safe-Haven Flow
  * 5. Nairobi (EAT) Session Liquidity & Broker Spread Friction
+ * 6. H1 Higher-Timeframe Trend Structure & Swing Key Level
  */
 export function evaluateAllTradeFactors(p: {
   pair: CurrencyPair;
@@ -365,12 +628,14 @@ export function evaluateAllTradeFactors(p: {
   ema20: number;
   ema50: number;
   rsi: number;
+  atrPips?: number;
   keyLevel?: number;
   prev3Close?: number;
   isBearishPinOrSweep?: boolean;
   isBullishPinOrAbsorption?: boolean;
   brokerSpread?: number;
   macro?: MacroContextSnapshot;
+  h1TrendDirection?: 'UPTREND' | 'DOWNTREND' | 'RANGING';
   biasOverride?: 'BUY' | 'SELL';
   previousDirection?: 'BUY' | 'SELL';
 }): {
@@ -379,6 +644,11 @@ export function evaluateAllTradeFactors(p: {
   bearScorePct: number;
   confidence: number;
   factorVerdicts: FactorJudgmentItem[];
+  alignedFactorsCount: number;
+  totalFactorsCount: number;
+  isExtendedZone: boolean;
+  entryTimingWarning?: string;
+  goAheadAssurance: ComputedTradeParams['goAheadAssurance'];
 } {
   const { isGold, isBtc, pipMultiplier, decimals } = getPairSpecs(p.pair);
   const macro = p.macro || getCurrentMacroContext();
@@ -386,6 +656,16 @@ export function evaluateAllTradeFactors(p: {
 
   let bullWeight = 0;
   let bearWeight = 0;
+
+  // Higher-Timeframe (H1) Structural Anchor (prevents short-term tick flipping)
+  const effectiveH1 =
+    p.h1TrendDirection ??
+    (p.ema20 >= p.ema50 ? 'UPTREND' : 'DOWNTREND');
+  if (effectiveH1 === 'UPTREND') {
+    bullWeight += 24;
+  } else if (effectiveH1 === 'DOWNTREND') {
+    bearWeight += 24;
+  }
 
   // FACTOR 1: Candlestick Price Action, Multi-Candle Momentum & Liquidity Sweep (26 pts max)
   const prevRef = p.prev3Close ?? p.ema20;
@@ -437,26 +717,29 @@ export function evaluateAllTradeFactors(p: {
     });
   }
 
-  // FACTOR 2: 20 / 50 EMA Dynamic Trend Stack & Overextension Guard (24 pts max)
+  // FACTOR 2: 20 / 50 EMA Dynamic Trend Stack & Pullback Timing Guard (24 pts max)
   const distEma20Pips = (p.livePrice - p.ema20) * pipMultiplier;
-  const overextLimit = isGold ? 210 : isBtc ? 1350 : 28;
+  const effectiveAtrPips = Math.max(5, p.atrPips ?? (isGold ? 28 : isBtc ? 180 : 16));
+  const overextLimit = Math.max(isGold ? 160 : isBtc ? 1100 : 24, effectiveAtrPips * 1.45);
+  const isExtendedZone = Math.abs(distEma20Pips) > overextLimit;
+
   if (distEma20Pips > overextLimit) {
-    bearWeight += 20;
-    bullWeight += 4;
+    if (p.ema20 >= p.ema50) bullWeight += 13;
+    else bearWeight += 17;
     verdicts.push({
       name: '2. 20/50 EMA Trend Stack',
-      signal: 'SELL',
-      weight: '20%',
-      detail: `Overextended +${distEma20Pips.toFixed(1)}p above 20 EMA (${p.ema20.toFixed(decimals)}) — mean-reversion risk`
+      signal: 'CAUTION',
+      weight: '14%',
+      detail: `Extended +${distEma20Pips.toFixed(1)}p above 20 EMA (${p.ema20.toFixed(decimals)}) — wait pullback toward 20 EMA`
     });
   } else if (distEma20Pips < -overextLimit) {
-    bullWeight += 20;
-    bearWeight += 4;
+    if (p.ema20 <= p.ema50) bearWeight += 13;
+    else bullWeight += 17;
     verdicts.push({
       name: '2. 20/50 EMA Trend Stack',
-      signal: 'BUY',
-      weight: '20%',
-      detail: `Stretched ${distEma20Pips.toFixed(1)}p below 20 EMA (${p.ema20.toFixed(decimals)}) — snapback bounce zone`
+      signal: 'CAUTION',
+      weight: '14%',
+      detail: `Extended ${distEma20Pips.toFixed(1)}p below 20 EMA (${p.ema20.toFixed(decimals)}) — wait pullback toward 20 EMA`
     });
   } else if (p.livePrice >= p.ema20 && p.ema20 >= p.ema50) {
     bullWeight += 24;
@@ -495,21 +778,23 @@ export function evaluateAllTradeFactors(p: {
   }
 
   // FACTOR 3: 14-Period Wilder RSI Momentum & Exhaustion (20 pts max)
-  if (p.rsi >= 69) {
-    bearWeight += 20;
+  if (p.rsi >= 72) {
+    bearWeight += 14;
+    bullWeight += 4;
     verdicts.push({
       name: '3. RSI (14) Momentum',
-      signal: 'SELL',
-      weight: '20%',
-      detail: `RSI ${p.rsi} Overbought Exhaustion — blocks BUY chasing, favors reversal SHORT`
+      signal: 'CAUTION',
+      weight: '14%',
+      detail: `RSI ${p.rsi} Overbought zone — avoid chasing high; wait 20 EMA retest`
     });
-  } else if (p.rsi <= 32) {
-    bullWeight += 20;
+  } else if (p.rsi <= 28) {
+    bullWeight += 14;
+    bearWeight += 4;
     verdicts.push({
       name: '3. RSI (14) Momentum',
-      signal: 'BUY',
-      weight: '20%',
-      detail: `RSI ${p.rsi} Oversold Capitulation — blocks SELL chasing, favors accumulation LONG`
+      signal: 'CAUTION',
+      weight: '14%',
+      detail: `RSI ${p.rsi} Oversold zone — avoid chasing lows; wait 20 EMA retest`
     });
   } else if (p.rsi >= 51) {
     bullWeight += 18;
@@ -518,7 +803,7 @@ export function evaluateAllTradeFactors(p: {
       name: '3. RSI (14) Momentum',
       signal: 'BUY',
       weight: '18%',
-      detail: `RSI ${p.rsi} healthy bullish expansion corridor (room before 70 overbought)`
+      detail: `RSI ${p.rsi} healthy bullish expansion corridor (room before 72 overbought)`
     });
   } else {
     bearWeight += 18;
@@ -527,16 +812,17 @@ export function evaluateAllTradeFactors(p: {
       name: '3. RSI (14) Momentum',
       signal: 'SELL',
       weight: '18%',
-      detail: `RSI ${p.rsi} sustained bearish momentum corridor (room before 30 oversold)`
+      detail: `RSI ${p.rsi} sustained bearish momentum corridor (room before 28 oversold)`
     });
   }
 
   // FACTOR 4: Global Macro & Live USD Basket (DXY) / Risk Sentiment Flow (18 pts max)
   const isUsdQuote = p.pair.endsWith('/USD');
   const isUsdBase = p.pair.startsWith('USD/');
+  const isJpyCross = p.pair === 'GBP/JPY' || p.pair === 'EUR/JPY';
   const dxy = macro.dxyPressurePct;
   if (isUsdQuote && !isGold) {
-    if (dxy <= -0.06) {
+    if (dxy <= -0.05) {
       bullWeight += 18;
       verdicts.push({
         name: '4. DXY Macro & Risk Flow',
@@ -544,7 +830,7 @@ export function evaluateAllTradeFactors(p: {
         weight: '18%',
         detail: `USD Basket weakening (${dxy}%) gives macro BUY tail-wind for ${p.pair}`
       });
-    } else if (dxy >= 0.06) {
+    } else if (dxy >= 0.05) {
       bearWeight += 18;
       verdicts.push({
         name: '4. DXY Macro & Risk Flow',
@@ -563,7 +849,7 @@ export function evaluateAllTradeFactors(p: {
       });
     }
   } else if (isUsdBase) {
-    if (dxy >= 0.06) {
+    if (dxy >= 0.05) {
       bullWeight += 18;
       verdicts.push({
         name: '4. DXY Macro & Risk Flow',
@@ -571,7 +857,7 @@ export function evaluateAllTradeFactors(p: {
         weight: '18%',
         detail: `USD Basket surging (+${dxy}%) lifts USD-base ${p.pair} upward`
       });
-    } else if (dxy <= -0.06) {
+    } else if (dxy <= -0.05) {
       bearWeight += 18;
       verdicts.push({
         name: '4. DXY Macro & Risk Flow',
@@ -616,15 +902,14 @@ export function evaluateAllTradeFactors(p: {
         detail: `Gold equilibrium (${macro.riskRegime}) — follow 15m liquidity sweep`
       });
     }
-  } else {
-    // GBP/JPY cross
+  } else if (isJpyCross) {
     if (macro.riskRegime === 'RISK-OFF SAFE-HAVEN') {
       bearWeight += 18;
       verdicts.push({
         name: '4. Yen Carry & Risk Flow',
         signal: 'SELL',
         weight: '18%',
-        detail: `Risk-Off safe-haven JPY inflow favors GBP/JPY downside distribution`
+        detail: `Risk-Off safe-haven JPY inflow favors ${p.pair} downside distribution`
       });
     } else {
       bullWeight += 16;
@@ -632,7 +917,7 @@ export function evaluateAllTradeFactors(p: {
         name: '4. Yen Carry & Risk Flow',
         signal: 'BUY',
         weight: '16%',
-        detail: `${macro.riskRegime}: constructive risk appetite supports GBP/JPY`
+        detail: `${macro.riskRegime}: constructive risk appetite supports ${p.pair}`
       });
     }
   }
@@ -647,7 +932,7 @@ export function evaluateAllTradeFactors(p: {
       name: '5. Kenya EAT Window & Spread',
       signal: bullWeight >= bearWeight ? 'BUY' : 'SELL',
       weight: '12%',
-      detail: `Active liquidity window (${macro.eatHour}:00 EAT) · tight ~${spreadPips}p broker spread ✓`
+      detail: `Active liquidity window (${macro.eatHour}:00 EAT) · tight ~${spreadPips}p broker spread`
     });
   } else {
     verdicts.push({
@@ -658,7 +943,33 @@ export function evaluateAllTradeFactors(p: {
         ? 'Midnight rollover window in Kenya — keep 0.01 lot & verify wide spread'
         : macro.isUsReleaseWindow
         ? '15:30 EAT NY release spike window — execute strictly at confirmed candle close'
-        : `Elevated spread (~${spreadPips}p) — strictly cap risk at $2.00`
+        : `Elevated spread (~${spreadPips}p) — strictly cap risk at 0.01 micro lot`
+    });
+  }
+
+  // FACTOR 6: H1 Trend Structure & Key Level Alignment (16 pts max)
+  if (effectiveH1 === 'UPTREND') {
+    bullWeight += 16;
+    verdicts.push({
+      name: '6. H1 Trend & Structure',
+      signal: 'BUY',
+      weight: '16%',
+      detail: `H1 macro trend confirms UPTREND above swing floor ${p.keyLevel ? p.keyLevel.toFixed(decimals) : p.ema50.toFixed(decimals)}`
+    });
+  } else if (effectiveH1 === 'DOWNTREND') {
+    bearWeight += 16;
+    verdicts.push({
+      name: '6. H1 Trend & Structure',
+      signal: 'SELL',
+      weight: '16%',
+      detail: `H1 macro trend confirms DOWNTREND below swing ceiling ${p.keyLevel ? p.keyLevel.toFixed(decimals) : p.ema50.toFixed(decimals)}`
+    });
+  } else {
+    verdicts.push({
+      name: '6. H1 Trend & Structure',
+      signal: 'CAUTION',
+      weight: '8%',
+      detail: 'H1 structure consolidating — scale 50% at TP1 and lock Breakeven early'
     });
   }
 
@@ -666,27 +977,63 @@ export function evaluateAllTradeFactors(p: {
   const bullScorePct = Math.round((bullWeight / total) * 100);
   const bearScorePct = 100 - bullScorePct;
   const strongDeadbandPips = isGold ? 28.0 : isBtc ? 160.0 : 4.5;
-  const distEmaAbsPips = Math.abs(p.livePrice - p.ema20) * pipMultiplier;
+  const distEmaAbsPips = Math.abs(distEma20Pips);
   const scoreMargin = Math.abs(bullScorePct - bearScorePct);
 
   let isBuy = bullWeight >= bearWeight;
   if (p.biasOverride) {
     isBuy = p.biasOverride === 'BUY';
-  } else if (p.previousDirection && scoreMargin < 24 && distEmaAbsPips < strongDeadbandPips) {
-    // Strong anti-whipsaw lock: require decisive multi-factor shift (>24% spread + structural breakout) before flipping BUY/SELL
+  } else if (
+    p.previousDirection &&
+    (scoreMargin < 22 || distEmaAbsPips < strongDeadbandPips)
+  ) {
     isBuy = p.previousDirection === 'BUY';
   }
 
   const dominantPct = isBuy ? bullScorePct : bearScorePct;
-  const rawConf = 72 + dominantPct * 0.25 + (spreadHealthy && !macro.isRolloverWindow ? 1.5 : -2.5);
-  const confidence = Number(Math.min(98.2, Math.max(71.5, rawConf)).toFixed(1));
+  const sideTag: 'BUY' | 'SELL' = isBuy ? 'BUY' : 'SELL';
+  const alignedFactorsCount = verdicts.filter((v) => v.signal === sideTag).length;
+  const totalFactorsCount = verdicts.length;
+
+  const rawConf =
+    72 +
+    dominantPct * 0.25 +
+    (alignedFactorsCount >= 5 ? 2.0 : alignedFactorsCount >= 4 ? 1.0 : -1.0) +
+    (spreadHealthy && !macro.isRolloverWindow ? 1.5 : -2.5) -
+    (isExtendedZone ? 4.5 : 0);
+  const confidence = Number(Math.min(98.5, Math.max(68.0, rawConf)).toFixed(1));
+
+  const entryTimingWarning = isExtendedZone
+    ? `Price is ${Math.abs(distEma20Pips).toFixed(1)}p (${(
+        Math.abs(distEma20Pips) / Math.max(1, effectiveAtrPips)
+      ).toFixed(1)}x ATR) away from 20 EMA (${p.ema20.toFixed(decimals)}) — WAIT PULLBACK TO 20 EMA instead of chasing.`
+    : undefined;
+
+  const goAheadAssurance: ComputedTradeParams['goAheadAssurance'] = isExtendedZone
+    ? 'WAIT PULLBACK TO 20 EMA — EXTENDED ENTRY ZONE'
+    : isBuy
+    ? alignedFactorsCount >= 5 && bullScorePct >= 70 && !macro.isRolloverWindow
+      ? 'GO-AHEAD ASSURANCE: STRONG BUY APPROVED'
+      : alignedFactorsCount >= 4 && bullScorePct >= 56
+      ? 'GO-AHEAD ASSURANCE: BUY BY MARKET'
+      : 'SELECTIVE BUY — ENTER ON 20 EMA CONFIRMATION'
+    : alignedFactorsCount >= 5 && bearScorePct >= 70 && !macro.isRolloverWindow
+    ? 'GO-AHEAD ASSURANCE: STRONG SELL APPROVED'
+    : alignedFactorsCount >= 4 && bearScorePct >= 56
+    ? 'GO-AHEAD ASSURANCE: SELL BY MARKET'
+    : 'SELECTIVE SELL — ENTER ON 20 EMA CONFIRMATION';
 
   return {
     isBuy,
     bullScorePct,
     bearScorePct,
     confidence,
-    factorVerdicts: verdicts
+    factorVerdicts: verdicts,
+    alignedFactorsCount,
+    totalFactorsCount,
+    isExtendedZone,
+    entryTimingWarning,
+    goAheadAssurance
   };
 }
 
@@ -704,6 +1051,7 @@ export function evaluateCandleSeriesAndTick(p: {
   change24hPct?: number;
   macro?: MacroContextSnapshot;
   brokerSpread?: number;
+  h1TrendDirection?: 'UPTREND' | 'DOWNTREND' | 'RANGING';
   previousDirection?: 'BUY' | 'SELL';
 }) {
   const { isGold, isBtc, pipMultiplier, decimals } = getPairSpecs(p.pair);
@@ -813,18 +1161,18 @@ export function evaluateCandleSeriesAndTick(p: {
   const rsi = computeRealRsi(closes, 14);
   const atrPips = computeRealAtrPips(candles, pipMultiplier, 14);
 
-  const recent24 = candles.slice(-24);
-  const swingHigh = Number(Math.max(...recent24.map((c) => c.high)).toFixed(decimals));
-  const swingLow = Number(Math.min(...recent24.map((c) => c.low)).toFixed(decimals));
+  const closedHistorySlice = candles.length >= 25 ? candles.slice(-25, -1) : candles.slice(-24);
+  const swingHigh = Number(Math.max(...closedHistorySlice.map((c) => c.high)).toFixed(decimals));
+  const swingLow = Number(Math.min(...closedHistorySlice.map((c) => c.low)).toFixed(decimals));
 
   const lastCandle = candles[candles.length - 1];
   const prevCandle = candles[candles.length - 2] || lastCandle;
   const prev3Candle = candles[candles.length - 4] || prevCandle;
-  const candleBody = Math.abs(lastCandle.close - lastCandle.open);
-  const upperWick = Math.max(0, lastCandle.high - Math.max(lastCandle.open, lastCandle.close));
-  const lowerWick = Math.max(0, Math.min(lastCandle.open, lastCandle.close) - lastCandle.low);
-  const isBearishPinOrSweep = upperWick > candleBody * 1.25 && lastCandle.close < prevCandle.high;
-  const isBullishPinOrAbsorption = lowerWick > candleBody * 1.25 && lastCandle.close > prevCandle.low;
+  const prevBody = Math.abs(prevCandle.close - prevCandle.open);
+  const prevUpperWick = Math.max(0, prevCandle.high - Math.max(prevCandle.open, prevCandle.close));
+  const prevLowerWick = Math.max(0, Math.min(prevCandle.open, prevCandle.close) - prevCandle.low);
+  const isBearishPinOrSweep = prevUpperWick > prevBody * 1.25 && lastCandle.close < prevCandle.high;
+  const isBullishPinOrAbsorption = prevLowerWick > prevBody * 1.25 && lastCandle.close > prevCandle.low;
 
   const tempKeyLevel = ema20 >= ema50 ? swingLow : swingHigh;
   const allFactorEval = evaluateAllTradeFactors({
@@ -833,12 +1181,14 @@ export function evaluateCandleSeriesAndTick(p: {
     ema20,
     ema50,
     rsi,
+    atrPips,
     keyLevel: tempKeyLevel,
     prev3Close: prev3Candle.close,
     isBearishPinOrSweep,
     isBullishPinOrAbsorption,
     brokerSpread: p.brokerSpread,
     macro: p.macro,
+    h1TrendDirection: p.h1TrendDirection,
     previousDirection: p.previousDirection
   });
 
@@ -870,6 +1220,8 @@ export function evaluateCandleSeriesAndTick(p: {
     bearScorePct: allFactorEval.bearScorePct,
     confidence: allFactorEval.confidence,
     factorVerdicts: allFactorEval.factorVerdicts,
+    isExtendedZone: allFactorEval.isExtendedZone,
+    entryTimingWarning: allFactorEval.entryTimingWarning,
     patternType,
     candles
   };
@@ -881,6 +1233,8 @@ export function computeRealChartTradeParams(p: {
   targetBroker: BrokerId;
   price: number;
   keyLevel?: number;
+  swingLow?: number;
+  swingHigh?: number;
   ema20?: number;
   ema50?: number;
   rsi?: number;
@@ -912,62 +1266,53 @@ export function computeRealChartTradeParams(p: {
     brokerSpread = isGold ? 2.6 : isJpy ? 1.8 : isBtc ? 35.0 : 1.5;
   }
 
-  // Base timeframe volatility + continuous sub-pip ATR & live candle displacement calibration
+  // Base timeframe volatility + continuous Swing Structure, ATR & spread SL protection
   let baseSlPips = 16;
-  let baseTp1Pips = 32;
-  let baseTp2Pips = 52;
+  let baseTp1Pips = 28;
+  let baseTp2Pips = 46;
 
   if (p.targetTf === 'M1') {
     baseSlPips = isGold ? 35 : isBtc ? 220 : 8;
-    baseTp1Pips = isGold ? 60 : isBtc ? 380 : 15;
-    baseTp2Pips = isGold ? 95 : isBtc ? 600 : 24;
+    baseTp1Pips = isGold ? 55 : isBtc ? 350 : 14;
+    baseTp2Pips = isGold ? 90 : isBtc ? 580 : 22;
   } else if (p.targetTf === 'M5') {
     baseSlPips = isGold ? 55 : isBtc ? 350 : 12;
-    baseTp1Pips = isGold ? 95 : isBtc ? 600 : 22;
-    baseTp2Pips = isGold ? 145 : isBtc ? 920 : 36;
+    baseTp1Pips = isGold ? 88 : isBtc ? 550 : 20;
+    baseTp2Pips = isGold ? 140 : isBtc ? 900 : 34;
   } else if (p.targetTf === 'M10') {
     baseSlPips = isGold ? 75 : isBtc ? 460 : 14;
-    baseTp1Pips = isGold ? 125 : isBtc ? 780 : 28;
-    baseTp2Pips = isGold ? 185 : isBtc ? 1150 : 44;
+    baseTp1Pips = isGold ? 115 : isBtc ? 720 : 24;
+    baseTp2Pips = isGold ? 180 : isBtc ? 1120 : 40;
   } else if (p.targetTf === 'M15') {
     baseSlPips = isGold ? 95 : isBtc ? 600 : 16;
-    baseTp1Pips = isGold ? 160 : isBtc ? 1050 : 32;
-    baseTp2Pips = isGold ? 240 : isBtc ? 1600 : 52;
+    baseTp1Pips = isGold ? 150 : isBtc ? 980 : 28;
+    baseTp2Pips = isGold ? 235 : isBtc ? 1550 : 48;
   } else if (p.targetTf === 'H1') {
-    baseSlPips = isGold ? 160 : isBtc ? 950 : 28;
-    baseTp1Pips = isGold ? 270 : isBtc ? 1650 : 56;
-    baseTp2Pips = isGold ? 410 : isBtc ? 2500 : 90;
+    baseSlPips = isGold ? 160 : isBtc ? 950 : 26;
+    baseTp1Pips = isGold ? 250 : isBtc ? 1500 : 48;
+    baseTp2Pips = isGold ? 400 : isBtc ? 2450 : 82;
   } else if (p.targetTf === 'H4') {
-    baseSlPips = isGold ? 280 : isBtc ? 1650 : 52;
-    baseTp1Pips = isGold ? 480 : isBtc ? 2800 : 105;
-    baseTp2Pips = isGold ? 720 : isBtc ? 4400 : 170;
+    baseSlPips = isGold ? 280 : isBtc ? 1650 : 48;
+    baseTp1Pips = isGold ? 440 : isBtc ? 2600 : 92;
+    baseTp2Pips = isGold ? 700 : isBtc ? 4300 : 155;
   } else if (p.targetTf === 'D1') {
-    baseSlPips = isGold ? 500 : isBtc ? 2800 : 95;
-    baseTp1Pips = isGold ? 850 : isBtc ? 4800 : 190;
-    baseTp2Pips = isGold ? 1300 : isBtc ? 7500 : 310;
+    baseSlPips = isGold ? 500 : isBtc ? 2800 : 85;
+    baseTp1Pips = isGold ? 800 : isBtc ? 4500 : 170;
+    baseTp2Pips = isGold ? 1280 : isBtc ? 7400 : 285;
   }
 
-  // Sub-pip continuous ATR + live EMA displacement scaling so even 0.5-1 pip candle movements refine SL & TP!
-  const emaDistPips = p.ema20 !== undefined ? Math.abs(p.price - p.ema20) * pipMultiplier : 0;
-  if (p.atrPips && p.atrPips > 0) {
-    const minSl = Math.max(7, baseSlPips * 0.78);
-    const maxSl = baseSlPips * 1.28;
-    const atrScaled = p.atrPips * 1.42 + emaDistPips * 0.14;
-    baseSlPips = Number(Math.min(maxSl, Math.max(minSl, atrScaled)).toFixed(1));
-    baseTp1Pips = Number(Math.max(baseSlPips * 1.85, baseTp1Pips).toFixed(1));
-    baseTp2Pips = Number(Math.max(baseSlPips * 3.15, baseTp2Pips).toFixed(1));
-  }
-
-  // Unified 5-Factor All-Confluence BUY / SELL Evaluation with Anti-Whipsaw Hysteresis
+  // Unified 6-Factor All-Confluence BUY / SELL Evaluation
   const allFactorEval = evaluateAllTradeFactors({
     pair: p.targetPair,
     livePrice: p.price,
     ema20: p.ema20 ?? p.price,
     ema50: p.ema50 ?? p.price,
     rsi: p.rsi ?? 52.0,
+    atrPips: p.atrPips,
     keyLevel: p.keyLevel,
     brokerSpread,
     macro: p.macro,
+    h1TrendDirection: p.h1TrendDirection,
     biasOverride: p.biasOverride,
     previousDirection: p.previousDirection
   });
@@ -975,21 +1320,44 @@ export function computeRealChartTradeParams(p: {
   const isBuy = allFactorEval.isBuy;
   const macro = p.macro ?? getCurrentMacroContext();
   const isUsdBase = p.targetPair.startsWith('USD/');
+  const isJpyCross = p.targetPair === 'GBP/JPY' || p.targetPair === 'EUR/JPY';
   const dxySupportsActiveSide =
     p.targetPair === 'BTC/USD'
       ? (isBuy && macro.dxyPressurePct <= 0.1) || (!isBuy && macro.dxyPressurePct >= -0.05)
-      : p.targetPair === 'GBP/JPY'
+      : isJpyCross
       ? (isBuy && macro.riskRegime !== 'RISK-OFF SAFE-HAVEN') || (!isBuy && macro.riskRegime === 'RISK-OFF SAFE-HAVEN')
       : isUsdBase
       ? (isBuy && macro.dxyPressurePct >= 0.05) || (!isBuy && macro.dxyPressurePct <= -0.05)
       : (isBuy && macro.dxyPressurePct <= -0.05) || (!isBuy && macro.dxyPressurePct >= 0.05);
+
+  // Anchor Stop Loss strictly beyond real Swing High/Low + ATR volatility + broker spread
+  const relevantSwingPrice = isBuy
+    ? p.swingLow ?? p.keyLevel
+    : p.swingHigh ?? p.keyLevel;
+  const rawSwingDistPips =
+    relevantSwingPrice && relevantSwingPrice > 0
+      ? Math.abs(p.price - relevantSwingPrice) * pipMultiplier
+      : 0;
+  const effectiveAtr = Math.max(5, p.atrPips ?? baseSlPips * 0.9);
+  const swingProtectedPips =
+    rawSwingDistPips > 0
+      ? rawSwingDistPips + brokerSpread + effectiveAtr * 0.45
+      : effectiveAtr * 1.68 + brokerSpread;
+  const atrFloorPips = effectiveAtr * 1.55 + brokerSpread;
+  const minSlFloor = baseSlPips * 0.95;
+  const maxSlCeiling = baseSlPips * 2.15;
+  baseSlPips = Number(
+    Math.min(maxSlCeiling, Math.max(minSlFloor, atrFloorPips, swingProtectedPips)).toFixed(1)
+  );
+  baseTp1Pips = Number(Math.max(baseSlPips * 1.28, baseTp1Pips).toFixed(1));
+  baseTp2Pips = Number(Math.max(baseSlPips * 2.18, baseTp2Pips).toFixed(1));
 
   // Longer 12H–48H swing target (TP3) scales dynamically with DXY macro tailwind & RSI headroom
   const rsiVal = p.rsi ?? 52.0;
   const rsiHeadroomFactor = isBuy
     ? Math.max(0.85, Math.min(1.22, (74 - rsiVal) / 24))
     : Math.max(0.85, Math.min(1.22, (rsiVal - 26) / 24));
-  const macroExpansionMultiplier = dxySupportsActiveSide ? 1.72 : 1.48;
+  const macroExpansionMultiplier = dxySupportsActiveSide ? 1.65 : 1.45;
   const baseTp3Pips = Number((baseTp2Pips * macroExpansionMultiplier * rsiHeadroomFactor).toFixed(1));
 
   const slOffset = baseSlPips / pipMultiplier;
@@ -1016,12 +1384,12 @@ export function computeRealChartTradeParams(p: {
 
   // Strict MT4/MT5 S/L & T/P Side Enforcement (Prevents [Invalid S/L or T/P])
   if (isBuy) {
-    if (slPrice >= p.price) slPrice = Number((p.price - Math.max(10, baseSlPips) / pipMultiplier).toFixed(decimals));
+    if (slPrice >= p.price) slPrice = Number((p.price - Math.max(12, baseSlPips) / pipMultiplier).toFixed(decimals));
     if (tp1Price <= p.price) tp1Price = Number((p.price + Math.max(20, baseTp1Pips) / pipMultiplier).toFixed(decimals));
     if (tp2Price <= tp1Price) tp2Price = Number((tp1Price + 15 / pipMultiplier).toFixed(decimals));
     if (tp3Price <= tp2Price) tp3Price = Number((tp2Price + 22 / pipMultiplier).toFixed(decimals));
   } else {
-    if (slPrice <= p.price) slPrice = Number((p.price + Math.max(10, baseSlPips) / pipMultiplier).toFixed(decimals));
+    if (slPrice <= p.price) slPrice = Number((p.price + Math.max(12, baseSlPips) / pipMultiplier).toFixed(decimals));
     if (tp1Price >= p.price) tp1Price = Number((p.price - Math.max(20, baseTp1Pips) / pipMultiplier).toFixed(decimals));
     if (tp2Price >= tp1Price) tp2Price = Number((tp1Price - 15 / pipMultiplier).toFixed(decimals));
     if (tp3Price >= tp2Price) tp3Price = Number((tp2Price - 22 / pipMultiplier).toFixed(decimals));
@@ -1032,10 +1400,10 @@ export function computeRealChartTradeParams(p: {
   const actualTpPips = Math.max(1, Number((Math.abs(tp2Price - p.price) * pipMultiplier).toFixed(1)));
   const actualTp3Pips = Math.max(1, Number((Math.abs(tp3Price - p.price) * pipMultiplier).toFixed(1)));
 
-  // Gilgil $2.00 / 260 KES strict risk cap on 0.01 micro lot + Real Net Profit Expectancy after spread
+  // Exact 0.01 micro lot risk & net profit after spread
   const pipValPerMicroLot = isGold ? 0.1 : isJpy ? 0.065 : isBtc ? 0.01 : 0.1;
   const rawRiskUsd = Number((actualSlPips * pipValPerMicroLot).toFixed(2));
-  const actualRiskUsd = Math.min(2.0, Math.max(0.8, rawRiskUsd));
+  const actualRiskUsd = Number(Math.max(0.8, rawRiskUsd).toFixed(2));
   const potentialGainUsd = Number((actualTpPips * pipValPerMicroLot).toFixed(2));
   const spreadCostUsd = Number((brokerSpread * pipValPerMicroLot).toFixed(2));
   const netProfitUsd = Math.max(0.4, Number((potentialGainUsd - spreadCostUsd).toFixed(2)));
@@ -1044,7 +1412,13 @@ export function computeRealChartTradeParams(p: {
   const netProfit48hKes = Math.round(netProfit48hUsd * 130);
   const tp1NetProfitUsd = Math.max(0.2, Number((actualTp1Pips * pipValPerMicroLot * 0.5 - spreadCostUsd).toFixed(2)));
   const tp1NetProfitKes = Math.round(tp1NetProfitUsd * 130);
-  const orderType = isBuy ? 'BUY BY MARKET' : 'SELL BY MARKET';
+  const orderType = allFactorEval.isExtendedZone
+    ? isBuy
+      ? 'BUY LIMIT (PULLBACK TO 20 EMA)'
+      : 'SELL LIMIT (PULLBACK TO 20 EMA)'
+    : isBuy
+    ? 'BUY BY MARKET'
+    : 'SELL BY MARKET';
   const rrNumeric = Number((actualTpPips / Math.max(1, actualSlPips)).toFixed(1));
   const riskReward = `1 : ${rrNumeric.toFixed(1)}`;
   const aiConfidence = allFactorEval.confidence;
@@ -1063,7 +1437,6 @@ export function computeRealChartTradeParams(p: {
   const priceMinusEma20Pips = (p.price - ema20Val) * pipMultiplier;
   const emaSpreadPips = (ema20Val - ema50Val) * pipMultiplier;
 
-  // Higher-timeframe (H1) EMA & multi-candle macro trend evaluation (immune to 1s noise)
   const h1TrendDirection: 'UPTREND' | 'DOWNTREND' | 'RANGING' =
     p.h1TrendDirection ??
     (emaSpreadPips >= 0.45
@@ -1094,9 +1467,14 @@ export function computeRealChartTradeParams(p: {
   const trendMatchesSide =
     (isBuy && trendDirection === 'UPTREND') || (!isBuy && trendDirection === 'DOWNTREND');
   const activeSideScore = isBuy ? allFactorEval.bullScorePct : allFactorEval.bearScorePct;
-  const isFavourableOrder = trendMatchesSide && activeSideScore >= 56 && rrNumeric >= 1.8;
+  const isFavourableOrder =
+    trendMatchesSide && activeSideScore >= 56 && rrNumeric >= 1.8 && !allFactorEval.isExtendedZone;
 
-  const orderVerdictLabel: ComputedTradeParams['orderVerdictLabel'] = isBuy
+  const orderVerdictLabel: ComputedTradeParams['orderVerdictLabel'] = allFactorEval.isExtendedZone
+    ? isBuy
+      ? 'SELECTIVE BUY (WAIT PULLBACK)'
+      : 'SELECTIVE SELL (WAIT PULLBACK)'
+    : isBuy
     ? isFavourableOrder
       ? 'FAVOURABLE BUY ORDER'
       : trendMatchesSide
@@ -1108,7 +1486,6 @@ export function computeRealChartTradeParams(p: {
     ? 'SELECTIVE SELL (WAIT PULLBACK)'
     : 'REVERSAL SELL PLAN (CONFIRM BELOW 20 EMA)';
 
-  // Side-consistent Trend & Projection Headline: always reflects the side the trader chose/inspected!
   const trendProjectionText = isBuy
     ? trendMatchesSide
       ? `UPTREND · BUY PROJECTION ↑ (${allFactorEval.bullScorePct}% Bull Confluence · H1 ${h1TrendDirection})`
@@ -1157,17 +1534,19 @@ export function computeRealChartTradeParams(p: {
     ? `${orderVerdictLabel}: +$${netProfitUsd.toFixed(2)} (+${netProfitKes} KES) at 12H TP2 (${tp2Price.toFixed(decimals)}) · +$${netProfit48hUsd.toFixed(2)} (+${netProfit48hKes} KES) 48H Swing TP3 vs -$${actualRiskUsd.toFixed(2)} max risk (${riskReward} R:R)`
     : `${orderVerdictLabel}: Pullback near 20 EMA (${ema20Val.toFixed(decimals)}) targets +$${netProfitUsd.toFixed(2)} (+${netProfitKes} KES) at TP2 & +$${netProfit48hUsd.toFixed(2)} (+${netProfit48hKes} KES) at 48H TP3 (${riskReward} R:R)`;
 
-  const humanCheckNote = isBuy
-    ? `BUY Confirmation Check (${p.targetTf}): Confirm a bullish candle close above 20 EMA (${ema20Val.toFixed(decimals)}) with lower wick rejection near ${sweepAnchor} before entering BUY.`
-    : `SELL Confirmation Check (${p.targetTf}): Confirm a bearish candle close below 20 EMA (${ema20Val.toFixed(decimals)}) with upper wick rejection near ${sweepAnchor} before entering SELL.`;
+  const humanCheckNote = allFactorEval.entryTimingWarning
+    ? allFactorEval.entryTimingWarning
+    : isBuy
+    ? `BUY Confirmation Check (${p.targetTf}): Confirm a bullish candle close above 20 EMA (${ema20Val.toFixed(decimals)}) with swing-protected SL @ ${slPrice.toFixed(decimals)}.`
+    : `SELL Confirmation Check (${p.targetTf}): Confirm a bearish candle close below 20 EMA (${ema20Val.toFixed(decimals)}) with swing-protected SL @ ${slPrice.toFixed(decimals)}.`;
 
   const trajectory = isBuy
-    ? `1H–48H ${p.biasOverride ? 'Chosen BUY' : 'AI BUY'} Roadmap (${trendProjectionText}): Live ${p.targetTf} candle @ ${p.price.toFixed(decimals)} (${brokerSymbol}). Sell-side liquidity swept near ${sweepAnchor}. 1H–4H TP1: ${tp1Price.toFixed(decimals)} (+$${tp1NetProfitUsd.toFixed(2)}) → 4H–12H TP2: ${tp2Price.toFixed(decimals)} (+${actualTpPips}p / +$${netProfitUsd.toFixed(2)}) → 12H–48H Extended TP3: ${tp3Price.toFixed(decimals)} (+${actualTp3Pips}p / +$${netProfit48hUsd.toFixed(2)}). ${macroFactorNote}.`
-    : `1H–48H ${p.biasOverride ? 'Chosen SELL' : 'AI SELL'} Roadmap (${trendProjectionText}): Live ${p.targetTf} candle @ ${p.price.toFixed(decimals)} (${brokerSymbol}). Buy-side liquidity swept near ${sweepAnchor}. 1H–4H TP1: ${tp1Price.toFixed(decimals)} (+$${tp1NetProfitUsd.toFixed(2)}) → 4H–12H TP2: ${tp2Price.toFixed(decimals)} (-${actualTpPips}p / +$${netProfitUsd.toFixed(2)}) → 12H–48H Extended TP3: ${tp3Price.toFixed(decimals)} (-${actualTp3Pips}p / +$${netProfit48hUsd.toFixed(2)}). ${macroFactorNote}.`;
+    ? `1H–48H ${p.biasOverride ? 'Chosen BUY' : 'AI BUY'} Roadmap (${trendProjectionText}): Live ${p.targetTf} candle @ ${p.price.toFixed(decimals)} (${brokerSymbol}). Swing SL @ ${slPrice.toFixed(decimals)} (${actualSlPips}p). 1H–4H TP1: ${tp1Price.toFixed(decimals)} (+$${tp1NetProfitUsd.toFixed(2)}) -> 4H–12H TP2: ${tp2Price.toFixed(decimals)} (+${actualTpPips}p / +$${netProfitUsd.toFixed(2)}) -> 12H–48H Extended TP3: ${tp3Price.toFixed(decimals)} (+${actualTp3Pips}p / +$${netProfit48hUsd.toFixed(2)}). ${macroFactorNote}.`
+    : `1H–48H ${p.biasOverride ? 'Chosen SELL' : 'AI SELL'} Roadmap (${trendProjectionText}): Live ${p.targetTf} candle @ ${p.price.toFixed(decimals)} (${brokerSymbol}). Swing SL @ ${slPrice.toFixed(decimals)} (${actualSlPips}p). 1H–4H TP1: ${tp1Price.toFixed(decimals)} (+$${tp1NetProfitUsd.toFixed(2)}) -> 4H–12H TP2: ${tp2Price.toFixed(decimals)} (-${actualTpPips}p / +$${netProfitUsd.toFixed(2)}) -> 12H–48H Extended TP3: ${tp3Price.toFixed(decimals)} (-${actualTp3Pips}p / +$${netProfit48hUsd.toFixed(2)}). ${macroFactorNote}.`;
 
   const mt4SafetyProof = isBuy
-    ? `MT4 BUY Validated ✓: SL (${slPrice.toFixed(decimals)}) < Entry (${p.price.toFixed(decimals)}) < TP1 (${tp1Price.toFixed(decimals)}) < TP2 (${tp2Price.toFixed(decimals)})`
-    : `MT4 SELL Validated ✓: TP2 (${tp2Price.toFixed(decimals)}) < TP1 (${tp1Price.toFixed(decimals)}) < Entry (${p.price.toFixed(decimals)}) < SL (${slPrice.toFixed(decimals)})`;
+    ? `MT4 BUY Validated: SL (${slPrice.toFixed(decimals)}) < Entry (${p.price.toFixed(decimals)}) < TP1 (${tp1Price.toFixed(decimals)}) < TP2 (${tp2Price.toFixed(decimals)})`
+    : `MT4 SELL Validated: TP2 (${tp2Price.toFixed(decimals)}) < TP1 (${tp1Price.toFixed(decimals)}) < Entry (${p.price.toFixed(decimals)}) < SL (${slPrice.toFixed(decimals)})`;
 
   return {
     direction: isBuy ? 'BUY' : 'SELL',
@@ -1195,6 +1574,8 @@ export function computeRealChartTradeParams(p: {
     orderVerdictLabel,
     profitOutlookText,
     isFavourableOrder,
+    isExtendedZone: allFactorEval.isExtendedZone,
+    entryTimingWarning: allFactorEval.entryTimingWarning,
     brokerSymbol,
     brokerSpread,
     decimals,
@@ -1202,6 +1583,9 @@ export function computeRealChartTradeParams(p: {
     bullScorePct: allFactorEval.bullScorePct,
     bearScorePct: allFactorEval.bearScorePct,
     factorVerdicts: allFactorEval.factorVerdicts,
+    alignedFactorsCount: allFactorEval.alignedFactorsCount,
+    totalFactorsCount: allFactorEval.totalFactorsCount,
+    goAheadAssurance: allFactorEval.goAheadAssurance,
     trajectory,
     trajectoryHorizons,
     trendDirection,
@@ -1214,7 +1598,7 @@ export function computeRealChartTradeParams(p: {
 }
 
 /**
- * Re-anchors all OHLC indicators, 5-Factor AI strategy verdict, & SL/TP levels around a live price & optional candle history.
+ * Re-anchors all OHLC indicators, 6-Factor AI strategy verdict, & swing-protected SL/TP levels around a live price & optional candle history.
  */
 export function buildCalibratedMarketItem(params: {
   pair: CurrencyPair;
@@ -1242,6 +1626,15 @@ export function buildCalibratedMarketItem(params: {
       ? Number((((params.price - params.dailyOpenPrice) / params.dailyOpenPrice) * 100).toFixed(2))
       : params.change24hPct;
 
+  // Compute genuine Higher-Timeframe (H1) EMA trend when H1 candles are available
+  let h1TrendDirection: 'UPTREND' | 'DOWNTREND' | 'RANGING' | undefined = params.previousTrendDirection;
+  if (params.h1Candles && params.h1Candles.length >= 22) {
+    const h1Closes = params.h1Candles.map((c) => c.close);
+    const h1Ema20 = computeRealEma(h1Closes, 20);
+    const h1Ema50 = computeRealEma(h1Closes, 50);
+    h1TrendDirection = h1Ema20 >= h1Ema50 ? 'UPTREND' : 'DOWNTREND';
+  }
+
   const evalData = evaluateCandleSeriesAndTick({
     pair: params.pair,
     timeframe: params.recommendedTf,
@@ -1251,17 +1644,9 @@ export function buildCalibratedMarketItem(params: {
     change24hPct: effectivePct,
     macro: params.macro,
     brokerSpread: params.spreadByBroker.fxpesa?.spread,
+    h1TrendDirection,
     previousDirection: params.previousDirection
   });
-
-  // Compute genuine Higher-Timeframe (H1) EMA trend when H1 candles are available
-  let h1TrendDirection: 'UPTREND' | 'DOWNTREND' | 'RANGING' | undefined = undefined;
-  if (params.h1Candles && params.h1Candles.length >= 22) {
-    const h1Closes = params.h1Candles.map((c) => c.close);
-    const h1Ema20 = computeRealEma(h1Closes, 20);
-    const h1Ema50 = computeRealEma(h1Closes, 50);
-    h1TrendDirection = h1Ema20 >= h1Ema50 ? 'UPTREND' : 'DOWNTREND';
-  }
 
   const absPct = Math.abs(effectivePct);
   const isNeutral =
@@ -1276,6 +1661,8 @@ export function buildCalibratedMarketItem(params: {
     targetBroker: 'fxpesa',
     price: params.price,
     keyLevel: evalData.keyLevel,
+    swingLow: evalData.swingLow,
+    swingHigh: evalData.swingHigh,
     ema20: evalData.ema20,
     ema50: evalData.ema50,
     rsi: evalData.rsi,
@@ -1356,26 +1743,52 @@ export function buildCalibratedMarketItem(params: {
     orderVerdictLabel: computed.orderVerdictLabel,
     profitOutlookText: computed.profitOutlookText,
     isFavourableOrder: computed.isFavourableOrder,
+    isExtendedZone: computed.isExtendedZone,
+    entryTimingWarning: computed.entryTimingWarning,
     dataSource: params.dataSource || 'Live Feed + Institutional Calibration',
     spreadByBroker: params.spreadByBroker
   };
 }
 
-export const INITIAL_MARKETS_DATA: MarketScanData[] = [
+export function sortMarketsByTopPercent(
+  list: MarketScanData[],
+  mode: 'PCT_DESC' | 'PCT_ABS' | 'CONFIDENCE' = 'PCT_DESC'
+): MarketScanData[] {
+  const sorted = [...list].sort((a, b) => {
+    if (mode === 'PCT_ABS') {
+      const diffAbs = Math.abs(b.change24hPct) - Math.abs(a.change24hPct);
+      return diffAbs !== 0 ? diffAbs : b.change24hPct - a.change24hPct;
+    }
+    if (mode === 'CONFIDENCE') {
+      const diffConf = b.confidence - a.confidence;
+      return diffConf !== 0 ? diffConf : b.change24hPct - a.change24hPct;
+    }
+    // Primary ranking: Top % down to Least %
+    const diffPct = b.change24hPct - a.change24hPct;
+    return diffPct !== 0 ? diffPct : b.confidence - a.confidence;
+  });
+  return sorted.map((m, idx) => ({
+    ...m,
+    currentRank: idx + 1,
+    isTopPick: idx === 0
+  }));
+}
+
+export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
   buildCalibratedMarketItem({
-    pair: 'GBP/USD',
-    symbol: 'Cable (British Pound)',
-    price: 1.35140,
-    change24hPct: 0.42,
-    recommendedTf: 'M10',
-    recommendedSession: 'London Open (10:00 - 13:00 EAT)',
+    pair: 'BTC/USD',
+    symbol: 'Bitcoin Spot',
+    price: 80491.43,
+    change24hPct: 3.43,
+    recommendedTf: 'H1',
+    recommendedSession: '24/7 Global Liquidity Flow',
     volatility: 'HIGH',
     isTopPick: true,
     spreadByBroker: {
-      fxpesa: { symbol: 'GBPUSD', spread: 1.1, notes: 'CMA Kenya regulated, tight 1.1 pip spread.' },
-      hfm: { symbol: 'GBPUSD.h', spread: 1.3, notes: 'Standard ECN execution.' },
-      exness: { symbol: 'GBPUSD.m', spread: 0.6, notes: 'Micro standard, 0.6 pip spread.' },
-      fbs: { symbol: 'GBPUSD', spread: 1.5, notes: 'Cent and Standard account.' }
+      fxpesa: { symbol: 'BTCUSD', spread: 25.0, notes: 'CMA CFD contract with risk protection.' },
+      hfm: { symbol: 'BTCUSD', spread: 30.0, notes: 'High leverage crypto CFD.' },
+      exness: { symbol: 'BTCUSD', spread: 18.0, notes: 'Zero overnight swap fee on crypto CFDs.' },
+      fbs: { symbol: 'BTCUSD', spread: 35.0, notes: 'Crypto swap rates apply.' }
     }
   }),
   buildCalibratedMarketItem({
@@ -1394,36 +1807,6 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = [
     }
   }),
   buildCalibratedMarketItem({
-    pair: 'EUR/USD',
-    symbol: 'Fiber (Euro)',
-    price: 1.16360,
-    change24hPct: 0.35,
-    recommendedTf: 'M15',
-    recommendedSession: 'London / NY (10:00 - 17:00 EAT)',
-    volatility: 'MEDIUM',
-    spreadByBroker: {
-      fxpesa: { symbol: 'EURUSD', spread: 1.1, notes: 'Lowest standard spread on CMA platform.' },
-      hfm: { symbol: 'EURUSD.h', spread: 1.2, notes: 'Standard account.' },
-      exness: { symbol: 'EURUSD.m', spread: 0.6, notes: 'Zero spread account reaches 0.1 pip.' },
-      fbs: { symbol: 'EURUSD', spread: 1.3, notes: 'Standard spread.' }
-    }
-  }),
-  buildCalibratedMarketItem({
-    pair: 'BTC/USD',
-    symbol: 'Bitcoin Spot',
-    price: 80491.43,
-    change24hPct: 3.43,
-    recommendedTf: 'H1',
-    recommendedSession: '24/7 Global Liquidity Flow',
-    volatility: 'HIGH',
-    spreadByBroker: {
-      fxpesa: { symbol: 'BTCUSD', spread: 25.0, notes: 'CMA CFD contract with risk protection.' },
-      hfm: { symbol: 'BTCUSD', spread: 30.0, notes: 'High leverage crypto CFD.' },
-      exness: { symbol: 'BTCUSD', spread: 18.0, notes: 'Zero overnight swap fee on crypto CFDs.' },
-      fbs: { symbol: 'BTCUSD', spread: 35.0, notes: 'Crypto swap rates apply.' }
-    }
-  }),
-  buildCalibratedMarketItem({
     pair: 'GBP/JPY',
     symbol: 'Guppy / Dragon',
     price: 213.450,
@@ -1439,18 +1822,48 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = [
     }
   }),
   buildCalibratedMarketItem({
-    pair: 'USD/CAD',
-    symbol: 'Loonie',
-    price: 1.39485,
-    change24hPct: -0.22,
+    pair: 'GBP/USD',
+    symbol: 'Cable (British Pound)',
+    price: 1.35140,
+    change24hPct: 0.42,
+    recommendedTf: 'M10',
+    recommendedSession: 'London Open (10:00 - 13:00 EAT)',
+    volatility: 'HIGH',
+    spreadByBroker: {
+      fxpesa: { symbol: 'GBPUSD', spread: 1.1, notes: 'CMA Kenya regulated, tight 1.1 pip spread.' },
+      hfm: { symbol: 'GBPUSD.h', spread: 1.3, notes: 'Standard ECN execution.' },
+      exness: { symbol: 'GBPUSD.m', spread: 0.6, notes: 'Micro standard, 0.6 pip spread.' },
+      fbs: { symbol: 'GBPUSD', spread: 1.5, notes: 'Cent and Standard account.' }
+    }
+  }),
+  buildCalibratedMarketItem({
+    pair: 'EUR/USD',
+    symbol: 'Fiber (Euro)',
+    price: 1.16360,
+    change24hPct: 0.35,
     recommendedTf: 'M15',
-    recommendedSession: 'New York Session (15:30 - 20:00 EAT)',
+    recommendedSession: 'London / NY (10:00 - 17:00 EAT)',
     volatility: 'MEDIUM',
     spreadByBroker: {
-      fxpesa: { symbol: 'USDCAD', spread: 1.3, notes: 'CMA standard.' },
-      hfm: { symbol: 'USDCAD.h', spread: 1.5, notes: 'Standard.' },
-      exness: { symbol: 'USDCAD.m', spread: 0.8, notes: 'Low spread.' },
-      fbs: { symbol: 'USDCAD', spread: 1.6, notes: 'Cent account.' }
+      fxpesa: { symbol: 'EURUSD', spread: 1.1, notes: 'Lowest standard spread on CMA platform.' },
+      hfm: { symbol: 'EURUSD.h', spread: 1.2, notes: 'Standard account.' },
+      exness: { symbol: 'EURUSD.m', spread: 0.6, notes: 'Zero spread account reaches 0.1 pip.' },
+      fbs: { symbol: 'EURUSD', spread: 1.3, notes: 'Standard spread.' }
+    }
+  }),
+  buildCalibratedMarketItem({
+    pair: 'AUD/USD',
+    symbol: 'Aussie',
+    price: 0.69750,
+    change24hPct: 0.31,
+    recommendedTf: 'M15',
+    recommendedSession: 'Asian / Sydney Session (03:00 - 09:00 EAT)',
+    volatility: 'LOW',
+    spreadByBroker: {
+      fxpesa: { symbol: 'AUDUSD', spread: 1.2, notes: 'Low spread.' },
+      hfm: { symbol: 'AUDUSD.h', spread: 1.4, notes: 'Standard.' },
+      exness: { symbol: 'AUDUSD.m', spread: 0.7, notes: 'Low spread.' },
+      fbs: { symbol: 'AUDUSD', spread: 1.5, notes: 'Cent account.' }
     }
   }),
   buildCalibratedMarketItem({
@@ -1469,21 +1882,51 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = [
     }
   }),
   buildCalibratedMarketItem({
-    pair: 'AUD/USD',
-    symbol: 'Aussie',
-    price: 0.69750,
-    change24hPct: 0.31,
+    pair: 'USD/CHF',
+    symbol: 'Swissy',
+    price: 0.87940,
+    change24hPct: 0.16,
     recommendedTf: 'M15',
-    recommendedSession: 'Asian / Sydney Session (03:00 - 09:00 EAT)',
-    volatility: 'LOW',
+    recommendedSession: 'Zurich / London Session (10:00 - 17:00 EAT)',
+    volatility: 'MEDIUM',
     spreadByBroker: {
-      fxpesa: { symbol: 'AUDUSD', spread: 1.2, notes: 'Low spread.' },
-      hfm: { symbol: 'AUDUSD.h', spread: 1.4, notes: 'Standard.' },
-      exness: { symbol: 'AUDUSD.m', spread: 0.7, notes: 'Low spread.' },
-      fbs: { symbol: 'AUDUSD', spread: 1.5, notes: 'Cent account.' }
+      fxpesa: { symbol: 'USDCHF', spread: 1.2, notes: 'CMA standard.' },
+      hfm: { symbol: 'USDCHF.h', spread: 1.4, notes: 'Standard.' },
+      exness: { symbol: 'USDCHF.m', spread: 0.7, notes: 'Low spread.' },
+      fbs: { symbol: 'USDCHF', spread: 1.5, notes: 'Cent account.' }
+    }
+  }),
+  buildCalibratedMarketItem({
+    pair: 'EUR/JPY',
+    symbol: 'Euppy Cross',
+    price: 183.790,
+    change24hPct: 0.21,
+    recommendedTf: 'M15',
+    recommendedSession: 'London / Tokyo Cross (10:00 - 16:30 EAT)',
+    volatility: 'HIGH',
+    spreadByBroker: {
+      fxpesa: { symbol: 'EURJPY', spread: 1.5, notes: 'CMA cross pair.' },
+      hfm: { symbol: 'EURJPY.h', spread: 1.7, notes: 'Standard.' },
+      exness: { symbol: 'EURJPY.m', spread: 0.9, notes: 'Low friction cross.' },
+      fbs: { symbol: 'EURJPY', spread: 1.9, notes: 'Cent account.' }
+    }
+  }),
+  buildCalibratedMarketItem({
+    pair: 'USD/CAD',
+    symbol: 'Loonie',
+    price: 1.39485,
+    change24hPct: -0.22,
+    recommendedTf: 'M15',
+    recommendedSession: 'New York Session (15:30 - 20:00 EAT)',
+    volatility: 'MEDIUM',
+    spreadByBroker: {
+      fxpesa: { symbol: 'USDCAD', spread: 1.3, notes: 'CMA standard.' },
+      hfm: { symbol: 'USDCAD.h', spread: 1.5, notes: 'Standard.' },
+      exness: { symbol: 'USDCAD.m', spread: 0.8, notes: 'Low spread.' },
+      fbs: { symbol: 'USDCAD', spread: 1.6, notes: 'Cent account.' }
     }
   })
-];
+]);
 
 function getKrakenPairAndInterval(pair: CurrencyPair, tf: Timeframe): { krakenPair: string | null; interval: number } {
   // For M10 we fetch 5m bars (interval=5) and aggregate 2x5m candles into 10m bars
@@ -1498,6 +1941,7 @@ function getKrakenPairAndInterval(pair: CurrencyPair, tf: Timeframe): { krakenPa
     'EUR/USD': 'EURUSD',
     'GBP/USD': 'GBPUSD',
     'USD/JPY': 'USDJPY',
+    'USD/CHF': 'USDCHF',
     'USD/CAD': 'USDCAD',
     'AUD/USD': 'AUDUSD',
     'XAU/USD': 'PAXGUSD',
@@ -1571,8 +2015,8 @@ export interface SuperAiLiveNote {
 const inFlightPairCandleMap = new Map<string, Promise<any>>();
 
 /**
- * Fetches live FX/Crypto/Gold spot rate AND recent OHLC candlesticks from public interbank APIs
- * with fast 1.6s timeout protection and in-flight deduplication.
+ * Fetches live FX/Crypto/Gold spot rate AND recent OHLC candlesticks from server aggregator + interbank APIs
+ * with fast timeout protection and in-flight deduplication.
  */
 export async function fetchPairLiveCandleSnapshot(
   pair: CurrencyPair,
@@ -1612,6 +2056,30 @@ export async function fetchPairLiveCandleSnapshot(
     let liveConnected = false;
 
     try {
+      // 1. Primary server-side institutional Yahoo/Interbank aggregator (/api/live-markets)
+      const serverRes = await fetchWithFastTimeout('/api/live-markets', {}, 2100).catch(() => null);
+      if (serverRes && serverRes.ok) {
+        const srvJson = await serverRes.json();
+        const q = srvJson?.quotes?.[pair];
+        if (q && typeof q.price === 'number' && q.price > 0) {
+          livePrice = q.price;
+          if (typeof q.change24hPct === 'number') {
+            change24hPct = q.change24hPct;
+          }
+          const wantsH1 = timeframe === 'H1' || timeframe === 'H4' || timeframe === 'D1';
+          const preferredBars = wantsH1
+            ? (Array.isArray(q.h1Candles) && q.h1Candles.length >= 12 ? q.h1Candles : q.m15Candles)
+            : (Array.isArray(q.m15Candles) && q.m15Candles.length >= 12 ? q.m15Candles : q.h1Candles);
+          if (Array.isArray(preferredBars) && preferredBars.length >= 12) {
+            fetchedCandles = preferredBars.slice(-60);
+          }
+          if (srvJson.liveFeedConnected) {
+            liveConnected = true;
+          }
+        }
+      }
+
+      // 2. Supplement/override with direct exchange OHLC & WS-matched spot if lower timeframe or fallback needed
       const { krakenPair, interval } = getKrakenPairAndInterval(pair, timeframe);
       const binanceSym =
         pair === 'BTC/USD' ? 'BTCUSDT' :
@@ -1627,151 +2095,105 @@ export async function fetchPairLiveCandleSnapshot(
         timeframe === 'H1' ? '1h' :
         timeframe === 'H4' ? '4h' : '1d';
 
-      const [coinbaseRes, frankfurterRes, krakenRes, binanceTickerRes, binanceKlinesRes] = await Promise.allSettled([
-        fetchWithFastTimeout(`https://api.coinbase.com/v2/exchange-rates?currency=USD&_t=${Date.now()}`, {}, 1500),
-        fetchWithFastTimeout(`https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR,GBP,JPY,CAD,AUD`, {}, 1500),
-        krakenPair ? fetchWithFastTimeout(`https://api.kraken.com/0/public/OHLC?pair=${krakenPair}&interval=${interval}`, {}, 1700) : Promise.resolve(null),
-        binanceSym ? fetchWithFastTimeout(`https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSym}`, {}, 1500) : Promise.resolve(null),
-        binanceSym ? fetchWithFastTimeout(`https://api.binance.com/api/v3/klines?symbol=${binanceSym}&interval=${binanceInterval}&limit=80`, {}, 1600) : Promise.resolve(null)
-      ]);
+      if (fetchedCandles.length < 15 || !liveConnected || timeframe === 'M1' || timeframe === 'M5' || timeframe === 'M10') {
+        const [coinbaseRes, krakenRes, binanceTickerRes, binanceKlinesRes] = await Promise.allSettled([
+          fetchWithFastTimeout(`https://api.coinbase.com/v2/exchange-rates?currency=USD&_t=${Date.now()}`, {}, 1400),
+          krakenPair ? fetchWithFastTimeout(`https://api.kraken.com/0/public/OHLC?pair=${krakenPair}&interval=${interval}`, {}, 1600) : Promise.resolve(null),
+          binanceSym ? fetchWithFastTimeout(`https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSym}`, {}, 1400) : Promise.resolve(null),
+          binanceSym ? fetchWithFastTimeout(`https://api.binance.com/api/v3/klines?symbol=${binanceSym}&interval=${binanceInterval}&limit=80`, {}, 1500) : Promise.resolve(null)
+        ]);
 
-    let cbEur: number | null = null;
-    let cbGbp: number | null = null;
-    let cbJpy: number | null = null;
-    let cbCad: number | null = null;
-    let cbAud: number | null = null;
+        if (!liveConnected && coinbaseRes.status === 'fulfilled' && coinbaseRes.value && coinbaseRes.value.ok) {
+          const cbData = await coinbaseRes.value.json();
+          const r = cbData?.data?.rates;
+          if (r) {
+            if (pair === 'EUR/USD' && r.EUR) { livePrice = 1 / parseFloat(r.EUR); liveConnected = true; }
+            else if (pair === 'GBP/USD' && r.GBP) { livePrice = 1 / parseFloat(r.GBP); liveConnected = true; }
+            else if (pair === 'USD/JPY' && r.JPY) { livePrice = parseFloat(r.JPY); liveConnected = true; }
+            else if (pair === 'USD/CHF' && r.CHF) { livePrice = parseFloat(r.CHF); liveConnected = true; }
+            else if (pair === 'USD/CAD' && r.CAD) { livePrice = parseFloat(r.CAD); liveConnected = true; }
+            else if (pair === 'AUD/USD' && r.AUD) { livePrice = 1 / parseFloat(r.AUD); liveConnected = true; }
+            else if (pair === 'GBP/JPY' && r.GBP && r.JPY) { livePrice = (1 / parseFloat(r.GBP)) * parseFloat(r.JPY); liveConnected = true; }
+            else if (pair === 'EUR/JPY' && r.EUR && r.JPY) { livePrice = (1 / parseFloat(r.EUR)) * parseFloat(r.JPY); liveConnected = true; }
+          }
+        }
 
-    if (coinbaseRes.status === 'fulfilled' && coinbaseRes.value && coinbaseRes.value.ok) {
-      const cbData = await coinbaseRes.value.json();
-      const rates = cbData?.data?.rates;
-      if (rates) {
-        if (rates.EUR) cbEur = 1 / parseFloat(rates.EUR);
-        if (rates.GBP) cbGbp = 1 / parseFloat(rates.GBP);
-        if (rates.JPY) cbJpy = parseFloat(rates.JPY);
-        if (rates.CAD) cbCad = parseFloat(rates.CAD);
-        if (rates.AUD) cbAud = 1 / parseFloat(rates.AUD);
-      }
-    }
+        if (krakenRes.status === 'fulfilled' && krakenRes.value && krakenRes.value.ok) {
+          const kJson = await krakenRes.value.json();
+          const resultKeys = Object.keys(kJson?.result || {}).filter((k) => k !== 'last');
+          if (resultKeys.length > 0) {
+            const rows = kJson.result[resultKeys[0]];
+            if (Array.isArray(rows) && rows.length >= 10) {
+              fetchedCandles = parseKrakenOhlcRows(rows, timeframe === 'M10');
+              const latestBar = fetchedCandles[fetchedCandles.length - 1];
+              if (!liveConnected && latestBar?.close > 0) {
+                livePrice = latestBar.close;
+                liveConnected = true;
+              }
+            }
+          }
+        }
 
-    let refOpen: number | null = null;
-    if (frankfurterRes.status === 'fulfilled' && frankfurterRes.value && frankfurterRes.value.ok) {
-      const ff = await frankfurterRes.value.json();
-      const r = ff?.rates;
-      if (r) {
-        if (pair === 'EUR/USD' && r.EUR) refOpen = 1 / r.EUR;
-        else if (pair === 'GBP/USD' && r.GBP) refOpen = 1 / r.GBP;
-        else if (pair === 'USD/JPY' && r.JPY) refOpen = r.JPY;
-        else if (pair === 'USD/CAD' && r.CAD) refOpen = r.CAD;
-        else if (pair === 'AUD/USD' && r.AUD) refOpen = 1 / r.AUD;
-        else if (pair === 'GBP/JPY' && r.GBP && r.JPY) refOpen = (1 / r.GBP) * r.JPY;
-      }
-    }
+        const isCryptoOrGold = pair === 'BTC/USD' || pair === 'XAU/USD';
+        if (binanceKlinesRes.status === 'fulfilled' && binanceKlinesRes.value && binanceKlinesRes.value.ok && (pair === 'BTC/USD' || fetchedCandles.length < 12)) {
+          const kRows = await binanceKlinesRes.value.json();
+          if (Array.isArray(kRows) && kRows.length >= 10) {
+            const parsed = kRows.map((r: any[]) => ({
+              time: Math.floor(Number(r[0]) / 1000),
+              open: parseFloat(r[1]),
+              high: parseFloat(r[2]),
+              low: parseFloat(r[3]),
+              close: parseFloat(r[4])
+            }));
+            fetchedCandles = timeframe === 'M10' ? parseKrakenOhlcRows(kRows.map((r: any[]) => [r[0] / 1000, r[1], r[2], r[3], r[4]]), true) : parsed.slice(-60);
+          }
+        }
 
-    if (pair === 'EUR/USD' && cbEur) {
-      livePrice = cbEur;
-      liveConnected = true;
-    } else if (pair === 'GBP/USD' && cbGbp) {
-      livePrice = cbGbp;
-      liveConnected = true;
-    } else if (pair === 'USD/JPY' && cbJpy) {
-      livePrice = cbJpy;
-      liveConnected = true;
-    } else if (pair === 'USD/CAD' && cbCad) {
-      livePrice = cbCad;
-      liveConnected = true;
-    } else if (pair === 'AUD/USD' && cbAud) {
-      livePrice = cbAud;
-      liveConnected = true;
-    } else if (pair === 'GBP/JPY' && cbGbp && cbJpy) {
-      livePrice = cbGbp * cbJpy;
-      liveConnected = true;
-    }
-
-    if (krakenRes.status === 'fulfilled' && krakenRes.value && krakenRes.value.ok) {
-      const kJson = await krakenRes.value.json();
-      const resultKeys = Object.keys(kJson?.result || {}).filter((k) => k !== 'last');
-      if (resultKeys.length > 0) {
-        const rows = kJson.result[resultKeys[0]];
-        if (Array.isArray(rows) && rows.length >= 10) {
-          fetchedCandles = parseKrakenOhlcRows(rows, timeframe === 'M10');
-          const latestBar = fetchedCandles[fetchedCandles.length - 1];
-          if (!liveConnected && latestBar?.close > 0) {
-            livePrice = latestBar.close;
+        if (binanceTickerRes.status === 'fulfilled' && binanceTickerRes.value && binanceTickerRes.value.ok) {
+          const tJson = await binanceTickerRes.value.json();
+          const last = parseFloat(tJson?.lastPrice);
+          const pct = parseFloat(tJson?.priceChangePercent);
+          if (last > 0 && (pair === 'BTC/USD' || (isCryptoOrGold && !liveConnected) || !liveConnected)) {
+            livePrice = last;
             liveConnected = true;
+          }
+          if (!isNaN(pct) && (pair === 'BTC/USD' || !liveConnected)) {
+            change24hPct = pct;
           }
         }
       }
+    } catch {
+      // Fallback gracefully to calibrated series
     }
 
-    // Only use Binance Klines/Ticker directly for crypto/gold (BTCUSDT, PAXGUSDT) or as fallback if Kraken failed
-    const isCryptoOrGold = pair === 'BTC/USD' || pair === 'XAU/USD';
-    if (binanceKlinesRes.status === 'fulfilled' && binanceKlinesRes.value && binanceKlinesRes.value.ok && (isCryptoOrGold || fetchedCandles.length < 12)) {
-      const kRows = await binanceKlinesRes.value.json();
-      if (Array.isArray(kRows) && kRows.length >= 10) {
-        const parsed = kRows.map((r: any[]) => ({
-          time: Math.floor(Number(r[0]) / 1000),
-          open: parseFloat(r[1]),
-          high: parseFloat(r[2]),
-          low: parseFloat(r[3]),
-          close: parseFloat(r[4])
-        }));
-        fetchedCandles = timeframe === 'M10' ? parseKrakenOhlcRows(kRows.map((r: any[]) => [r[0] / 1000, r[1], r[2], r[3], r[4]]), true) : parsed.slice(-60);
-      }
-    }
+    const finalPrice = customPrice && customPrice > 0 ? customPrice : livePrice;
+    const currentBasket = globalLiveStream?.getState?.().markets || INITIAL_MARKETS_DATA;
+    const pctMap: Partial<Record<CurrencyPair, number>> = {};
+    currentBasket.forEach((m) => {
+      pctMap[m.pair] = m.pair === pair ? change24hPct : m.change24hPct;
+    });
+    const liveMacro = getCurrentMacroContext(pctMap);
 
-    if (binanceTickerRes.status === 'fulfilled' && binanceTickerRes.value && binanceTickerRes.value.ok) {
-      const tJson = await binanceTickerRes.value.json();
-      const last = parseFloat(tJson?.lastPrice);
-      const pct = parseFloat(tJson?.priceChangePercent);
-      if (last > 0 && (isCryptoOrGold || !liveConnected)) {
-        livePrice = last;
-        liveConnected = true;
-      }
-      if (!isNaN(pct)) {
-        change24hPct = pct;
-      }
-    }
+    const evalResult = evaluateCandleSeriesAndTick({
+      pair,
+      timeframe,
+      livePrice: finalPrice,
+      baseCandles: fetchedCandles.length >= 12 ? fetchedCandles : baseline.candles,
+      candlesAreRealOhlc: fetchedCandles.length >= 12,
+      change24hPct,
+      macro: liveMacro
+    });
 
-    if (refOpen && refOpen > 0 && !binanceSym) {
-      change24hPct = ((livePrice - refOpen) / refOpen) * 100;
-    } else if (fetchedCandles.length >= 24 && isNaN(change24hPct)) {
-      const baseOpen = fetchedCandles[0].open;
-      if (baseOpen > 0) {
-        change24hPct = ((livePrice - baseOpen) / baseOpen) * 100;
-      }
-    }
-  } catch {
-    // Fallback gracefully to calibrated series
-  }
+    const lastBar = evalResult.candles[evalResult.candles.length - 1];
+    const lastCandleTime = lastBar
+      ? new Date(lastBar.time * 1000).toLocaleTimeString('en-GB', {
+          timeZone: 'Africa/Nairobi',
+          hour: '2-digit',
+          minute: '2-digit'
+        }) + ' EAT'
+      : 'Live Candle';
 
-  const finalPrice = customPrice && customPrice > 0 ? customPrice : livePrice;
-  const currentBasket = globalLiveStream?.getState?.().markets || INITIAL_MARKETS_DATA;
-  const pctMap: Partial<Record<CurrencyPair, number>> = {};
-  currentBasket.forEach((m) => {
-    pctMap[m.pair] = m.pair === pair ? change24hPct : m.change24hPct;
-  });
-  const liveMacro = getCurrentMacroContext(pctMap);
-
-  const evalResult = evaluateCandleSeriesAndTick({
-    pair,
-    timeframe,
-    livePrice: finalPrice,
-    baseCandles: fetchedCandles.length >= 12 ? fetchedCandles : baseline.candles,
-    candlesAreRealOhlc: fetchedCandles.length >= 12,
-    change24hPct,
-    macro: liveMacro
-  });
-
-  const lastBar = evalResult.candles[evalResult.candles.length - 1];
-  const lastCandleTime = lastBar
-    ? new Date(lastBar.time * 1000).toLocaleTimeString('en-GB', {
-        timeZone: 'Africa/Nairobi',
-        hour: '2-digit',
-        minute: '2-digit'
-      }) + ' EAT'
-    : 'Live Candle';
-
-  const { decimals } = getPairSpecs(pair);
+    const { decimals } = getPairSpecs(pair);
 
     return {
       price: Number(finalPrice.toFixed(decimals)),
@@ -1804,15 +2226,6 @@ export async function fetchPairLiveCandleSnapshot(
   return p;
 }
 
-let cachedDailyOpenRates: {
-  fetchedAt: number;
-  eur?: number;
-  gbp?: number;
-  jpy?: number;
-  cad?: number;
-  aud?: number;
-} = { fetchedAt: 0 };
-
 const cachedBackgroundCandles: Partial<
   Record<CurrencyPair, { m15?: OhlcCandle[]; h1?: OhlcCandle[]; fetchedAt: number }>
 > = {};
@@ -1822,15 +2235,35 @@ async function refreshBackgroundRealOhlcCandles(force = false) {
   if (isRefreshingBgCandles || typeof fetch === 'undefined') return;
   const now = Date.now();
   const sample = cachedBackgroundCandles['GBP/USD'];
-  if (!force && sample && now - sample.fetchedAt < 18_000) return;
+  if (!force && sample && now - sample.fetchedAt < 14_000) return;
 
   isRefreshingBgCandles = true;
   try {
-    const sig = typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(3000) : undefined;
+    const serverRes = await fetchWithFastTimeout('/api/live-markets', {}, 2200).catch(() => null);
+    if (serverRes && serverRes.ok) {
+      const srvJson = await serverRes.json();
+      const quotes = srvJson?.quotes || {};
+      (Object.keys(quotes) as CurrencyPair[]).forEach((pName) => {
+        const q = quotes[pName];
+        if (q) {
+          const m15 = Array.isArray(q.m15Candles) && q.m15Candles.length >= 15 ? q.m15Candles.slice(-60) : cachedBackgroundCandles[pName]?.m15;
+          const h1 = Array.isArray(q.h1Candles) && q.h1Candles.length >= 15 ? q.h1Candles.slice(-60) : cachedBackgroundCandles[pName]?.h1;
+          if (m15 || h1) {
+            cachedBackgroundCandles[pName] = { m15, h1, fetchedAt: Date.now() };
+          }
+        }
+      });
+      if (cachedBackgroundCandles['GBP/USD']?.m15) {
+        return;
+      }
+    }
+
+    const sig = typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(2600) : undefined;
     const krakenSpecs: { pair: CurrencyPair; kSym: string }[] = [
       { pair: 'GBP/USD', kSym: 'GBPUSD' },
       { pair: 'EUR/USD', kSym: 'EURUSD' },
       { pair: 'USD/JPY', kSym: 'USDJPY' },
+      { pair: 'USD/CHF', kSym: 'USDCHF' },
       { pair: 'USD/CAD', kSym: 'USDCAD' },
       { pair: 'AUD/USD', kSym: 'AUDUSD' },
       { pair: 'XAU/USD', kSym: 'PAXGUSD' },
@@ -1881,46 +2314,6 @@ async function refreshBackgroundRealOhlcCandles(force = false) {
         };
       }
     });
-
-    // Derive synthetic GBP/JPY M15 & H1 OHLC bars cleanly from GBP/USD and USD/JPY
-    const gbpCache = cachedBackgroundCandles['GBP/USD'];
-    const jpyCache = cachedBackgroundCandles['USD/JPY'];
-    if (gbpCache?.m15 && jpyCache?.m15) {
-      const len = Math.min(gbpCache.m15.length, jpyCache.m15.length);
-      const gjM15: OhlcCandle[] = [];
-      for (let i = len; i > 0; i--) {
-        const g = gbpCache.m15[gbpCache.m15.length - i];
-        const j = jpyCache.m15[jpyCache.m15.length - i];
-        gjM15.push({
-          time: g.time,
-          open: Number((g.open * j.open).toFixed(3)),
-          high: Number((g.high * j.high).toFixed(3)),
-          low: Number((g.low * j.low).toFixed(3)),
-          close: Number((g.close * j.close).toFixed(3))
-        });
-      }
-      let gjH1: OhlcCandle[] | undefined = undefined;
-      if (gbpCache.h1 && jpyCache.h1) {
-        const hLen = Math.min(gbpCache.h1.length, jpyCache.h1.length);
-        gjH1 = [];
-        for (let i = hLen; i > 0; i--) {
-          const g = gbpCache.h1[gbpCache.h1.length - i];
-          const j = jpyCache.h1[jpyCache.h1.length - i];
-          gjH1.push({
-            time: g.time,
-            open: Number((g.open * j.open).toFixed(3)),
-            high: Number((g.high * j.high).toFixed(3)),
-            low: Number((g.low * j.low).toFixed(3)),
-            close: Number((g.close * j.close).toFixed(3))
-          });
-        }
-      }
-      cachedBackgroundCandles['GBP/JPY'] = {
-        m15: gjM15,
-        h1: gjH1,
-        fetchedAt: Date.now()
-      };
-    }
   } catch {
     // Non-blocking background OHLC refresh
   } finally {
@@ -1933,8 +2326,8 @@ const inFlightSnapshotPromiseRef: { current: Promise<{ markets: MarketScanData[]
 };
 
 /**
- * Fetches live FX, Gold, and BTC spot prices & OHLC candles across all 8 markets simultaneously
- * with deduplication and strict 1.6s timeout guards for high speed.
+ * Fetches live FX, Gold, and BTC spot prices & OHLC candles across all 10 markets simultaneously
+ * via server institutional cache + direct exchange fallback.
  */
 export async function fetchLiveMarketSnapshot(
   currentMarkets: MarketScanData[] = INITIAL_MARKETS_DATA
@@ -1944,314 +2337,174 @@ export async function fetchLiveMarketSnapshot(
   }
 
   const runSnapshot = async (): Promise<{ markets: MarketScanData[]; syncedAt: string; liveFeedConnected: boolean }> => {
-  // Kick off background non-blocking real OHLC candle refresh
-  void refreshBackgroundRealOhlcCandles(false);
+    void refreshBackgroundRealOhlcCandles(false);
 
-  let eurusd = currentMarkets.find((m) => m.pair === 'EUR/USD')?.price || 1.16360;
-  let gbpusd = currentMarkets.find((m) => m.pair === 'GBP/USD')?.price || 1.35140;
-  let usdjpy = currentMarkets.find((m) => m.pair === 'USD/JPY')?.price || 157.950;
-  let usdcad = currentMarkets.find((m) => m.pair === 'USD/CAD')?.price || 1.39485;
-  let audusd = currentMarkets.find((m) => m.pair === 'AUD/USD')?.price || 0.69750;
-  let btcusd = currentMarkets.find((m) => m.pair === 'BTC/USD')?.price || 80491.43;
-  let xauusd = currentMarkets.find((m) => m.pair === 'XAU/USD')?.price || 3962.50;
+    const liveMap: Partial<Record<CurrencyPair, { price: number; pct: number; dailyOpen?: number }>> = {};
+    const candleMap: Partial<Record<CurrencyPair, OhlcCandle[]>> = {};
+    const h1CandleMap: Partial<Record<CurrencyPair, OhlcCandle[]>> = {};
+    let liveFeedConnected = false;
 
-  let openEurUsd: number | undefined = cachedDailyOpenRates.eur;
-  let openGbpUsd: number | undefined = cachedDailyOpenRates.gbp;
-  let openUsdJpy: number | undefined = cachedDailyOpenRates.jpy;
-  let openUsdCad: number | undefined = cachedDailyOpenRates.cad;
-  let openAudUsd: number | undefined = cachedDailyOpenRates.aud;
+    currentMarkets.forEach((cm) => {
+      liveMap[cm.pair] = {
+        price: cm.price,
+        pct: cm.change24hPct,
+        dailyOpen: cm.dailyOpenPrice
+      };
+      const c = cachedBackgroundCandles[cm.pair];
+      if (c?.m15 && c.m15.length >= 15) candleMap[cm.pair] = c.m15;
+      if (c?.h1 && c.h1.length >= 15) h1CandleMap[cm.pair] = c.h1;
+    });
 
-  let pctEurUsd = currentMarkets.find((m) => m.pair === 'EUR/USD')?.change24hPct ?? 0.35;
-  let pctGbpUsd = currentMarkets.find((m) => m.pair === 'GBP/USD')?.change24hPct ?? 0.42;
-  let pctUsdJpy = currentMarkets.find((m) => m.pair === 'USD/JPY')?.change24hPct ?? -0.14;
-  let pctUsdCad = currentMarkets.find((m) => m.pair === 'USD/CAD')?.change24hPct ?? -0.22;
-  let pctAudUsd = currentMarkets.find((m) => m.pair === 'AUD/USD')?.change24hPct ?? 0.31;
-  let pctBtcUsd = currentMarkets.find((m) => m.pair === 'BTC/USD')?.change24hPct ?? 3.43;
-  let pctXauUsd = currentMarkets.find((m) => m.pair === 'XAU/USD')?.change24hPct ?? 0.85;
-
-  let liveFeedConnected = false;
-  let fiatFxFeedOk = false;
-
-  const candleMap: Partial<Record<CurrencyPair, OhlcCandle[]>> = {};
-  const h1CandleMap: Partial<Record<CurrencyPair, OhlcCandle[]>> = {};
-  (['GBP/USD', 'XAU/USD', 'EUR/USD', 'BTC/USD', 'GBP/JPY', 'USD/CAD', 'USD/JPY', 'AUD/USD'] as CurrencyPair[]).forEach(
-    (pName) => {
-      const c = cachedBackgroundCandles[pName];
-      if (c?.m15 && c.m15.length >= 20) candleMap[pName] = c.m15;
-      if (c?.h1 && c.h1.length >= 20) h1CandleMap[pName] = c.h1;
-    }
-  );
-
-  try {
-    const shouldRefreshDailyOpen =
-      !cachedDailyOpenRates.fetchedAt || Date.now() - cachedDailyOpenRates.fetchedAt > 300_000;
-
-    const [coinbaseRes, frankfurterRes, binanceTickerRes, krakenBatchRes] = await Promise.allSettled([
-      fetchWithFastTimeout(`https://api.coinbase.com/v2/exchange-rates?currency=USD&_t=${Date.now()}`, {}, 1500),
-      shouldRefreshDailyOpen
-        ? fetchWithFastTimeout(`https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR,GBP,JPY,CAD,AUD`, {}, 1500)
-        : Promise.resolve(null),
-      fetchWithFastTimeout('https://api.binance.com/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22PAXGUSDT%22%5D', {}, 1500),
-      fetchWithFastTimeout('https://api.kraken.com/0/public/Ticker?pair=GBPUSD,USDCAD,AUDUSD,EURUSD,USDJPY,PAXGUSD,XBTUSD', {}, 1600)
-    ]);
-
-    // 1. Frankfurter reference baseline (cached for 5 min so 0.5s polls stay ultra-fast)
-    if (frankfurterRes.status === 'fulfilled' && frankfurterRes.value && frankfurterRes.value.ok) {
-      const ff = await frankfurterRes.value.json();
-      const r = ff?.rates;
-      if (r) {
-        const eurRate = Number(r.EUR);
-        const gbpRate = Number(r.GBP);
-        const jpyRate = Number(r.JPY);
-        const cadRate = Number(r.CAD);
-        const audRate = Number(r.AUD);
-
-        if (!isNaN(eurRate) && eurRate > 0) {
-          openEurUsd = 1 / eurRate;
-          eurusd = openEurUsd;
-        }
-        if (!isNaN(gbpRate) && gbpRate > 0) {
-          openGbpUsd = 1 / gbpRate;
-          gbpusd = openGbpUsd;
-        }
-        if (!isNaN(jpyRate) && jpyRate > 0) {
-          openUsdJpy = jpyRate;
-          usdjpy = openUsdJpy;
-        }
-        if (!isNaN(cadRate) && cadRate > 0) {
-          openUsdCad = cadRate;
-          usdcad = openUsdCad;
-        }
-        if (!isNaN(audRate) && audRate > 0) {
-          openAudUsd = 1 / audRate;
-          audusd = openAudUsd;
-        }
-        cachedDailyOpenRates = {
-          fetchedAt: Date.now(),
-          eur: openEurUsd,
-          gbp: openGbpUsd,
-          jpy: openUsdJpy,
-          cad: openUsdCad,
-          aud: openAudUsd
-        };
-        liveFeedConnected = true;
-      }
-    }
-
-    // 2. Real-time Coinbase interbank fiat USD mid-rates
-    if (coinbaseRes.status === 'fulfilled' && coinbaseRes.value.ok) {
-      const cb = await coinbaseRes.value.json();
-      const r = cb?.data?.rates;
-      if (r) {
-        if (r.EUR) eurusd = Number((1 / parseFloat(r.EUR)).toFixed(5));
-        if (r.GBP) gbpusd = Number((1 / parseFloat(r.GBP)).toFixed(5));
-        if (r.JPY) usdjpy = Number(parseFloat(r.JPY).toFixed(3));
-        if (r.CAD) usdcad = Number(parseFloat(r.CAD).toFixed(5));
-        if (r.AUD) audusd = Number((1 / parseFloat(r.AUD)).toFixed(5));
-        liveFeedConnected = true;
-        fiatFxFeedOk = true;
-      }
-    }
-
-    // 3. Kraken Batch Public Fiat USD Ticker (consistent fiat USD pricing across FX, Gold & BTC — eliminates USDT/USD ping-pong!)
-    if (krakenBatchRes.status === 'fulfilled' && krakenBatchRes.value.ok) {
-      const kb = await krakenBatchRes.value.json();
-      const resObj = kb?.result || {};
-      for (const k of Object.keys(resObj)) {
-        const entry = resObj[k];
-        const lastP = parseFloat(entry?.c?.[0]);
-        const openP = parseFloat(entry?.o);
-        if (isNaN(lastP) || lastP <= 0) continue;
-
-        if (k.includes('GBP')) {
-          gbpusd = Number(lastP.toFixed(5));
-          if (!isNaN(openP) && openP > 0) {
-            openGbpUsd = openP;
-            pctGbpUsd = Number((((lastP - openP) / openP) * 100).toFixed(2));
+    try {
+      // 1. Primary server-side institutional live markets aggregator (/api/live-markets)
+      const serverRes = await fetchWithFastTimeout('/api/live-markets', {}, 2100).catch(() => null);
+      if (serverRes && serverRes.ok) {
+        const srvJson = await serverRes.json();
+        const quotes = srvJson?.quotes || {};
+        (Object.keys(quotes) as CurrencyPair[]).forEach((pName) => {
+          const q = quotes[pName];
+          if (q && typeof q.price === 'number' && q.price > 0) {
+            liveMap[pName] = {
+              price: q.price,
+              pct: typeof q.change24hPct === 'number' ? q.change24hPct : liveMap[pName]?.pct ?? 0,
+              dailyOpen: q.dailyOpenPrice ?? liveMap[pName]?.dailyOpen
+            };
+            if (Array.isArray(q.m15Candles) && q.m15Candles.length >= 15) {
+              candleMap[pName] = q.m15Candles.slice(-60);
+            }
+            if (Array.isArray(q.h1Candles) && q.h1Candles.length >= 15) {
+              h1CandleMap[pName] = q.h1Candles.slice(-60);
+            }
           }
-          liveFeedConnected = true;
-          fiatFxFeedOk = true;
-        } else if (k.includes('JPY')) {
-          usdjpy = Number(lastP.toFixed(3));
-          if (!isNaN(openP) && openP > 0) {
-            openUsdJpy = openP;
-            pctUsdJpy = Number((((lastP - openP) / openP) * 100).toFixed(2));
-          }
-          liveFeedConnected = true;
-          fiatFxFeedOk = true;
-        } else if (k.includes('CAD')) {
-          usdcad = Number(lastP.toFixed(5));
-          if (!isNaN(openP) && openP > 0) {
-            openUsdCad = openP;
-            pctUsdCad = Number((((lastP - openP) / openP) * 100).toFixed(2));
-          }
-          liveFeedConnected = true;
-          fiatFxFeedOk = true;
-        } else if (k.includes('AUD')) {
-          audusd = Number(lastP.toFixed(5));
-          if (!isNaN(openP) && openP > 0) {
-            openAudUsd = openP;
-            pctAudUsd = Number((((lastP - openP) / openP) * 100).toFixed(2));
-          }
-          liveFeedConnected = true;
-          fiatFxFeedOk = true;
-        } else if (k.includes('EUR')) {
-          eurusd = Number(lastP.toFixed(5));
-          if (!isNaN(openP) && openP > 0) {
-            openEurUsd = openP;
-            pctEurUsd = Number((((lastP - openP) / openP) * 100).toFixed(2));
-          }
-          liveFeedConnected = true;
-          fiatFxFeedOk = true;
-        } else if (k.includes('PAXG') && lastP > 1500) {
-          xauusd = Number(lastP.toFixed(2));
-          if (!isNaN(openP) && openP > 0) {
-            pctXauUsd = Number((((lastP - openP) / openP) * 100).toFixed(2));
-          }
-          liveFeedConnected = true;
-        } else if (k.includes('XBT') && lastP > 5000) {
-          btcusd = Number(lastP.toFixed(2));
-          if (!isNaN(openP) && openP > 0) {
-            pctBtcUsd = Number((((lastP - openP) / openP) * 100).toFixed(2));
-          }
+        });
+        if (srvJson.liveFeedConnected) {
           liveFeedConnected = true;
         }
       }
-    }
 
-    // 4. Binance 24h live tickers strictly for BTC & Gold (PAXG) so fiat FX pairs never ping-pong against USDT basis!
-    if (binanceTickerRes.status === 'fulfilled' && binanceTickerRes.value.ok) {
-      const tickers = await binanceTickerRes.value.json();
-      if (Array.isArray(tickers)) {
-        for (const t of tickers) {
-          if (t.symbol === 'BTCUSDT') {
-            btcusd = parseFloat(t.lastPrice) || btcusd;
-            pctBtcUsd = parseFloat(t.priceChangePercent) || pctBtcUsd;
+      // 2. Fallback direct exchange tickers if /api/live-markets did not report a live upstream feed
+      if (!liveFeedConnected) {
+        const [coinbaseRes, binanceTickerRes] = await Promise.allSettled([
+          fetchWithFastTimeout(`https://api.coinbase.com/v2/exchange-rates?currency=USD&_t=${Date.now()}`, {}, 1400),
+          fetchWithFastTimeout('https://api.binance.com/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22PAXGUSDT%22%5D', {}, 1400)
+        ]);
+
+        if (coinbaseRes.status === 'fulfilled' && coinbaseRes.value && coinbaseRes.value.ok) {
+          const cb = await coinbaseRes.value.json();
+          const r = cb?.data?.rates;
+          if (r) {
+            const eur = r.EUR ? 1 / parseFloat(r.EUR) : undefined;
+            const gbp = r.GBP ? 1 / parseFloat(r.GBP) : undefined;
+            const jpy = r.JPY ? parseFloat(r.JPY) : undefined;
+            const chf = r.CHF ? parseFloat(r.CHF) : undefined;
+            const cad = r.CAD ? parseFloat(r.CAD) : undefined;
+            const aud = r.AUD ? 1 / parseFloat(r.AUD) : undefined;
+            if (eur) liveMap['EUR/USD'] = { price: Number(eur.toFixed(5)), pct: liveMap['EUR/USD']?.pct ?? 0 };
+            if (gbp) liveMap['GBP/USD'] = { price: Number(gbp.toFixed(5)), pct: liveMap['GBP/USD']?.pct ?? 0 };
+            if (jpy) liveMap['USD/JPY'] = { price: Number(jpy.toFixed(3)), pct: liveMap['USD/JPY']?.pct ?? 0 };
+            if (chf) liveMap['USD/CHF'] = { price: Number(chf.toFixed(5)), pct: liveMap['USD/CHF']?.pct ?? 0 };
+            if (cad) liveMap['USD/CAD'] = { price: Number(cad.toFixed(5)), pct: liveMap['USD/CAD']?.pct ?? 0 };
+            if (aud) liveMap['AUD/USD'] = { price: Number(aud.toFixed(5)), pct: liveMap['AUD/USD']?.pct ?? 0 };
+            if (gbp && jpy) liveMap['GBP/JPY'] = { price: Number((gbp * jpy).toFixed(3)), pct: liveMap['GBP/JPY']?.pct ?? 0 };
+            if (eur && jpy) liveMap['EUR/JPY'] = { price: Number((eur * jpy).toFixed(3)), pct: liveMap['EUR/JPY']?.pct ?? 0 };
             liveFeedConnected = true;
-          } else if (t.symbol === 'PAXGUSDT') {
-            const goldVal = parseFloat(t.lastPrice);
-            if (goldVal > 1500) {
-              xauusd = goldVal;
-              pctXauUsd = parseFloat(t.priceChangePercent) || pctXauUsd;
-              liveFeedConnected = true;
+          }
+        }
+
+        if (binanceTickerRes.status === 'fulfilled' && binanceTickerRes.value && binanceTickerRes.value.ok) {
+          const tickers = await binanceTickerRes.value.json();
+          if (Array.isArray(tickers)) {
+            for (const t of tickers) {
+              if (t.symbol === 'BTCUSDT') {
+                const p = parseFloat(t.lastPrice);
+                const pct = parseFloat(t.priceChangePercent);
+                if (p > 0) {
+                  liveMap['BTC/USD'] = { price: Number(p.toFixed(2)), pct: !isNaN(pct) ? pct : liveMap['BTC/USD']?.pct ?? 0 };
+                  liveFeedConnected = true;
+                }
+              } else if (t.symbol === 'PAXGUSDT') {
+                const p = parseFloat(t.lastPrice);
+                const pct = parseFloat(t.priceChangePercent);
+                if (p > 1500) {
+                  liveMap['XAU/USD'] = { price: Number(p.toFixed(2)), pct: !isNaN(pct) ? pct : liveMap['XAU/USD']?.pct ?? 0 };
+                  liveFeedConnected = true;
+                }
+              }
             }
           }
         }
       }
+    } catch {
+      // Graceful fallback
     }
 
-    // Calculate live % changes against daily open reference if needed
-    if (!fiatFxFeedOk && openEurUsd && openEurUsd > 0) {
-      pctEurUsd = ((eurusd - openEurUsd) / openEurUsd) * 100;
-    }
-    if (!fiatFxFeedOk && openGbpUsd && openGbpUsd > 0) {
-      pctGbpUsd = ((gbpusd - openGbpUsd) / openGbpUsd) * 100;
-    }
-    if (!fiatFxFeedOk && openUsdJpy && openUsdJpy > 0) {
-      pctUsdJpy = ((usdjpy - openUsdJpy) / openUsdJpy) * 100;
-    }
-    if (!fiatFxFeedOk && openUsdCad && openUsdCad > 0) {
-      pctUsdCad = ((usdcad - openUsdCad) / openUsdCad) * 100;
-    }
-    if (!fiatFxFeedOk && openAudUsd && openAudUsd > 0) {
-      pctAudUsd = ((audusd - openAudUsd) / openAudUsd) * 100;
-    }
-  } catch {
-    // Graceful fallback to calibrated baseline
-  }
-
-  const gbpjpy = Number((gbpusd * usdjpy).toFixed(3));
-  const openGbpJpy = openGbpUsd && openUsdJpy ? openGbpUsd * openUsdJpy : undefined;
-  const pctGbpJpy = Number((pctGbpUsd + pctUsdJpy).toFixed(2));
-
-  const liveMap: Record<CurrencyPair, { price: number; pct: number; dailyOpen?: number }> = {
-    'GBP/USD': { price: gbpusd, pct: pctGbpUsd, dailyOpen: openGbpUsd },
-    'XAU/USD': { price: xauusd, pct: pctXauUsd },
-    'EUR/USD': { price: eurusd, pct: pctEurUsd, dailyOpen: openEurUsd },
-    'BTC/USD': { price: btcusd, pct: pctBtcUsd },
-    'GBP/JPY': { price: gbpjpy, pct: pctGbpJpy, dailyOpen: openGbpJpy },
-    'USD/CAD': { price: usdcad, pct: pctUsdCad, dailyOpen: openUsdCad },
-    'USD/JPY': { price: usdjpy, pct: pctUsdJpy, dailyOpen: openUsdJpy },
-    'AUD/USD': { price: audusd, pct: pctAudUsd, dailyOpen: openAudUsd }
-  };
-
-  const liveMacro = getCurrentMacroContext({
-    'GBP/USD': pctGbpUsd,
-    'XAU/USD': pctXauUsd,
-    'EUR/USD': pctEurUsd,
-    'BTC/USD': pctBtcUsd,
-    'USD/CAD': pctUsdCad,
-    'USD/JPY': pctUsdJpy,
-    'AUD/USD': pctAudUsd
-  });
-
-  const prevMeta = new Map<
-    CurrencyPair,
-    { rank: number; dir: 'BUY' | 'SELL'; trendDir: 'UPTREND' | 'DOWNTREND' | 'RANGING'; price: number }
-  >();
-  currentMarkets.forEach((cm, idx) => {
-    prevMeta.set(cm.pair, {
-      rank: cm.currentRank || idx + 1,
-      dir: cm.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
-      trendDir: cm.trendDirection || (cm.bias === 'STRONG_SELL' ? 'DOWNTREND' : 'UPTREND'),
-      price: cm.price
+    const pctSnapshot: Partial<Record<CurrencyPair, number>> = {};
+    (Object.keys(liveMap) as CurrencyPair[]).forEach((k) => {
+      pctSnapshot[k] = liveMap[k]?.pct;
     });
-  });
+    const liveMacro = getCurrentMacroContext(pctSnapshot);
 
-  const nowTickStr = new Date().toLocaleTimeString('en-GB', {
-    timeZone: 'Africa/Nairobi',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  }) + ' EAT';
-
-  const rebuilt = currentMarkets.map((existing) => {
-    const live = liveMap[existing.pair];
-    const nextP = live ? live.price : existing.price;
-    const { pipMultiplier } = getPairSpecs(existing.pair);
-    const prevP = existing.price;
-    const rawDiffPips = Number(((nextP - prevP) * pipMultiplier).toFixed(2));
-    const tickDir: 'UP' | 'DOWN' | 'FLAT' = rawDiffPips > 0 ? 'UP' : rawDiffPips < 0 ? 'DOWN' : 'FLAT';
-    const old = prevMeta.get(existing.pair);
-
-    const item = buildCalibratedMarketItem({
-      pair: existing.pair,
-      symbol: existing.symbol,
-      price: nextP,
-      change24hPct: live ? live.pct : existing.change24hPct,
-      dailyOpenPrice: live?.dailyOpen ?? existing.dailyOpenPrice,
-      recommendedTf: existing.recommendedTf,
-      recommendedSession: existing.recommendedSession,
-      volatility: existing.volatility,
-      candles: candleMap[existing.pair] || existing.candles,
-      h1Candles: h1CandleMap[existing.pair] || existing.h1Candles,
-      candlesAreRealOhlc: Boolean(candleMap[existing.pair]) || existing.candlesAreRealOhlc,
-      macro: liveMacro,
-      previousDirection: old?.dir,
-      previousTrendDirection: old?.trendDir,
-      spreadByBroker: existing.spreadByBroker,
-      dataSource: liveFeedConnected ? 'Live Interbank Feed' : 'Live Feed + Institutional Calibration'
+    const prevMeta = new Map<
+      CurrencyPair,
+      { rank: number; dir: 'BUY' | 'SELL'; trendDir: 'UPTREND' | 'DOWNTREND' | 'RANGING'; price: number }
+    >();
+    currentMarkets.forEach((cm, idx) => {
+      prevMeta.set(cm.pair, {
+        rank: cm.currentRank || idx + 1,
+        dir: cm.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+        trendDir: cm.trendDirection || (cm.bias === 'STRONG_SELL' ? 'DOWNTREND' : 'UPTREND'),
+        price: cm.price
+      });
     });
-    const newDir: 'BUY' | 'SELL' = item.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
-    return {
-      ...item,
-      previousRank: old?.rank,
-      previousDirection: old?.dir,
-      directionFlipped: Boolean(old && old.dir !== newDir),
-      lastTickTime: nowTickStr,
-      lastTickDir: tickDir,
-      lastTickDeltaPips: rawDiffPips
-    };
-  });
 
-  // Sort by highest AI confidence & mark top trending market
-  rebuilt.sort((a, b) => b.confidence - a.confidence);
-  const withTop = rebuilt.map((m, idx) => ({
-    ...m,
-    currentRank: idx + 1,
-    isTopPick: idx === 0
-  }));
+    const nowTickStr =
+      new Date().toLocaleTimeString('en-GB', {
+        timeZone: 'Africa/Nairobi',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      }) + ' EAT';
 
+    const rebuilt = currentMarkets.map((existing) => {
+      const live = liveMap[existing.pair];
+      const nextP = live ? live.price : existing.price;
+      const { pipMultiplier } = getPairSpecs(existing.pair);
+      const prevP = existing.price;
+      const rawDiffPips = Number(((nextP - prevP) * pipMultiplier).toFixed(2));
+      const tickDir: 'UP' | 'DOWN' | 'FLAT' = rawDiffPips > 0 ? 'UP' : rawDiffPips < 0 ? 'DOWN' : 'FLAT';
+      const old = prevMeta.get(existing.pair);
+
+      const item = buildCalibratedMarketItem({
+        pair: existing.pair,
+        symbol: existing.symbol,
+        price: nextP,
+        change24hPct: live ? live.pct : existing.change24hPct,
+        dailyOpenPrice: live?.dailyOpen ?? existing.dailyOpenPrice,
+        recommendedTf: existing.recommendedTf,
+        recommendedSession: existing.recommendedSession,
+        volatility: existing.volatility,
+        candles: candleMap[existing.pair] || existing.candles,
+        h1Candles: h1CandleMap[existing.pair] || existing.h1Candles,
+        candlesAreRealOhlc: Boolean(candleMap[existing.pair]) || existing.candlesAreRealOhlc,
+        macro: liveMacro,
+        previousDirection: old?.dir,
+        previousTrendDirection: old?.trendDir,
+        spreadByBroker: existing.spreadByBroker,
+        dataSource: liveFeedConnected ? 'Live Interbank Feed' : 'Live Feed + Institutional Calibration'
+      });
+      const newDir: 'BUY' | 'SELL' = item.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
+      return {
+        ...item,
+        previousRank: old?.rank,
+        previousDirection: old?.dir,
+        directionFlipped: Boolean(old && old.dir !== newDir),
+        lastTickTime: nowTickStr,
+        lastTickDir: tickDir,
+        lastTickDeltaPips: rawDiffPips
+      };
+    });
+
+    const withTop = sortMarketsByTopPercent(rebuilt, 'PCT_DESC');
     return { markets: withTop, syncedAt: nowTickStr, liveFeedConnected };
   };
 
@@ -2308,7 +2561,7 @@ export function evaluatePairKenyaTiming(pair: CurrencyPair, now: Date = new Date
       isFavorableTime: false,
       windowStatusCode: 'CLOSED_WAIT',
       statusLabel: `MARKET CLOSED · OPENS IN ${cd}`,
-      windowBadgeShort: `✕ CLOSED · OPENS IN ${cd}`,
+      windowBadgeShort: `CLOSED · OPENS IN ${cd}`,
       bannerHeadline: `MARKET CLOSED IN KENYA (EAT) · OPENS IN ${cd}`,
       currentWindowName: 'Weekend Interbank Settlement',
       nextWindowName: 'Sydney / Tokyo Open (Sun 23:55 EAT)',
@@ -2340,6 +2593,15 @@ export function evaluatePairKenyaTiming(pair: CurrencyPair, now: Date = new Date
       { name: 'Tokyo Cross Volatility (03:00–06:00 EAT)', startSec: 3 * 3600, endSec: 6 * 3600 },
       { name: 'London Dragon Open (10:00–13:00 EAT)', startSec: 10 * 3600, endSec: 13 * 3600 },
       { name: 'New York Open Impulse (15:30–18:30 EAT)', startSec: 15.5 * 3600, endSec: 18.5 * 3600 }
+    ],
+    'USD/CHF': [
+      { name: 'Zurich & London Open (10:00–13:30 EAT)', startSec: 10 * 3600, endSec: 13.5 * 3600 },
+      { name: 'London / NY Overlap (15:30–19:30 EAT)', startSec: 15.5 * 3600, endSec: 19.5 * 3600 }
+    ],
+    'EUR/JPY': [
+      { name: 'Tokyo Morning Cross (03:00–06:30 EAT)', startSec: 3 * 3600, endSec: 6.5 * 3600 },
+      { name: 'Frankfurt & London Cross (10:00–13:00 EAT)', startSec: 10 * 3600, endSec: 13 * 3600 },
+      { name: 'New York Overlap Impulse (15:30–19:00 EAT)', startSec: 15.5 * 3600, endSec: 19 * 3600 }
     ],
     'USD/CAD': [
       { name: 'New York & Toronto Open (15:30–21:00 EAT)', startSec: 15.5 * 3600, endSec: 21 * 3600 }
@@ -2401,9 +2663,23 @@ export function evaluatePairKenyaTiming(pair: CurrencyPair, now: Date = new Date
   };
 }
 
+export function computeCandleSwingLevels(candles?: OhlcCandle[]): {
+  swingLow?: number;
+  swingHigh?: number;
+} {
+  if (!candles || candles.length === 0) return {};
+  const recent = candles.slice(-16);
+  const swingLow = Math.min(...recent.map((c) => c.low));
+  const swingHigh = Math.max(...recent.map((c) => c.high));
+  return {
+    swingLow: Number.isFinite(swingLow) ? swingLow : undefined,
+    swingHigh: Number.isFinite(swingHigh) ? swingHigh : undefined
+  };
+}
+
 /**
  * Generates the comprehensive Daily Global Trade Safety & Macro Factors report (Pillar 09)
- * answering whether it is safe to BUY or SELL today across all 8 markets, auto-updating
+ * answering whether it is safe to BUY or SELL today across all 10 markets, auto-updating
  * every second with live market telemetry and Kenya EAT countdown timers.
  */
 export function computeDailyMacroSafetyReport(
@@ -2415,13 +2691,14 @@ export function computeDailyMacroSafetyReport(
   const gbpPct = byPair['GBP/USD']?.change24hPct ?? 0;
   const audPct = byPair['AUD/USD']?.change24hPct ?? 0;
   const jpyPct = byPair['USD/JPY']?.change24hPct ?? 0;
+  const chfPct = byPair['USD/CHF']?.change24hPct ?? 0;
   const cadPct = byPair['USD/CAD']?.change24hPct ?? 0;
   const goldPct = byPair['XAU/USD']?.change24hPct ?? 0;
   const btcPct = byPair['BTC/USD']?.change24hPct ?? 0;
 
-  // Live USD Basket (DXY proxy) % change: positive = USD strengthening globally
+  // Live USD Basket (DXY proxy) % change across EUR, GBP, AUD, JPY, CHF, CAD
   const dxyPressurePct = Number(
-    ((-0.45 * eurPct - 0.18 * gbpPct - 0.10 * audPct + 0.17 * jpyPct + 0.10 * cadPct)).toFixed(2)
+    (-0.42 * eurPct - 0.16 * gbpPct - 0.08 * audPct + 0.15 * jpyPct + 0.11 * chfPct + 0.08 * cadPct).toFixed(2)
   );
 
   const dxyStatus: DailyMacroSafetyReport['dxyStatus'] =
@@ -2433,31 +2710,35 @@ export function computeDailyMacroSafetyReport(
 
   const dxySummary =
     dxyStatus === 'USD SURGING BULLISH'
-      ? `US Dollar Basket is strong (${dxyPressurePct >= 0 ? `+${dxyPressurePct}%` : `${dxyPressurePct}%`}). Favour USD-denominated shorts (SELL EUR/USD, SELL GBP/USD, SELL AUD/USD) or cautious USD/JPY & USD/CAD longs.`
+      ? `US Dollar Basket is strong (${dxyPressurePct >= 0 ? `+${dxyPressurePct}%` : `${dxyPressurePct}%`}). Favour USD-denominated shorts (SELL EUR/USD, SELL GBP/USD, SELL AUD/USD) or cautious USD/JPY, USD/CHF & USD/CAD longs.`
       : dxyStatus === 'USD WEAKENING BEARISH'
       ? `US Dollar Basket is softening (${dxyPressurePct}%). Institutional tail-wind supports BUY setups on EUR/USD, GBP/USD, AUD/USD, and Gold (XAU/USD).`
       : `US Dollar Basket is balanced (${dxyPressurePct >= 0 ? `+${dxyPressurePct}%` : `${dxyPressurePct}%`}). Trade individual pair structure around 20/50 EMA rather than blind USD correlation.`;
 
   // Global Risk Sentiment Regime
-  const riskScore = (btcPct > 0.6 ? 1 : btcPct < -0.8 ? -1 : 0) + (jpyPct > 0.15 ? 1 : jpyPct < -0.25 ? -1 : 0) - (goldPct > 1.2 ? 0.5 : 0);
+  const riskScore =
+    (btcPct > 0.6 ? 1 : btcPct < -0.8 ? -1 : 0) +
+    (jpyPct > 0.15 ? 1 : jpyPct < -0.25 ? -1 : 0) -
+    (goldPct > 1.2 ? 0.5 : 0);
   const riskRegime: DailyMacroSafetyReport['riskRegime'] =
     riskScore > 0.4 ? 'RISK-ON EXPANSION' : riskScore < -0.4 ? 'RISK-OFF SAFE-HAVEN' : 'MIXED CONSOLIDATION';
 
   const riskRegimeSummary =
     riskRegime === 'RISK-ON EXPANSION'
-      ? 'Global risk appetite is constructive (Equities/BTC supported, Yen carry calm). Trend-following pullbacks on GBP/USD, EUR/USD, and GBP/JPY have higher follow-through.'
+      ? 'Global risk appetite is constructive (Equities/BTC supported, Yen carry calm). Trend-following pullbacks on GBP/USD, EUR/USD, EUR/JPY, and GBP/JPY have higher follow-through.'
       : riskRegime === 'RISK-OFF SAFE-HAVEN'
-      ? 'Defensive safe-haven flows active (Capital rotating into Gold XAU/USD & Japanese Yen JPY). Beware sharp downside wicks on risk crosses like GBP/JPY & AUD/USD.'
+      ? 'Defensive safe-haven flows active (Capital rotating into Gold XAU/USD, Swiss Franc CHF & Japanese Yen JPY). Beware sharp downside wicks on risk crosses like GBP/JPY, EUR/JPY & AUD/USD.'
       : 'Global macro flows are selective. Stick strictly to A+ liquidity sweeps and enforce the 0.01 micro lot Gilgil cap ($2.00 max risk).';
 
   // East Africa Time (Nairobi UTC+3) Live Session Guard
   const now = new Date();
-  const eatTimeString = now.toLocaleTimeString('en-GB', {
-    timeZone: 'Africa/Nairobi',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  }) + ' EAT';
+  const eatTimeString =
+    now.toLocaleTimeString('en-GB', {
+      timeZone: 'Africa/Nairobi',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    }) + ' EAT';
   const eatHour = parseInt(
     now.toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', hour12: false }),
     10
@@ -2470,7 +2751,8 @@ export function computeDailyMacroSafetyReport(
   // Automatic real-time detection of daily macro/micro market hazards
   const isUsMacroReleaseWindow = eatHour === 15 && eatMin >= 20 && eatMin <= 50;
   const isRolloverHours = eatHour >= 22 || eatHour <= 2;
-  const isStrongDxyOrVolatilitySurge = Math.abs(dxyPressurePct) >= 0.35 || Math.abs(goldPct) >= 1.35 || Math.abs(btcPct) >= 4.2;
+  const isStrongDxyOrVolatilitySurge =
+    Math.abs(dxyPressurePct) >= 0.35 || Math.abs(goldPct) >= 1.35 || Math.abs(btcPct) >= 4.2;
 
   const autoDetectedFactors: MacroFactorFlags = {
     highImpactUsNews: isUsMacroReleaseWindow,
@@ -2509,20 +2791,24 @@ export function computeDailyMacroSafetyReport(
 
   let sessionWindowName = 'Tokyo / Sydney Range (03:00–09:59 EAT)';
   let sessionSafety: SideSafetyVerdict = 'SAFE_SELECTIVE';
-  let sessionAdvice = 'Asian liquidity range: prime window for USD/JPY, GBP/JPY, and AUD/USD after range sweep.';
+  let sessionAdvice =
+    'Asian liquidity range: prime window for USD/JPY, GBP/JPY, EUR/JPY, and AUD/USD after range sweep.';
 
   if (isRolloverHours) {
     sessionWindowName = 'Midnight Rollover & Dead Zone (22:00–02:59 EAT)';
     sessionSafety = 'UNSAFE_AVOID';
-    sessionAdvice = 'DO NOT OPEN NEW ORDERS right now. Broker spreads widen 3x–8x during daily swap rollover and stop-hunt spikes.';
+    sessionAdvice =
+      'DO NOT OPEN NEW ORDERS right now. Broker spreads widen 3x–8x during daily swap rollover and stop-hunt spikes.';
   } else if (eatHour >= 15 && eatHour <= 18) {
     sessionWindowName = 'London / New York Killzone Overlap (15:30–18:59 EAT)';
     sessionSafety = 'SAFE_OPTIMAL';
-    sessionAdvice = 'PEAK GLOBAL INSTITUTIONAL LIQUIDITY: Tightest spreads and highest breakout follow-through across USD, GBP, EUR & Gold.';
+    sessionAdvice =
+      'PEAK GLOBAL INSTITUTIONAL LIQUIDITY: Tightest spreads and highest breakout follow-through across USD, GBP, EUR, CHF & Gold.';
   } else if (eatHour >= 10 && eatHour <= 14) {
     sessionWindowName = 'London Killzone & Morning Session (10:00–14:59 EAT)';
     sessionSafety = 'SAFE_OPTIMAL';
-    sessionAdvice = 'PRIME EUROPEAN LIQUIDITY: Ideal for EUR/USD, GBP/USD, GBP/JPY, and Gold after initial Asian sweep.';
+    sessionAdvice =
+      'PRIME EUROPEAN LIQUIDITY: Ideal for EUR/USD, GBP/USD, EUR/JPY, GBP/JPY, USD/CHF, and Gold after initial Asian sweep.';
   } else if (eatHour >= 19 && eatHour <= 21) {
     sessionWindowName = 'New York Afternoon Session (19:00–21:59 EAT)';
     sessionSafety = 'CAUTION_WAIT';
@@ -2531,19 +2817,27 @@ export function computeDailyMacroSafetyReport(
 
   const activeWarnings: string[] = [];
   if (flags.highImpactUsNews) {
-    activeWarnings.push('HIGH-IMPACT USD WINDOW / NEWS GUARD: Elevated spike risk — wait 15 mins after candle close before executing.');
+    activeWarnings.push(
+      'HIGH-IMPACT USD WINDOW / NEWS GUARD: Elevated spike risk — wait 15 mins after candle close before executing.'
+    );
   }
   if (flags.centralBankRateDay) {
-    activeWarnings.push('HIGH CENTRAL BANK CURRENCY VOLATILITY (>0.75% Daily Move): Expect sharp liquidity wicks on active majors.');
+    activeWarnings.push(
+      'HIGH CENTRAL BANK CURRENCY VOLATILITY (>0.75% Daily Move): Expect sharp liquidity wicks on active majors.'
+    );
   }
   if (flags.geopoliticalSafeHavenSpike) {
-    activeWarnings.push('SAFE-HAVEN CAPITAL SURGE: Gold (XAU/USD) & JPY demand elevated — keep strictly 0.01 micro lot.');
+    activeWarnings.push(
+      'SAFE-HAVEN CAPITAL SURGE: Gold (XAU/USD) & JPY demand elevated — keep strictly 0.01 micro lot.'
+    );
   }
   if (flags.bankHolidayThinLiquidity) {
     activeWarnings.push('THIN INTERBANK VOLUME DETECTED: Price range compressed — avoid breakout chasing.');
   }
   if (flags.wideSpreadAlert) {
-    activeWarnings.push('ROLLOVER / WIDE SPREAD GUARD: Broker spreads expanded — pause new entries until session opens.');
+    activeWarnings.push(
+      'ROLLOVER / WIDE SPREAD GUARD: Broker spreads expanded — pause new entries until session opens.'
+    );
   }
 
   let overallDaySafety: SideSafetyVerdict = sessionSafety;
@@ -2563,83 +2857,81 @@ export function computeDailyMacroSafetyReport(
       ? 'NOT SAFE FOR IMPULSIVE ENTRIES — WAIT FOR KENYA SESSION TIMER & MACRO SETTLEMENT'
       : 'DO NOT ENTER PLANNED TRADES RIGHT NOW — GLOBAL RISK & ROLLOVER BLOCK ACTIVE';
 
+  const liveMacro = getCurrentMacroContext({
+    'EUR/USD': eurPct,
+    'GBP/USD': gbpPct,
+    'AUD/USD': audPct,
+    'USD/JPY': jpyPct,
+    'USD/CHF': chfPct,
+    'USD/CAD': cadPct,
+    'XAU/USD': goldPct,
+    'BTC/USD': btcPct
+  });
+
   const assetScorecards: AssetDailySafetyCard[] = markets.map((m) => {
     const isUsdQuote = m.pair.endsWith('/USD');
     const isUsdBase = m.pair.startsWith('USD/');
-    const isJpyCross = m.pair === 'GBP/JPY';
+    const isJpyCross = m.pair === 'GBP/JPY' || m.pair === 'EUR/JPY';
     const isGold = m.pair === 'XAU/USD';
     const kenyaTiming = evaluatePairKenyaTiming(m.pair, now);
 
-    let buyScore = 54;
-    let sellScore = 54;
+    // Unified institutional scoring aligned with MultiMarketRadarEngine & ActiveMarketOrderPanel
+    const factorJudgment = evaluateAllTradeFactors({
+      pair: m.pair,
+      livePrice: m.price,
+      ema20: m.ema20,
+      ema50: m.ema50,
+      rsi: m.rsi,
+      atrPips: m.atrPips,
+      keyLevel: m.keyLevel,
+      h1TrendDirection: m.h1TrendDirection,
+      macro: liveMacro
+    });
 
-    // 1. Live Candle & EMA Trend Confluence
-    if (m.price > m.ema20) buyScore += 18;
-    else sellScore += 18;
-
-    if (m.ema20 > m.ema50) buyScore += 12;
-    else sellScore += 12;
-
-    // 2. Global DXY Macro Tail-wind / Head-wind
-    let dxyCorrelationNote = 'Neutral cross-flow correlation';
-    if (isUsdQuote && !isGold) {
-      if (dxyPressurePct <= -0.10) {
-        buyScore += 12;
-        sellScore -= 10;
-        dxyCorrelationNote = `DXY weakening (${dxyPressurePct}%) gives BUY tail-wind`;
-      } else if (dxyPressurePct >= 0.10) {
-        sellScore += 12;
-        buyScore -= 10;
-        dxyCorrelationNote = `DXY surging (+${dxyPressurePct}%) creates head-wind against BUY`;
-      }
-    } else if (isUsdBase) {
-      if (dxyPressurePct >= 0.10) {
-        buyScore += 12;
-        sellScore -= 10;
-        dxyCorrelationNote = `DXY surging (+${dxyPressurePct}%) supports ${m.pair} upside`;
-      } else if (dxyPressurePct <= -0.10) {
-        sellScore += 12;
-        buyScore -= 10;
-        dxyCorrelationNote = `DXY weakening (${dxyPressurePct}%) favors ${m.pair} downside`;
-      }
-    } else if (isGold) {
-      if (flags.geopoliticalSafeHavenSpike || dxyPressurePct < 0) {
-        buyScore += 14;
-        dxyCorrelationNote = 'Safe-haven demand & softer USD favor Gold accumulation';
-      } else if (dxyPressurePct > 0.25) {
-        sellScore += 10;
-        dxyCorrelationNote = 'Strong USD yields cap Gold rallies';
-      }
-    } else if (isJpyCross) {
-      if (riskRegime === 'RISK-OFF SAFE-HAVEN') {
-        sellScore += 14;
-        buyScore -= 12;
-        dxyCorrelationNote = 'Risk-Off JPY inflow warns against aggressive GBP/JPY longs';
-      } else {
-        buyScore += 10;
-        dxyCorrelationNote = 'Risk-On Yen weakness supports GBP/JPY upward swings';
-      }
-    }
-
-    // 3. RSI Exhaustion Protection (Prevents buying tops or selling bottoms)
-    if (m.rsi >= 68) {
-      buyScore -= 26;
-      sellScore += 14;
-    } else if (m.rsi <= 34) {
-      sellScore -= 26;
-      buyScore += 14;
-    }
-
-    // 4. Kenya Time Window + Global Macro Risk Penalty
-    const timingPenalty = kenyaTiming.isFavorableTime ? 0 : 18;
+    const timingPenalty = kenyaTiming.isFavorableTime ? 0 : 14;
     const macroPenalty =
-      (flags.wideSpreadAlert ? 24 : 0) +
-      (flags.highImpactUsNews ? 14 : 0) +
-      (flags.bankHolidayThinLiquidity ? 16 : 0) +
+      (flags.wideSpreadAlert ? 22 : 0) +
+      (flags.highImpactUsNews ? 12 : 0) +
+      (flags.bankHolidayThinLiquidity ? 14 : 0) +
       timingPenalty;
 
-    buyScore = Math.max(12, Math.min(96, Math.round(buyScore - macroPenalty)));
-    sellScore = Math.max(12, Math.min(96, Math.round(sellScore - macroPenalty)));
+    const buyScore = Math.max(
+      14,
+      Math.min(96, Math.round(factorJudgment.bullScorePct - macroPenalty))
+    );
+    const sellScore = Math.max(
+      14,
+      Math.min(96, Math.round(factorJudgment.bearScorePct - macroPenalty))
+    );
+
+    let dxyCorrelationNote = 'Neutral cross-flow correlation';
+    if (isUsdQuote && !isGold) {
+      dxyCorrelationNote =
+        dxyPressurePct <= -0.1
+          ? `DXY weakening (${dxyPressurePct}%) gives BUY tail-wind`
+          : dxyPressurePct >= 0.1
+          ? `DXY surging (+${dxyPressurePct}%) creates head-wind against BUY`
+          : `DXY balanced (${dxyPressurePct >= 0 ? `+${dxyPressurePct}%` : `${dxyPressurePct}%`}) — rely on ${m.pair} EMA structure`;
+    } else if (isUsdBase) {
+      dxyCorrelationNote =
+        dxyPressurePct >= 0.1
+          ? `DXY surging (+${dxyPressurePct}%) supports ${m.pair} upside`
+          : dxyPressurePct <= -0.1
+          ? `DXY weakening (${dxyPressurePct}%) favors ${m.pair} downside`
+          : `DXY balanced (${dxyPressurePct >= 0 ? `+${dxyPressurePct}%` : `${dxyPressurePct}%`}) — follow H1/M15 swing structure`;
+    } else if (isGold) {
+      dxyCorrelationNote =
+        flags.geopoliticalSafeHavenSpike || dxyPressurePct < 0
+          ? 'Safe-haven demand & softer USD favor Gold accumulation'
+          : dxyPressurePct > 0.25
+          ? 'Strong USD yields cap Gold rallies'
+          : 'Balanced bullion flow around structural key levels';
+    } else if (isJpyCross) {
+      dxyCorrelationNote =
+        riskRegime === 'RISK-OFF SAFE-HAVEN'
+          ? `Risk-Off JPY inflow warns against aggressive ${m.pair} longs`
+          : `Risk-On Yen weakness supports ${m.pair} upward swings`;
+    }
 
     const toVerdict = (sc: number): SideSafetyVerdict =>
       sc >= 72 ? 'SAFE_OPTIMAL' : sc >= 56 ? 'SAFE_SELECTIVE' : sc >= 42 ? 'CAUTION_WAIT' : 'UNSAFE_AVOID';
@@ -2655,11 +2947,13 @@ export function computeDailyMacroSafetyReport(
       !kenyaTiming.isFavorableTime ||
       (flags.highImpactUsNews && flags.centralBankRateDay);
 
-    let globalEntryBannerText = `SAFE TO ${plannedSide} ${m.pair} NOW — Kenya Session Active (${kenyaTiming.countdownFormatted} left) & Macro Aligned ✓`;
+    let globalEntryBannerText = `SAFE TO ${plannedSide} ${m.pair} NOW — Kenya Session Active (${kenyaTiming.countdownFormatted} left) & Macro Aligned`;
     if (flags.wideSpreadAlert) {
       globalEntryBannerText = `NOT SAFE TO ENTER ${m.pair} — Rollover Wide Spreads Active (Wait for Next Session)`;
     } else if (!kenyaTiming.isFavorableTime) {
       globalEntryBannerText = `NOT FAVOURABLE TIME FOR ${m.pair} ENTRY IN KENYA — Wait ${kenyaTiming.countdownFormatted} for ${kenyaTiming.nextWindowName}`;
+    } else if (factorJudgment.isExtendedZone && factorJudgment.entryTimingWarning) {
+      globalEntryBannerText = `WAIT PULLBACK ON ${m.pair} — ${factorJudgment.entryTimingWarning}`;
     } else if (isUsdQuote && !isGold && plannedSide === 'BUY' && dxyPressurePct >= 0.15) {
       globalEntryBannerText = `GLOBAL WARNING ON ${m.pair} BUY — US Dollar (DXY +${dxyPressurePct}%) Moving Against Planned Entry`;
     } else if (isUsdBase && plannedSide === 'BUY' && dxyPressurePct <= -0.15) {
@@ -2669,17 +2963,18 @@ export function computeDailyMacroSafetyReport(
     }
 
     let primaryVerdictText = 'WAIT FOR KENYA WINDOW';
-    if (flags.wideSpreadAlert || bestScore < 42) primaryVerdictText = 'NOT SAFE RIGHT NOW ✕';
+    if (flags.wideSpreadAlert || bestScore < 42) primaryVerdictText = 'NOT SAFE RIGHT NOW';
     else if (!kenyaTiming.isFavorableTime) primaryVerdictText = `WAIT (${kenyaTiming.countdownFormatted})`;
-    else if (buyScore >= 72 && buyScore > sellScore) primaryVerdictText = 'SAFE TO BUY NOW ✓';
-    else if (sellScore >= 72 && sellScore > buyScore) primaryVerdictText = 'SAFE TO SELL NOW ✓';
-    else if (buyScore >= 56 && buyScore >= sellScore) primaryVerdictText = 'SELECTIVE BUY ✓';
-    else if (sellScore >= 56 && sellScore > buyScore) primaryVerdictText = 'SELECTIVE SELL ✓';
+    else if (factorJudgment.isExtendedZone) primaryVerdictText = 'WAIT PULLBACK (20 EMA)';
+    else if (buyScore >= 72 && buyScore > sellScore) primaryVerdictText = 'SAFE TO BUY NOW';
+    else if (sellScore >= 72 && sellScore > buyScore) primaryVerdictText = 'SAFE TO SELL NOW';
+    else if (buyScore >= 56 && buyScore >= sellScore) primaryVerdictText = 'SELECTIVE BUY';
+    else if (sellScore >= 56 && sellScore > buyScore) primaryVerdictText = 'SELECTIVE SELL';
 
     const globalDriverNote =
       m.rsi >= 68
         ? `RSI ${m.rsi} Overbought: UNSAFE to chase BUY orders; watch for Tower Top SELL sweep near ${m.keyLevel}.`
-        : m.rsi <= 34
+        : m.rsi <= 32
         ? `RSI ${m.rsi} Oversold: UNSAFE to chase SELL orders; watch for SSL BUY absorption near ${m.keyLevel}.`
         : m.price >= m.ema20
         ? `Live candle (${m.price}) holding above 20 EMA (${m.ema20}). Bullish structure intact unless USD spikes.`
@@ -2732,11 +3027,35 @@ export function computeDailyMacroSafetyReport(
 // ============================================================================
 // 24/7 EVERY-SECOND REAL-TIME GLOBAL MARKET STREAM MANAGER
 // ============================================================================
+export interface DailyMacroAiDirective {
+  headline: string;
+  overallSafety: string;
+  hourlyOutlook: string;
+  catalystSummary: string;
+  source: 'gemini-3.8-flash' | 'quantitative-engine';
+  syncedAt: string;
+}
+
+export type ScannerWorkspaceTab =
+  | 'hub'
+  | 'radar'
+  | 'favorable_chart'
+  | 'manual'
+  | 'advisor'
+  | 'camera'
+  | 'trade_log';
+
 export interface GlobalStreamState {
   markets: MarketScanData[];
   selectedPair: CurrencyPair | null;
+  activeBroker: BrokerId;
+  activeOrders: Partial<Record<CurrencyPair, ActiveMarketOrder>>;
+  orderHistory: ClosedOrderHistoryEntry[];
+  suggestedSignals: SuggestedSignalLogEntry[];
+  notifications: TradeNotification[];
   superAiAutoEnabled: boolean;
   superAiNotes: Partial<Record<CurrencyPair, SuperAiLiveNote>>;
+  dailyMacroDirective: DailyMacroAiDirective;
   syncedAt: string;
   liveFeedConnected: boolean;
   tickCount: number;
@@ -2747,11 +3066,108 @@ export interface GlobalStreamState {
 
 type StreamListener = (state: GlobalStreamState) => void;
 
+const ACTIVE_ORDERS_STORAGE_KEY = 'pivotfx_active_market_orders_v1';
+const CLOSED_ORDERS_STORAGE_KEY = 'pivotfx_closed_orders_history_v1';
+const SUGGESTED_SIGNALS_STORAGE_KEY = 'pivotfx_suggested_signals_v1';
+const NOTIFICATIONS_STORAGE_KEY = 'pivotfx_trade_notifications_v1';
+const BROKER_STORAGE_KEY = 'pivotfx_selected_broker_v1';
+const PROP_TRADES_STORAGE_KEY = 'pivotfx_prop_trades';
+
+function loadPersistedActiveOrders(): Partial<Record<CurrencyPair, ActiveMarketOrder>> {
+  try {
+    if (typeof window === 'undefined') return {};
+    const raw = window.localStorage.getItem(ACTIVE_ORDERS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Partial<Record<CurrencyPair, ActiveMarketOrder>>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function loadPersistedOrderHistory(): ClosedOrderHistoryEntry[] {
+  try {
+    if (typeof window === 'undefined') return [];
+    const raw = window.localStorage.getItem(CLOSED_ORDERS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as ClosedOrderHistoryEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadPersistedSuggestedSignals(): SuggestedSignalLogEntry[] {
+  try {
+    if (typeof window === 'undefined') return [];
+    const raw = window.localStorage.getItem(SUGGESTED_SIGNALS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as SuggestedSignalLogEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadPersistedNotifications(): TradeNotification[] {
+  try {
+    if (typeof window === 'undefined') return [];
+    const raw = window.localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as TradeNotification[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadPersistedBroker(): BrokerId {
+  try {
+    if (typeof window === 'undefined') return 'fxpesa';
+    const raw = window.localStorage.getItem(BROKER_STORAGE_KEY);
+    if (raw === 'fxpesa' || raw === 'exness' || raw === 'hfm' || raw === 'fbs') return raw;
+    return 'fxpesa';
+  } catch {
+    return 'fxpesa';
+  }
+}
+
+function buildInitialMacroDirective(markets: MarketScanData[]): DailyMacroAiDirective {
+  const pctMap: Partial<Record<CurrencyPair, number>> = {};
+  markets.forEach((m) => {
+    pctMap[m.pair] = m.change24hPct;
+  });
+  const macro = getCurrentMacroContext(pctMap);
+  const top = markets[0];
+  const buyCount = markets.filter((m) => m.bias !== 'STRONG_SELL').length;
+  const sellCount = markets.length - buyCount;
+
+  const headline =
+    macro.dxyPressurePct <= -0.08
+      ? `TODAY & THIS HOUR: FAVOURABLE BUYING ON NON-USD PAIRS & GOLD (DXY ${macro.dxyPressurePct}%)`
+      : macro.dxyPressurePct >= 0.08
+      ? `TODAY & THIS HOUR: FAVOURABLE SELLING EUR/GBP/AUD · LONG USD PAIRS (DXY +${macro.dxyPressurePct}%)`
+      : buyCount >= sellCount
+      ? `TODAY & THIS HOUR: SELECTIVE BUY BIAS (${buyCount} BUY vs ${sellCount} SELL Setups)`
+      : `TODAY & THIS HOUR: SELECTIVE SELL BIAS (${sellCount} SELL vs ${buyCount} BUY Setups)`;
+
+  return {
+    headline,
+    overallSafety: macro.overallDaySafety,
+    hourlyOutlook: top
+      ? `${macro.sessionWindowName} (${macro.eatTimeString}): #1 Leader ${top.pair} (${
+          top.change24hPct >= 0 ? `+${top.change24hPct}%` : `${top.change24hPct}%`
+        }) holds ${top.trendDirection} → ${top.bias === 'STRONG_SELL' ? 'SELL' : 'BUY'} @ ${top.price}.`
+      : macro.overallHeadline,
+    catalystSummary: `Macro Regime: ${macro.riskRegime} · ${macro.dxySummary} · 0.01 Micro Lot ($2.00 / 260 KES Cap)`,
+    source: 'quantitative-engine',
+    syncedAt: macro.eatTimeString
+  };
+}
+
 class GlobalLiveMarketStreamEngine {
   private markets: MarketScanData[] = INITIAL_MARKETS_DATA;
-  private selectedPair: CurrencyPair | null = 'GBP/USD';
+  private selectedPair: CurrencyPair | null = null;
+  private activeBroker: BrokerId = loadPersistedBroker();
+  private activeOrders: Partial<Record<CurrencyPair, ActiveMarketOrder>> = loadPersistedActiveOrders();
+  private orderHistory: ClosedOrderHistoryEntry[] = loadPersistedOrderHistory();
+  private suggestedSignals: SuggestedSignalLogEntry[] = loadPersistedSuggestedSignals();
+  private notifications: TradeNotification[] = loadPersistedNotifications();
   private superAiAutoEnabled: boolean = true;
   private superAiNotes: Partial<Record<CurrencyPair, SuperAiLiveNote>> = {};
+  private dailyMacroDirective: DailyMacroAiDirective = buildInitialMacroDirective(INITIAL_MARKETS_DATA);
   private lastAiFetchByPair: Partial<Record<CurrencyPair, number>> = {};
   private syncedAt: string = 'Synchronizing...';
   private liveFeedConnected: boolean = false;
@@ -2767,13 +3183,351 @@ class GlobalLiveMarketStreamEngine {
   private wsFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private isFetchingRest = false;
   private trendHoldUntil: Partial<Record<CurrencyPair, number>> = {};
+  private orderMilestoneAlerts = new Set<string>();
+  private lastNotificationDedupe = new Map<string, number>();
+
+  private persistOrders() {
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(ACTIVE_ORDERS_STORAGE_KEY, JSON.stringify(this.activeOrders));
+        window.localStorage.setItem(CLOSED_ORDERS_STORAGE_KEY, JSON.stringify(this.orderHistory));
+      }
+    } catch {}
+  }
+
+  private persistSuggestedSignals() {
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(SUGGESTED_SIGNALS_STORAGE_KEY, JSON.stringify(this.suggestedSignals));
+      }
+    } catch {}
+  }
+
+  private persistNotifications() {
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(this.notifications));
+      }
+    } catch {}
+  }
+
+  private appendPropJournalRecord(entry: {
+    pair: CurrencyPair;
+    direction: 'BUY' | 'SELL';
+    entryPrice: number;
+    exitPrice: number;
+    pips: number;
+    usdPnL: number;
+    kesPnL: number;
+    outcome: 'WIN' | 'LOSS' | 'PENDING';
+    reason: string;
+  }) {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = window.localStorage.getItem(PROP_TRADES_STORAGE_KEY);
+      const existing = raw && Array.isArray(JSON.parse(raw)) ? JSON.parse(raw) : [];
+      const mappedStatus =
+        entry.outcome === 'WIN'
+          ? 'WON'
+          : entry.outcome === 'LOSS'
+          ? 'LOST'
+          : 'OPEN';
+      const row = {
+        id: `trd_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: this.formatNowEat(),
+        pair: entry.pair,
+        type: entry.direction,
+        lotSize: 0.01,
+        entryPrice: entry.entryPrice,
+        exitPrice: entry.exitPrice,
+        pnlUsd: entry.usdPnL,
+        status: mappedStatus,
+        setupName: `Broker Order (${entry.pips >= 0 ? `+${entry.pips}p` : `${entry.pips}p`})`,
+        mistakeTag:
+          entry.outcome === 'WIN'
+            ? 'Clean Execution'
+            : entry.outcome === 'PENDING'
+            ? 'Active Broker Order'
+            : 'SL Protected Cap',
+        notes: entry.reason
+      };
+      const updated = [row, ...existing].slice(0, 60);
+      window.localStorage.setItem(PROP_TRADES_STORAGE_KEY, JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('pivotfx:prop-trades-updated', { detail: row }));
+    } catch {}
+  }
+
+  public pushNotification(n: {
+    pair?: CurrencyPair;
+    type: TradeNotification['type'];
+    title: string;
+    message: string;
+  }) {
+    const now = Date.now();
+    const dedupeKey = `${n.type}:${n.pair || ''}:${n.title}`;
+    const lastFired = this.lastNotificationDedupe.get(dedupeKey) ?? 0;
+    if (now - lastFired < 15_000) return;
+    this.lastNotificationDedupe.set(dedupeKey, now);
+
+    const item: TradeNotification = {
+      id: `notif_${now}_${Math.random().toString(36).slice(2, 6)}`,
+      pair: n.pair,
+      type: n.type,
+      title: n.title,
+      message: n.message,
+      eatTimestamp: this.formatNowEat(),
+      timestampMs: now,
+      read: false
+    };
+
+    this.notifications = [item, ...this.notifications].slice(0, 50);
+    this.persistNotifications();
+    try {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('pivotfx:new-notification', { detail: item }));
+      }
+    } catch {}
+    this.broadcast();
+  }
+
+  public markNotificationRead(id: string) {
+    this.notifications = this.notifications.map((n) => (n.id === id ? { ...n, read: true } : n));
+    this.persistNotifications();
+    this.broadcast();
+  }
+
+  public markAllNotificationsRead() {
+    this.notifications = this.notifications.map((n) => ({ ...n, read: true }));
+    this.persistNotifications();
+    this.broadcast();
+  }
+
+  public clearNotifications() {
+    this.notifications = [];
+    this.persistNotifications();
+    this.broadcast();
+  }
+
+  public logSuggestedSetup(params: {
+    pair: CurrencyPair;
+    timeframe?: Timeframe;
+    broker?: BrokerId;
+    direction?: 'BUY' | 'SELL';
+    customEntryPrice?: number;
+    customStopLoss?: number;
+    customTp?: number;
+    reasonSummary?: string;
+    status?: 'SUGGESTED' | 'PLACED_WITH_BROKER';
+    linkedOrderId?: string;
+  }): SuggestedSignalLogEntry | null {
+    const market = this.markets.find((m) => m.pair === params.pair) || this.markets[0];
+    if (!market) return null;
+
+    const broker = params.broker || this.activeBroker;
+    const timeframe = params.timeframe || this.customTimeframes[market.pair] || market.recommendedTf || 'M15';
+    const pctMap: Partial<Record<CurrencyPair, number>> = {};
+    this.markets.forEach((m) => {
+      pctMap[m.pair] = m.change24hPct;
+    });
+    const macro = getCurrentMacroContext(pctMap);
+    const swings = computeCandleSwingLevels(market.candles);
+    const dir = params.direction || (market.bias === 'STRONG_SELL' ? 'SELL' : 'BUY');
+
+    const computed = computeRealChartTradeParams({
+      targetPair: market.pair,
+      targetTf: timeframe,
+      targetBroker: broker,
+      price: params.customEntryPrice && params.customEntryPrice > 0 ? params.customEntryPrice : market.price,
+      keyLevel: market.keyLevel,
+      ema20: market.ema20,
+      ema50: market.ema50,
+      rsi: market.rsi,
+      atrPips: market.atrPips,
+      swingLow: swings.swingLow,
+      swingHigh: swings.swingHigh,
+      macro,
+      biasOverride: dir,
+      previousDirection: dir,
+      h1TrendDirection: market.h1TrendDirection
+    });
+
+    const { decimals } = getPairSpecs(market.pair);
+    const finalEntry =
+      params.customEntryPrice && !isNaN(params.customEntryPrice) && params.customEntryPrice > 0
+        ? Number(params.customEntryPrice.toFixed(decimals))
+        : computed.entryPrice;
+    const finalSl =
+      params.customStopLoss && !isNaN(params.customStopLoss) && params.customStopLoss > 0
+        ? Number(params.customStopLoss.toFixed(decimals))
+        : computed.stopLoss;
+    const finalTp2 =
+      params.customTp && !isNaN(params.customTp) && params.customTp > 0
+        ? Number(params.customTp.toFixed(decimals))
+        : computed.tp2;
+
+    const entry: SuggestedSignalLogEntry = {
+      id: `sig_${Date.now()}_${market.pair.replace('/', '')}_${Math.random().toString(36).slice(2, 5)}`,
+      pair: market.pair,
+      direction: dir,
+      timeframe,
+      broker,
+      entryPrice: finalEntry,
+      stopLoss: finalSl,
+      tp1: computed.tp1,
+      tp2: finalTp2,
+      tp3: computed.tp3,
+      slPips: computed.slPips,
+      tpPips: computed.tpPips,
+      riskReward: computed.riskReward,
+      confidence: computed.confidence,
+      netProfitUsd: computed.netProfitUsd,
+      netProfitKes: computed.netProfitKes,
+      orderVerdict: computed.orderType,
+      goAheadAssurance: computed.goAheadAssurance,
+      reasonSummary:
+        params.reasonSummary ||
+        computed.entryTimingWarning ||
+        `${computed.trendProjectionText} · ${computed.alignedFactorsCount}/${computed.totalFactorsCount} Factors Aligned`,
+      loggedAtEat: this.formatNowEat(),
+      suggestedTimestamp: Date.now(),
+      status: params.status || 'SUGGESTED',
+      linkedOrderId: params.linkedOrderId
+    };
+
+    this.suggestedSignals = [entry, ...this.suggestedSignals].slice(0, 60);
+    this.persistSuggestedSignals();
+
+    if (entry.status !== 'PLACED_WITH_BROKER') {
+      this.pushNotification({
+        pair: entry.pair,
+        type: 'AI_SIGNAL',
+        title: `${entry.pair} ${entry.direction} Setup Logged`,
+        message: `Entry ${entry.entryPrice} · SL ${entry.stopLoss} · TP2 ${entry.tp2} (${entry.orderVerdict})`
+      });
+    } else {
+      this.broadcast();
+    }
+
+    return entry;
+  }
+
+  public removeSuggestedSignal(id: string) {
+    this.suggestedSignals = this.suggestedSignals.filter((s) => s.id !== id);
+    this.persistSuggestedSignals();
+    this.broadcast();
+  }
+
+  public clearSuggestedSignals() {
+    this.suggestedSignals = [];
+    this.persistSuggestedSignals();
+    this.broadcast();
+  }
+
+  private syncActiveOrdersWithMarkets() {
+    const orderKeys = Object.keys(this.activeOrders) as CurrencyPair[];
+    if (orderKeys.length === 0) return;
+
+    let anyChanged = false;
+    for (const pairKey of orderKeys) {
+      const order = this.activeOrders[pairKey];
+      const market = this.markets.find((m) => m.pair === pairKey);
+      if (!order || !market) continue;
+
+      const metrics = computeLiveOrderMetrics(order, market.price, market.atrPips);
+      let nextPeak = order.peakProfitUsd;
+      if (metrics.netProfitUsd > nextPeak) {
+        nextPeak = metrics.netProfitUsd;
+        anyChanged = true;
+      }
+
+      // Check real-time TP milestones & drawdown cushion notifications (1 alert per milestone per order)
+      if (metrics.hitTp1 && !this.orderMilestoneAlerts.has(`${order.id}:TP1`)) {
+        this.orderMilestoneAlerts.add(`${order.id}:TP1`);
+        this.pushNotification({
+          pair: order.pair,
+          type: 'TP_HIT',
+          title: `${order.pair} ${order.direction} Reached TP1 (+${metrics.floatingPips}p)`,
+          message: `Live candle @ ${market.price} crossed TP1 (${order.tp1}). Lock Breakeven SL (${metrics.suggestedBreakevenSl}) on your broker!`
+        });
+      }
+      if (metrics.hitTp2 && !this.orderMilestoneAlerts.has(`${order.id}:TP2`)) {
+        this.orderMilestoneAlerts.add(`${order.id}:TP2`);
+        this.pushNotification({
+          pair: order.pair,
+          type: 'TP_HIT',
+          title: `${order.pair} ${order.direction} Reached TP2 (+${metrics.floatingPips}p)`,
+          message: `Target TP2 (${order.tp2}) reached (+$${metrics.netProfitUsd.toFixed(2)}). Trail SL or extend to TP3 (${order.tp3}).`
+        });
+      }
+      if (
+        !metrics.isInProfit &&
+        metrics.pipsDistanceAboveSl > 0 &&
+        metrics.pipsDistanceAboveSl <= 5.0 &&
+        !this.orderMilestoneAlerts.has(`${order.id}:SL_PROXIMITY`)
+      ) {
+        this.orderMilestoneAlerts.add(`${order.id}:SL_PROXIMITY`);
+        this.pushNotification({
+          pair: order.pair,
+          type: 'SL_WARNING',
+          title: `${order.pair} ${order.direction} Drawdown Guard Alert`,
+          message: `Price (${market.price}) is within ${metrics.pipsDistanceAboveSl}p of your SL (${order.stopLoss}). Check Super AI Position Coach in Trade Log.`
+        });
+      }
+
+      let nextSl = order.stopLoss;
+      let nextSlCount = order.slUpdatesCount;
+      let nextTp2 = order.tp2;
+      let nextTp3 = order.tp3;
+
+      // When Auto-Trail Profit Lock is ON and trade has gained >= 8 pips in profit, lock SL forward!
+      if (order.autoTrailEnabled && metrics.floatingPips >= 8) {
+        const isBuy = order.direction === 'BUY';
+        const improvedSl =
+          metrics.floatingPips >= 18 ? metrics.suggestedLockProfitSl : metrics.suggestedBreakevenSl;
+        if ((isBuy && improvedSl > nextSl) || (!isBuy && improvedSl < nextSl)) {
+          nextSl = improvedSl;
+          nextSlCount += 1;
+          anyChanged = true;
+        }
+        if (metrics.pipsRemainingToTp2 <= 6 && metrics.floatingPips >= 16) {
+          if (
+            (isBuy && metrics.suggestedExpandedTp2 > nextTp2) ||
+            (!isBuy && metrics.suggestedExpandedTp2 < nextTp2)
+          ) {
+            nextTp2 = metrics.suggestedExpandedTp2;
+            nextTp3 = metrics.suggestedExpandedTp3;
+            anyChanged = true;
+          }
+        }
+      }
+
+      this.activeOrders[pairKey] = {
+        ...order,
+        stopLoss: nextSl,
+        tp2: nextTp2,
+        tp3: nextTp3,
+        slUpdatesCount: nextSlCount,
+        peakProfitUsd: nextPeak
+      };
+    }
+
+    if (anyChanged) {
+      this.persistOrders();
+    }
+  }
 
   public getState(): GlobalStreamState {
     return {
       markets: this.markets,
       selectedPair: this.selectedPair,
+      activeBroker: this.activeBroker,
+      activeOrders: { ...this.activeOrders },
+      orderHistory: [...this.orderHistory],
+      suggestedSignals: [...this.suggestedSignals],
+      notifications: [...this.notifications],
       superAiAutoEnabled: this.superAiAutoEnabled,
       superAiNotes: { ...this.superAiNotes },
+      dailyMacroDirective: this.dailyMacroDirective,
       syncedAt: this.syncedAt,
       liveFeedConnected: this.liveFeedConnected,
       tickCount: this.tickCount,
@@ -2781,6 +3535,340 @@ class GlobalLiveMarketStreamEngine {
       lockedPairs: { ...this.lockedPairs },
       customTimeframes: { ...this.customTimeframes }
     };
+  }
+
+  public setActiveBroker(broker: BrokerId) {
+    this.activeBroker = broker;
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(BROKER_STORAGE_KEY, broker);
+      }
+    } catch {}
+    this.broadcast();
+  }
+
+  public loadMarketOrder(params: {
+    pair: CurrencyPair;
+    direction: 'BUY' | 'SELL';
+    lotSize?: number;
+    timeframe?: Timeframe;
+    broker?: BrokerId;
+    autoTrailEnabled?: boolean;
+    customEntryPrice?: number;
+    customStopLoss?: number;
+    customTp?: number;
+    suggestedSignalId?: string;
+    note?: string;
+  }): ActiveMarketOrder | null {
+    const market = this.markets.find((m) => m.pair === params.pair) || this.markets[0];
+    if (!market) return null;
+
+    const broker = params.broker || this.activeBroker;
+    const timeframe = params.timeframe || this.customTimeframes[market.pair] || market.recommendedTf || 'M15';
+    const pctMap: Partial<Record<CurrencyPair, number>> = {};
+    this.markets.forEach((m) => {
+      pctMap[m.pair] = m.change24hPct;
+    });
+    const macro = getCurrentMacroContext(pctMap);
+    const swings = computeCandleSwingLevels(market.candles);
+
+    const entryToUse =
+      params.customEntryPrice && !isNaN(params.customEntryPrice) && params.customEntryPrice > 0
+        ? params.customEntryPrice
+        : market.price;
+
+    const computed = computeRealChartTradeParams({
+      targetPair: market.pair,
+      targetTf: timeframe,
+      targetBroker: broker,
+      price: entryToUse,
+      keyLevel: market.keyLevel,
+      ema20: market.ema20,
+      ema50: market.ema50,
+      rsi: market.rsi,
+      atrPips: market.atrPips,
+      swingLow: swings.swingLow,
+      swingHigh: swings.swingHigh,
+      macro,
+      biasOverride: params.direction,
+      previousDirection: params.direction,
+      h1TrendDirection: market.h1TrendDirection
+    });
+
+    const { decimals } = getPairSpecs(market.pair);
+    const finalEntry = Number(entryToUse.toFixed(decimals));
+    const finalSl =
+      params.customStopLoss && !isNaN(params.customStopLoss) && params.customStopLoss > 0
+        ? Number(params.customStopLoss.toFixed(decimals))
+        : computed.stopLoss;
+    const finalTp2 =
+      params.customTp && !isNaN(params.customTp) && params.customTp > 0
+        ? Number(params.customTp.toFixed(decimals))
+        : computed.tp2;
+
+    const newOrder: ActiveMarketOrder = {
+      id: `ord_${Date.now()}_${market.pair.replace('/', '')}`,
+      pair: market.pair,
+      direction: params.direction,
+      lotSize: Number((params.lotSize || 0.01).toFixed(2)),
+      broker,
+      timeframe,
+      entryPrice: finalEntry,
+      stopLoss: finalSl,
+      tp1: computed.tp1,
+      tp2: finalTp2,
+      tp3: computed.tp3,
+      initialStopLoss: finalSl,
+      initialTp2: finalTp2,
+      loadedAtEat: this.formatNowEat(),
+      loadedTimestamp: Date.now(),
+      autoTrailEnabled: params.autoTrailEnabled ?? true,
+      slUpdatesCount: 0,
+      peakProfitUsd: 0
+    };
+
+    this.activeOrders[market.pair] = newOrder;
+    this.persistOrders();
+
+    // Update linked suggested signal or automatically record in Real Suggested Markets Trade Log as PLACED_WITH_BROKER
+    if (params.suggestedSignalId) {
+      let matched = false;
+      this.suggestedSignals = this.suggestedSignals.map((sig) => {
+        if (sig.id === params.suggestedSignalId) {
+          matched = true;
+          return {
+            ...sig,
+            status: 'PLACED_WITH_BROKER',
+            linkedOrderId: newOrder.id,
+            entryPrice: newOrder.entryPrice,
+            stopLoss: newOrder.stopLoss,
+            tp2: newOrder.tp2
+          };
+        }
+        return sig;
+      });
+      this.persistSuggestedSignals();
+      if (!matched) {
+        this.logSuggestedSetup({
+          pair: market.pair,
+          timeframe,
+          broker,
+          direction: params.direction,
+          customEntryPrice: newOrder.entryPrice,
+          customStopLoss: newOrder.stopLoss,
+          customTp: newOrder.tp2,
+          reasonSummary: params.note,
+          status: 'PLACED_WITH_BROKER',
+          linkedOrderId: newOrder.id
+        });
+      }
+    } else {
+      this.logSuggestedSetup({
+        pair: market.pair,
+        timeframe,
+        broker,
+        direction: params.direction,
+        customEntryPrice: newOrder.entryPrice,
+        customStopLoss: newOrder.stopLoss,
+        customTp: newOrder.tp2,
+        reasonSummary: params.note,
+        status: 'PLACED_WITH_BROKER',
+        linkedOrderId: newOrder.id
+      });
+    }
+
+    this.appendPropJournalRecord({
+      pair: market.pair,
+      direction: params.direction,
+      entryPrice: newOrder.entryPrice,
+      exitPrice: newOrder.tp2,
+      pips: computed.tpPips,
+      usdPnL: computed.netProfitUsd,
+      kesPnL: computed.netProfitKes,
+      outcome: 'PENDING',
+      reason:
+        params.note ||
+        `Broker Order Placed (${broker.toUpperCase()} ${timeframe}) · SL ${newOrder.stopLoss} · TP2 ${newOrder.tp2}`
+    });
+
+    this.pushNotification({
+      pair: market.pair,
+      type: 'ORDER_PLACED',
+      title: `${market.pair} ${params.direction} Placed With Broker`,
+      message: `${broker.toUpperCase()} @ ${newOrder.entryPrice} · SL ${newOrder.stopLoss} · TP ${newOrder.tp2}. Live progress & drawdown guard active.`
+    });
+
+    return newOrder;
+  }
+
+  public updateOrderSlTp(
+    pair: CurrencyPair,
+    updates: {
+      stopLoss?: number;
+      tp1?: number;
+      tp2?: number;
+      tp3?: number;
+      autoTrailEnabled?: boolean;
+    }
+  ): ActiveMarketOrder | null {
+    const existing = this.activeOrders[pair];
+    if (!existing) return null;
+    const { decimals } = getPairSpecs(pair);
+    const nextSl =
+      updates.stopLoss !== undefined && !isNaN(updates.stopLoss) && updates.stopLoss > 0
+        ? Number(updates.stopLoss.toFixed(decimals))
+        : existing.stopLoss;
+    const nextTp2 =
+      updates.tp2 !== undefined && !isNaN(updates.tp2) && updates.tp2 > 0
+        ? Number(updates.tp2.toFixed(decimals))
+        : existing.tp2;
+    const nextTp1 =
+      updates.tp1 !== undefined && !isNaN(updates.tp1) && updates.tp1 > 0
+        ? Number(updates.tp1.toFixed(decimals))
+        : existing.tp1;
+    const nextTp3 =
+      updates.tp3 !== undefined && !isNaN(updates.tp3) && updates.tp3 > 0
+        ? Number(updates.tp3.toFixed(decimals))
+        : existing.tp3;
+
+    const slChanged = nextSl !== existing.stopLoss;
+    const tpChanged = nextTp2 !== existing.tp2;
+    const updated: ActiveMarketOrder = {
+      ...existing,
+      stopLoss: nextSl,
+      tp1: nextTp1,
+      tp2: nextTp2,
+      tp3: nextTp3,
+      autoTrailEnabled:
+        updates.autoTrailEnabled !== undefined ? updates.autoTrailEnabled : existing.autoTrailEnabled,
+      slUpdatesCount: slChanged ? existing.slUpdatesCount + 1 : existing.slUpdatesCount
+    };
+
+    this.activeOrders[pair] = updated;
+    this.persistOrders();
+
+    if (slChanged || tpChanged) {
+      this.pushNotification({
+        pair,
+        type: 'SL_UPDATED',
+        title: `${pair} (${existing.direction}) SL/TP Synced`,
+        message: `Updated SL ${updated.stopLoss} · TP ${updated.tp2} across broker order card.`
+      });
+    } else {
+      this.broadcast();
+    }
+    return updated;
+  }
+
+  public applySmartSlTpAction(
+    pair: CurrencyPair,
+    action: 'LOCK_BREAKEVEN' | 'LOCK_PROFIT_55' | 'EXPAND_TP' | 'LOCK_AND_EXPAND'
+  ): ActiveMarketOrder | null {
+    const existing = this.activeOrders[pair];
+    const market = this.markets.find((m) => m.pair === pair);
+    if (!existing || !market) return null;
+
+    const metrics = computeLiveOrderMetrics(existing, market.price, market.atrPips);
+    if (action === 'LOCK_BREAKEVEN') {
+      return this.updateOrderSlTp(pair, { stopLoss: metrics.suggestedBreakevenSl });
+    }
+    if (action === 'LOCK_PROFIT_55') {
+      return this.updateOrderSlTp(pair, { stopLoss: metrics.suggestedLockProfitSl });
+    }
+    if (action === 'EXPAND_TP') {
+      return this.updateOrderSlTp(pair, {
+        tp1: metrics.suggestedExpandedTp1,
+        tp2: metrics.suggestedExpandedTp2,
+        tp3: metrics.suggestedExpandedTp3
+      });
+    }
+    return this.updateOrderSlTp(pair, {
+      stopLoss: metrics.suggestedLockProfitSl,
+      tp1: metrics.suggestedExpandedTp1,
+      tp2: metrics.suggestedExpandedTp2,
+      tp3: metrics.suggestedExpandedTp3
+    });
+  }
+
+  public closeMarketOrder(pair: CurrencyPair): ClosedOrderHistoryEntry | null {
+    const existing = this.activeOrders[pair];
+    if (!existing) return null;
+    const market = this.markets.find((m) => m.pair === pair);
+    const closePrice = market ? market.price : existing.entryPrice;
+    const metrics = computeLiveOrderMetrics(existing, closePrice, market?.atrPips);
+
+    const outcome: ClosedOrderHistoryEntry['outcome'] = metrics.hitSl
+      ? 'STOP_LOSS'
+      : metrics.isBreakevenLocked && Math.abs(metrics.floatingPips) <= 2.5
+      ? 'BREAKEVEN'
+      : metrics.netProfitUsd > 0
+      ? 'PROFIT'
+      : 'MANUAL_CLOSE';
+
+    const entry: ClosedOrderHistoryEntry = {
+      id: existing.id,
+      pair: existing.pair,
+      direction: existing.direction,
+      lotSize: existing.lotSize,
+      broker: existing.broker,
+      timeframe: existing.timeframe,
+      entryPrice: existing.entryPrice,
+      closePrice,
+      finalStopLoss: existing.stopLoss,
+      finalTp: existing.tp2,
+      realizedPips: metrics.floatingPips,
+      realizedUsd: metrics.netProfitUsd,
+      realizedKes: metrics.netProfitKes,
+      slUpdatesCount: existing.slUpdatesCount,
+      loadedAtEat: existing.loadedAtEat,
+      closedAtEat: this.formatNowEat(),
+      outcome
+    };
+
+    delete this.activeOrders[pair];
+    this.orderHistory = [entry, ...this.orderHistory].slice(0, 40);
+    this.persistOrders();
+
+    // Mark matching suggested signal CLOSED
+    let sigUpdated = false;
+    this.suggestedSignals = this.suggestedSignals.map((sig) => {
+      if (sig.linkedOrderId === existing.id) {
+        sigUpdated = true;
+        return { ...sig, status: 'CLOSED' };
+      }
+      return sig;
+    });
+    if (sigUpdated) {
+      this.persistSuggestedSignals();
+    }
+
+    this.appendPropJournalRecord({
+      pair: entry.pair,
+      direction: entry.direction,
+      entryPrice: entry.entryPrice,
+      exitPrice: entry.closePrice,
+      pips: entry.realizedPips,
+      usdPnL: entry.realizedUsd,
+      kesPnL: entry.realizedKes,
+      outcome: entry.realizedUsd >= 0 ? 'WIN' : 'LOSS',
+      reason: `Closed (${entry.outcome}) · Final SL ${entry.finalStopLoss} · ${entry.slUpdatesCount} SL adjustments`
+    });
+
+    const sign = entry.realizedUsd >= 0 ? '+' : '';
+    this.pushNotification({
+      pair: entry.pair,
+      type: entry.realizedUsd >= 0 ? 'TP_HIT' : 'SL_WARNING',
+      title: `${entry.pair} ${entry.direction} Closed (${sign}$${entry.realizedUsd.toFixed(2)})`,
+      message: `${entry.entryPrice} → ${entry.closePrice} (${sign}${entry.realizedPips}p · ${sign}${entry.realizedKes} KES) saved to Trade Log.`
+    });
+
+    return entry;
+  }
+
+  public clearOrderHistory() {
+    this.orderHistory = [];
+    this.persistOrders();
+    this.broadcast();
   }
 
   public setSelectedPair(pair: CurrencyPair | null, tf?: Timeframe) {
@@ -2794,12 +3882,36 @@ class GlobalLiveMarketStreamEngine {
     }
   }
 
+  public requestOpenScannerView(view: ScannerWorkspaceTab, targetPair?: CurrencyPair) {
+    if (targetPair) {
+      this.selectedPair = targetPair;
+    }
+    try {
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.setItem('pivotfx_pending_scanner_view', view);
+        if (targetPair) {
+          window.sessionStorage.setItem('pivotfx_pending_scanner_pair', targetPair);
+        }
+        window.dispatchEvent(
+          new CustomEvent('pivotfx:open-scanner-view', { detail: { view, pair: targetPair } })
+        );
+        const el = document.getElementById('scanner-tools');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }
+    } catch {}
+    this.broadcast();
+  }
+
   public setSuperAiAuto(enabled: boolean) {
     this.superAiAutoEnabled = enabled;
-    if (enabled && this.markets[0]) {
-      const topPair = this.selectedPair || this.markets[0].pair;
-      this.selectedPair = topPair;
-      void this.fetchSuperAiNoteForPair(topPair, undefined, true);
+    if (enabled) {
+      if (this.selectedPair) {
+        void this.fetchSuperAiNoteForPair(this.selectedPair, undefined, true);
+      } else {
+        void this.runBatchAiScan('deep_ai');
+      }
     }
     this.broadcast();
   }
@@ -2841,16 +3953,19 @@ class GlobalLiveMarketStreamEngine {
       pctMap[item.pair] = item.change24hPct;
     });
     const macro = getCurrentMacroContext(pctMap);
+    const swings = computeCandleSwingLevels(m.candles);
     const computed = computeRealChartTradeParams({
       targetPair: m.pair,
       targetTf: activeTf,
-      targetBroker: 'fxpesa',
+      targetBroker: this.activeBroker,
       price: m.price,
       keyLevel: m.keyLevel,
       ema20: m.ema20,
       ema50: m.ema50,
       rsi: m.rsi,
       atrPips: m.atrPips,
+      swingLow: swings.swingLow,
+      swingHigh: swings.swingHigh,
       macro,
       h1TrendDirection: m.h1TrendDirection
     });
@@ -2865,7 +3980,7 @@ class GlobalLiveMarketStreamEngine {
           body: JSON.stringify({
             pair: m.pair,
             timeframe: activeTf,
-            broker: 'FXPesa',
+            broker: this.activeBroker.toUpperCase(),
             price: computed.entryPrice,
             ema20: m.ema20,
             ema50: m.ema50,
@@ -2879,6 +3994,8 @@ class GlobalLiveMarketStreamEngine {
             dxyPressurePct: macro.dxyPressurePct,
             riskRegime: macro.riskRegime,
             windowHeadline: timing.bannerHeadline,
+            isExtendedZone: computed.isExtendedZone,
+            entryTimingWarning: computed.entryTimingWarning,
             customPrompt
           })
         },
@@ -2888,7 +4005,8 @@ class GlobalLiveMarketStreamEngine {
       if (res.ok) {
         const data = await res.json();
         const resolvedText = data.note || data.tacticalNote || m.projection;
-        const resolvedRisk = data.invalidationNote || data.riskNote || m.humanCheckNote || `Close beyond SL ${computed.stopLoss}`;
+        const resolvedRisk =
+          data.invalidationNote || data.riskNote || m.humanCheckNote || `Close beyond SL ${computed.stopLoss}`;
         const resolvedMacro = data.catalystWatch || data.macroNote || macro.dxySummary;
         const noteObj: SuperAiLiveNote = {
           pair: m.pair,
@@ -2947,7 +4065,7 @@ class GlobalLiveMarketStreamEngine {
     if (isNaN(price) || price <= 0) return;
     this.pendingWsUpdates[pair] = { price, pct };
 
-    // Keep GBP/JPY cross instantaneously synchronized whenever GBP/USD or USD/JPY ticks
+    // Keep GBP/JPY & EUR/JPY crosses instantaneously synchronized whenever major USD legs tick
     if (pair === 'GBP/USD' || pair === 'USD/JPY') {
       const latestGbp =
         pair === 'GBP/USD'
@@ -2966,6 +4084,24 @@ class GlobalLiveMarketStreamEngine {
       }
     }
 
+    if (pair === 'EUR/USD' || pair === 'USD/JPY') {
+      const latestEur =
+        pair === 'EUR/USD'
+          ? price
+          : this.pendingWsUpdates['EUR/USD']?.price ??
+            this.markets.find((m) => m.pair === 'EUR/USD')?.price;
+      const latestJpy =
+        pair === 'USD/JPY'
+          ? price
+          : this.pendingWsUpdates['USD/JPY']?.price ??
+            this.markets.find((m) => m.pair === 'USD/JPY')?.price;
+      if (latestEur && latestJpy && latestEur > 0 && latestJpy > 0) {
+        this.pendingWsUpdates['EUR/JPY'] = {
+          price: Number((latestEur * latestJpy).toFixed(3))
+        };
+      }
+    }
+
     if (!this.wsFlushTimer) {
       this.wsFlushTimer = setTimeout(() => {
         this.wsFlushTimer = null;
@@ -2974,13 +4110,16 @@ class GlobalLiveMarketStreamEngine {
         if (Object.keys(batch).length > 0) {
           this.rebuildAndSortMarkets(batch, 'auto_1s', true);
         }
-      }, 150);
+      }, 250);
     }
   }
 
   private rebuildAndSortMarkets(
     priceUpdates?: Partial<
-      Record<CurrencyPair, { price: number; pct?: number; dailyOpen?: number; candles?: OhlcCandle[]; h1Candles?: OhlcCandle[] }>
+      Record<
+        CurrencyPair,
+        { price: number; pct?: number; dailyOpen?: number; candles?: OhlcCandle[]; h1Candles?: OhlcCandle[] }
+      >
     >,
     scanMode: 'auto_1s' | 'scan_all' | 'rescan' | 'deep_ai' = 'auto_1s',
     feedOk = this.liveFeedConnected
@@ -3015,6 +4154,10 @@ class GlobalLiveMarketStreamEngine {
         };
       }
 
+      if (isExplicitFreshScan) {
+        this.trendHoldUntil[existing.pair] = 0;
+      }
+
       const incoming = priceUpdates?.[existing.pair];
       const nextPrice = incoming && incoming.price > 0 ? incoming.price : existing.price;
       const nextDailyOpen = incoming?.dailyOpen ?? existing.dailyOpenPrice;
@@ -3031,11 +4174,11 @@ class GlobalLiveMarketStreamEngine {
         rawDiffPips > 0 ? 'UP' : rawDiffPips < 0 ? 'DOWN' : existing.lastTickDir || 'FLAT';
       const old = prevMeta.get(existing.pair);
 
-      // Hold trend & direction stable for at least 3 minutes unless an explicit scan_all OR strong >0.25% move occurred
+      // Hold trend stable for 25 seconds during tick noise unless explicit scan or structural breakout occurs
       const holdUntil = this.trendHoldUntil[existing.pair] ?? 0;
       const isStrongBreakout =
-        old && old.price > 0 ? Math.abs((nextPrice - old.price) / old.price) >= 0.0025 : false;
-      const shouldPreserveTrend = scanMode !== 'scan_all' && nowMs < holdUntil && !isStrongBreakout;
+        old && old.price > 0 ? Math.abs((nextPrice - old.price) / old.price) >= 0.0018 : false;
+      const shouldPreserveTrend = Boolean(old) && !isExplicitFreshScan && nowMs < holdUntil && !isStrongBreakout;
 
       const calibrated = buildCalibratedMarketItem({
         pair: existing.pair,
@@ -3051,51 +4194,50 @@ class GlobalLiveMarketStreamEngine {
         candlesAreRealOhlc:
           Boolean(incoming?.candles || cachedBackgroundCandles[existing.pair]?.m15) || existing.candlesAreRealOhlc,
         macro: liveMacro,
-        previousDirection: shouldPreserveTrend ? old?.dir : isExplicitFreshScan ? undefined : old?.dir,
-        previousTrendDirection: shouldPreserveTrend
-          ? old?.trendDir
-          : isExplicitFreshScan
-          ? undefined
-          : old?.trendDir,
+        previousDirection: shouldPreserveTrend ? old?.dir : undefined,
+        previousTrendDirection: shouldPreserveTrend ? old?.trendDir : undefined,
         spreadByBroker: existing.spreadByBroker,
         dataSource: feedOk ? 'Live Interbank Feed' : 'Live Feed + Institutional Calibration'
       });
 
       const newDir: 'BUY' | 'SELL' = calibrated.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
-      if (!old || old.dir !== newDir || !this.trendHoldUntil[existing.pair]) {
-        this.trendHoldUntil[existing.pair] = nowMs + 180_000;
+      if (!old || old.dir !== newDir || !this.trendHoldUntil[existing.pair] || isExplicitFreshScan) {
+        this.trendHoldUntil[existing.pair] = nowMs + 25_000;
       }
 
       return {
         ...calibrated,
         previousRank: old?.rank ?? calibrated.previousRank,
         previousDirection: old?.dir ?? calibrated.previousDirection,
-        directionFlipped: isExplicitFreshScan
-          ? false
-          : Boolean(old && old.dir !== newDir),
+        directionFlipped: Boolean(old && old.dir !== newDir),
         lastTickTime: tickStr,
         lastTickDir: tickDir,
         lastTickDeltaPips: rawDiffPips !== 0 ? rawDiffPips : existing.lastTickDeltaPips
       };
     });
 
-    // Dynamic sorting: rank by trajectory net profit expectancy + AI confluence so highest-profit setups lead!
-    updatedList.sort((a, b) => {
-      if (scanMode === 'deep_ai') {
-        const scoreA = a.confidence + (a.isFavourableOrder ? 5 : 0) + Math.min(8, Math.abs(a.change24hPct) * 1.4);
-        const scoreB = b.confidence + (b.isFavourableOrder ? 5 : 0) + Math.min(8, Math.abs(b.change24hPct) * 1.4);
-        return scoreB - scoreA;
-      }
-      const rankScoreA = a.confidence + (a.isFavourableOrder ? 4 : 0);
-      const rankScoreB = b.confidence + (b.isFavourableOrder ? 4 : 0);
-      return rankScoreB - rankScoreA;
-    });
+    // Dynamic sorting strictly from Top % down to Least % across all markets!
+    this.markets = sortMarketsByTopPercent(updatedList, 'PCT_DESC');
+    this.syncActiveOrdersWithMarkets();
+    if (scanMode === 'auto_1s' && this.dailyMacroDirective.source !== 'gemini-3.8-flash') {
+      this.dailyMacroDirective = buildInitialMacroDirective(this.markets);
+    }
 
-    this.markets = updatedList.map((m, idx) => ({
-      ...m,
-      currentRank: idx + 1,
-      isTopPick: idx === 0
-    }));
+    if (isExplicitFreshScan && this.markets[0]) {
+      const top = this.markets[0];
+      const dir = top.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
+      if (top.confidence >= 76) {
+        this.pushNotification({
+          pair: top.pair,
+          type: 'AI_SIGNAL',
+          title: `#1 Ranked Setup: ${top.pair} ${dir} (${top.confidence}% AI)`,
+          message: `Entry @ ${top.price} · SL ${top.suggestedSL} · TP2 ${top.suggestedTP2} · ${
+            top.entryTimingWarning || 'Prime Entry Zone'
+          }`
+        });
+      }
+    }
+
     this.syncedAt = tickStr;
     this.liveFeedConnected = feedOk;
     this.lastScanMode = scanMode;
@@ -3109,7 +4251,6 @@ class GlobalLiveMarketStreamEngine {
     }
 
     try {
-      // Stream strictly BTCUSDT and PAXGUSDT from Binance so fiat EUR/GBP/AUD stay 100% locked to Kraken fiat USD (no USDT basis ping-pong!)
       const socket = new WebSocket(
         'wss://stream.binance.com:9443/stream?streams=btcusdt@bookTicker/paxgusdt@bookTicker/btcusdt@miniTicker/paxgusdt@miniTicker'
       );
@@ -3122,9 +4263,7 @@ class GlobalLiveMarketStreamEngine {
           if (!d || !d.s) return;
 
           const hasBook = d.b !== undefined && d.a !== undefined;
-          const lastPrice = hasBook
-            ? (parseFloat(d.b) + parseFloat(d.a)) / 2
-            : parseFloat(d.c);
+          const lastPrice = hasBook ? (parseFloat(d.b) + parseFloat(d.a)) / 2 : parseFloat(d.c);
           const openPrice = d.o !== undefined ? parseFloat(d.o) : NaN;
           if (isNaN(lastPrice) || lastPrice <= 0) return;
 
@@ -3143,12 +4282,8 @@ class GlobalLiveMarketStreamEngine {
         }
       };
 
-      socket.onerror = () => {
-        // Fallback smoothly to Kraken WS & 0.5s REST loop
-      };
-    } catch {
-      // Ignore restricted WebSocket environments
-    }
+      socket.onerror = () => {};
+    } catch {}
   }
 
   private connectKrakenWebSocket() {
@@ -3171,7 +4306,7 @@ class GlobalLiveMarketStreamEngine {
               method: 'subscribe',
               params: {
                 channel: 'ticker',
-                symbol: ['EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CAD', 'AUD/USD', 'PAXG/USD', 'BTC/USD']
+                symbol: ['EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'USD/CAD', 'AUD/USD']
               }
             })
           );
@@ -3188,15 +4323,13 @@ class GlobalLiveMarketStreamEngine {
             const pct = typeof item?.change_pct === 'number' ? Number(item.change_pct.toFixed(2)) : undefined;
             if (!sym || isNaN(last) || last <= 0) continue;
 
-            if (sym === 'PAXG/USD' && last > 1500) {
-              this.queueWsTick('XAU/USD', last, pct);
-            } else if (
+            if (
               sym === 'EUR/USD' ||
               sym === 'GBP/USD' ||
               sym === 'USD/JPY' ||
+              sym === 'USD/CHF' ||
               sym === 'USD/CAD' ||
-              sym === 'AUD/USD' ||
-              sym === 'BTC/USD'
+              sym === 'AUD/USD'
             ) {
               this.queueWsTick(sym as CurrencyPair, last, pct);
             }
@@ -3206,12 +4339,8 @@ class GlobalLiveMarketStreamEngine {
         }
       };
 
-      kws.onerror = () => {
-        // Graceful fallback to Binance WS + 1s REST loop
-      };
-    } catch {
-      // Ignore restricted WebSocket environments
-    }
+      kws.onerror = () => {};
+    } catch {}
   }
 
   private async pollLiveExchangeRest(scanMode: 'auto_1s' | 'scan_all' | 'rescan' | 'deep_ai' = 'auto_1s') {
@@ -3220,7 +4349,10 @@ class GlobalLiveMarketStreamEngine {
     try {
       const snap = await fetchLiveMarketSnapshot(this.markets);
       const updates: Partial<
-        Record<CurrencyPair, { price: number; pct: number; dailyOpen?: number; candles?: OhlcCandle[]; h1Candles?: OhlcCandle[] }>
+        Record<
+          CurrencyPair,
+          { price: number; pct: number; dailyOpen?: number; candles?: OhlcCandle[]; h1Candles?: OhlcCandle[] }
+        >
       > = {};
       snap.markets.forEach((m) => {
         updates[m.pair] = {
@@ -3237,16 +4369,133 @@ class GlobalLiveMarketStreamEngine {
     }
   }
 
+  public async runBatchAiScan(mode: 'scan_all' | 'rescan' | 'deep_ai' = 'deep_ai') {
+    const pctMap: Partial<Record<CurrencyPair, number>> = {};
+    this.markets.forEach((item) => {
+      pctMap[item.pair] = item.change24hPct;
+    });
+    const macro = getCurrentMacroContext(pctMap);
+    const localDirective = buildInitialMacroDirective(this.markets);
+    this.dailyMacroDirective = localDirective;
+
+    if (typeof fetch === 'undefined') return;
+    try {
+      const payloadMarkets = this.markets.map((m) => {
+        const timing = evaluatePairKenyaTiming(m.pair);
+        return {
+          pair: m.pair,
+          timeframe: this.customTimeframes[m.pair] || m.recommendedTf,
+          price: m.price,
+          change24hPct: m.change24hPct,
+          direction: m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+          trendDirection: m.trendDirection,
+          ema20: m.ema20,
+          ema50: m.ema50,
+          rsi: m.rsi,
+          stopLoss: m.suggestedSL,
+          tp1: m.suggestedTP1,
+          tp2: m.suggestedTP2,
+          tp3: m.suggestedTP3,
+          confidence: m.confidence,
+          riskReward: m.riskReward,
+          windowStatus: timing.windowBadgeShort,
+          isExtendedZone: m.isExtendedZone,
+          entryTimingWarning: m.entryTimingWarning
+        };
+      });
+
+      const res = await fetchWithFastTimeout(
+        '/api/ai/scan-markets',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode,
+            dxyPressurePct: macro.dxyPressurePct,
+            riskRegime: macro.riskRegime,
+            eatTimeString: macro.eatTimeString,
+            eatHour: macro.eatHour,
+            sessionWindowName: macro.sessionWindowName,
+            overallDaySafety: macro.overallDaySafety,
+            markets: payloadMarkets
+          })
+        },
+        2800
+      );
+
+      if (res.ok) {
+        const data = await res.json();
+        const nowEat = this.formatNowEat();
+        if (data?.dailyMacroDirective) {
+          this.dailyMacroDirective = {
+            headline: data.dailyMacroDirective.headline || localDirective.headline,
+            overallSafety: data.dailyMacroDirective.overallSafety || localDirective.overallSafety,
+            hourlyOutlook: data.dailyMacroDirective.hourlyOutlook || localDirective.hourlyOutlook,
+            catalystSummary: data.dailyMacroDirective.catalystSummary || localDirective.catalystSummary,
+            source: data.source === 'gemini-3.8-flash' ? 'gemini-3.8-flash' : 'quantitative-engine',
+            syncedAt: nowEat
+          };
+        }
+        if (data?.perPair) {
+          for (const pairKey of Object.keys(data.perPair) as CurrencyPair[]) {
+            const pData = data.perPair[pairKey];
+            if (pData) {
+              this.superAiNotes[pairKey] = {
+                pair: pairKey,
+                source: data.source === 'gemini-3.8-flash' ? 'gemini-3.8-flash' : 'quantitative-engine',
+                headline: pData.headline || `${pairKey} Super AI Verdict`,
+                note: pData.note || '',
+                invalidationNote: pData.invalidationNote || '',
+                catalystWatch: pData.catalystWatch || '',
+                tacticalNote: pData.note || '',
+                riskNote: pData.invalidationNote || '',
+                macroNote: pData.catalystWatch || '',
+                syncedAt: nowEat
+              };
+              this.lastAiFetchByPair[pairKey] = Date.now();
+            }
+          }
+        }
+        this.broadcast();
+      }
+    } catch {
+      // Fallback already set
+    }
+  }
+
+  public async rescanSinglePair(targetPair: CurrencyPair, tf?: Timeframe) {
+    const activeTf =
+      tf ||
+      this.customTimeframes[targetPair] ||
+      this.markets.find((m) => m.pair === targetPair)?.recommendedTf ||
+      'M15';
+    this.customTimeframes[targetPair] = activeTf;
+    this.lockedPairs[targetPair] = false;
+
+    const snap = await fetchPairLiveCandleSnapshot(targetPair, activeTf);
+    const updates: Partial<
+      Record<CurrencyPair, { price: number; candles?: OhlcCandle[]; h1Candles?: OhlcCandle[] }>
+    > = {
+      [targetPair]: {
+        price: snap.price,
+        candles: snap.candles
+      }
+    };
+    this.rebuildAndSortMarkets(updates, 'rescan', true);
+    if (this.superAiAutoEnabled) {
+      await this.fetchSuperAiNoteForPair(targetPair, activeTf, true);
+    }
+    return this.getState();
+  }
+
   public async triggerScan(mode: 'scan_all' | 'rescan' | 'deep_ai') {
     if (mode === 'scan_all' || mode === 'rescan') {
       this.lockedPairs = {};
     }
-    void refreshBackgroundRealOhlcCandles(true);
+    await refreshBackgroundRealOhlcCandles(true);
     await this.pollLiveExchangeRest(mode);
-    if (this.superAiAutoEnabled && this.markets[0]) {
-      this.selectedPair = this.markets[0].pair;
-      void this.fetchSuperAiNoteForPair(this.selectedPair, true);
-    } else if (this.superAiAutoEnabled) {
+    await this.runBatchAiScan(mode);
+    if (this.selectedPair && this.superAiAutoEnabled) {
       void this.fetchSuperAiNoteForPair(this.selectedPair, true);
     }
     return this.getState();
@@ -3292,6 +4541,7 @@ class GlobalLiveMarketStreamEngine {
         recommendedSession: m.recommendedSession,
         volatility: m.volatility,
         candles: m.candles,
+        h1Candles: m.h1Candles,
         candlesAreRealOhlc: m.candlesAreRealOhlc,
         macro: liveMacro,
         spreadByBroker: m.spreadByBroker,
@@ -3309,15 +4559,12 @@ class GlobalLiveMarketStreamEngine {
       };
     });
 
-    // Re-sort live rankings so custom candle moves immediately reflect in #1/#2/#3 leaderboard
     const prevRanks = new Map(this.markets.map((m, i) => [m.pair, m.currentRank || i + 1]));
-    this.markets.sort((a, b) => b.confidence - a.confidence);
-    this.markets = this.markets.map((m, idx) => ({
+    this.markets = sortMarketsByTopPercent(this.markets, 'PCT_DESC').map((m) => ({
       ...m,
-      previousRank: prevRanks.get(m.pair),
-      currentRank: idx + 1,
-      isTopPick: idx === 0
+      previousRank: prevRanks.get(m.pair)
     }));
+    this.syncActiveOrdersWithMarkets();
     this.syncedAt = tickStr;
     this.broadcast();
   }
@@ -3336,13 +4583,13 @@ class GlobalLiveMarketStreamEngine {
     this.connectBinanceWebSocket();
     this.connectKrakenWebSocket();
     if (!this.intervalId) {
-      this.pollLiveExchangeRest('scan_all');
+      void refreshBackgroundRealOhlcCandles(true);
+      void this.pollLiveExchangeRest('scan_all').then(() => this.runBatchAiScan('deep_ai'));
       this.intervalId = setInterval(() => {
         this.tickCount += 1;
         this.syncedAt = this.formatNowEat();
-        // Poll REST interbank feeds every 500ms (0.5s, non-overlapping) + 150ms WebSocket push
         this.pollLiveExchangeRest('auto_1s');
-      }, 500);
+      }, 2000);
     }
   }
 
@@ -3371,4 +4618,5 @@ class GlobalLiveMarketStreamEngine {
 }
 
 export const globalLiveStream = new GlobalLiveMarketStreamEngine();
+
 

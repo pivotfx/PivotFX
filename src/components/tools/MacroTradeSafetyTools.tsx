@@ -2,14 +2,18 @@ import React, { useState, useEffect } from 'react';
 import { PageTab, CurrencyPair, BrokerId } from '../../types';
 import {
   MarketScanData,
+  ActiveMarketOrder,
   INITIAL_MARKETS_DATA,
   globalLiveStream,
   computeRealChartTradeParams,
+  computeLiveOrderMetrics,
   computeDailyMacroSafetyReport,
+  computeCandleSwingLevels,
   MacroFactorFlags,
   SideSafetyVerdict
 } from '../../utils/liveMarketEngine';
 import { LiveInteractiveCandleChart } from './LiveInteractiveCandleChart';
+import { ActiveMarketOrderPanel } from './ActiveMarketOrderPanel';
 import sessionWorldMapImg from '../../assets/images/session_world_map_1793873187765.jpg';
 import {
   Globe,
@@ -28,8 +32,11 @@ import {
   ArrowLeft,
   Scale,
   Sparkles,
+  Copy,
+  Check,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  ClipboardList
 } from 'lucide-react';
 
 interface MacroTradeSafetyToolsProps {
@@ -49,13 +56,29 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
     () => globalLiveStream.getState().superAiNotes
   );
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
-  const [selectedBroker, setSelectedBroker] = useState<BrokerId>('fxpesa');
+  const [selectedBroker, setSelectedBroker] = useState<BrokerId>(
+    () => globalLiveStream.getState().activeBroker || 'fxpesa'
+  );
+  const [activeOrders, setActiveOrders] = useState<Partial<Record<CurrencyPair, ActiveMarketOrder>>>(
+    () => globalLiveStream.getState().activeOrders
+  );
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [selectedPairFilter, setSelectedPairFilter] = useState<CurrencyPair | 'ALL'>('ALL');
   const [focusedPair, setFocusedPair] = useState<CurrencyPair | null>(null);
   const [inspectedSide, setInspectedSide] = useState<'AUTO' | 'BUY' | 'SELL'>('AUTO');
   const [showManualOverrides, setShowManualOverrides] = useState<boolean>(false);
   const [manualFlags, setManualFlags] = useState<Partial<MacroFactorFlags>>({});
   const [mapImgFailed, setMapImgFailed] = useState<boolean>(false);
+
+  const copyLevel = (val: string | number, key: string) => {
+    try {
+      navigator.clipboard.writeText(String(val));
+    } catch {}
+    setCopiedKey(key);
+    setTimeout(() => {
+      setCopiedKey((prev) => (prev === key ? null : prev));
+    }, 1500);
+  };
 
   useEffect(() => {
     const unsubscribe = globalLiveStream.subscribe((streamState) => {
@@ -64,6 +87,8 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
       setLiveConnected(streamState.liveFeedConnected);
       setLockedPairs(streamState.lockedPairs);
       setSuperAiNotes(streamState.superAiNotes);
+      setSelectedBroker(streamState.activeBroker);
+      setActiveOrders(streamState.activeOrders);
     });
     return () => unsubscribe();
   }, []);
@@ -175,7 +200,11 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
         <div className="flex items-center gap-2.5 flex-wrap shrink-0">
           <select
             value={selectedBroker}
-            onChange={(e) => setSelectedBroker(e.target.value as BrokerId)}
+            onChange={(e) => {
+              const nextBroker = e.target.value as BrokerId;
+              setSelectedBroker(nextBroker);
+              globalLiveStream.setActiveBroker(nextBroker);
+            }}
             aria-label="Select Broker"
             className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:border-[#D4AF37] outline-none"
           >
@@ -184,6 +213,15 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
             <option value="hfm">Broker: HFM Standard</option>
             <option value="fbs">Broker: FBS Standard</option>
           </select>
+
+          <button
+            type="button"
+            onClick={() => globalLiveStream.requestOpenScannerView('trade_log', focusedPair || undefined)}
+            className="px-3.5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 font-mono font-bold text-xs flex items-center gap-1.5 transition whitespace-nowrap shrink-0"
+          >
+            <ClipboardList className="w-3.5 h-3.5" />
+            <span>Trade Log &amp; Orders</span>
+          </button>
 
           <button
             type="button"
@@ -196,6 +234,14 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
           </button>
         </div>
       </div>
+
+      {/* 1B. SYNCHRONIZED BROKER LIVE ORDERS, PROGRESS GAUGES & DYNAMIC SL/TP LOCK */}
+      <ActiveMarketOrderPanel
+        mode="broker_terminal"
+        broker={selectedBroker}
+        pair={focusedPair || undefined}
+        onInspectPairCard={(targetPair) => setFocusedPair(targetPair)}
+      />
 
       {/* 2. GLOBAL SESSION MAP & PROMINENT PLANNED-ENTRY SAFETY VERDICT */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
@@ -349,12 +395,13 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
       </div>
 
       {/* =====================================================================
-          4. ISOLATED SINGLE-MARKET CARD INSPECTION VIEW vs 8-CARD SUMMARY GRID
+          4. ISOLATED SINGLE-MARKET CARD INSPECTION VIEW vs 10-CARD SUMMARY GRID
           ===================================================================== */}
       {focusedCard && focusedMarket ? (
         (() => {
           const aiBestSide: 'BUY' | 'SELL' = focusedCard.buyScore >= focusedCard.sellScore ? 'BUY' : 'SELL';
           const effectiveSide: 'BUY' | 'SELL' = inspectedSide === 'AUTO' ? aiBestSide : inspectedSide;
+          const focusedSwings = computeCandleSwingLevels(focusedMarket.candles);
           const computed = computeRealChartTradeParams({
             targetPair: focusedCard.pair,
             targetTf: focusedMarket.recommendedTf || 'M15',
@@ -365,6 +412,8 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
             ema50: focusedCard.ema50,
             rsi: focusedCard.rsi,
             atrPips: focusedMarket.atrPips,
+            swingLow: focusedSwings.swingLow,
+            swingHigh: focusedSwings.swingHigh,
             biasOverride: effectiveSide,
             previousDirection: aiBestSide,
             previousTrendDirection: focusedMarket.trendDirection,
@@ -381,7 +430,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] hover:text-white border border-[#D4AF37]/40 text-xs font-bold transition group"
                 >
                   <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-                  <span>← Return to All 8 Markets Safety Cards</span>
+                  <span>← Return to All 10 Markets Safety Cards</span>
                 </button>
 
                 <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
@@ -408,6 +457,15 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
 
               {/* Focused Market Master Card */}
               <div className="p-6 rounded-3xl bg-slate-950 border-2 border-[#D4AF37] shadow-2xl space-y-5">
+                {/* Go-Ahead Assurance, Copy SL/TP & Live Market Order Tracker */}
+                <ActiveMarketOrderPanel
+                  mode="full"
+                  pair={focusedCard.pair}
+                  direction={effectiveSide}
+                  timeframe={focusedMarket.recommendedTf || 'M15'}
+                  broker={selectedBroker}
+                />
+
                 {/* Global Planned Entry Safety Banner + Trend Projection */}
                 <div
                   className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
@@ -429,6 +487,9 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                       <p>{focusedCard.globalEntryBannerText}</p>
                       <p className="text-[11px] text-[#00C261] font-bold">{computed.profitOutlookText}</p>
                       <p className="text-[11px] text-amber-200">{computed.humanCheckNote}</p>
+                      {computed.isExtendedZone && computed.entryTimingWarning && (
+                        <p className="text-[11px] text-amber-300 font-bold pt-0.5">{computed.entryTimingWarning}</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -598,7 +659,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                     className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/40 text-xs font-bold flex items-center gap-1.5 transition"
                   >
                     <ArrowLeft className="w-3.5 h-3.5" />
-                    <span>← Back to All 8 Markets</span>
+                    <span>← Back to All 10 Markets</span>
                   </button>
 
                   {onNavigatePillar && (
@@ -618,7 +679,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
         })()
       ) : (
         /* =====================================================================
-           UNCONGESTED 8 INDEPENDENT CLICKABLE SAFETY CARDS GRID
+           UNCONGESTED 10 INDEPENDENT CLICKABLE SAFETY CARDS GRID
            Top summary: Pair, Live Candle Price, %, Kenya Time Countdown, Global Safety Badge, SL/TP
            ===================================================================== */
         <div className="space-y-4">
@@ -629,12 +690,12 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                 <span>Independent Market Safety & Kenya Entry Window Cards (Click Any Card)</span>
               </h4>
               <p className="text-xs text-slate-400 font-mono">
-                Shows live %, candle price, Kenya EAT entry countdown timer, global entry verdict, and SL/TP. Click any card to open its full chart & countdown view.
+                Shows live %, candle price, Kenya EAT entry countdown timer, global entry verdict, and SL/TP across all 10 markets. Click any card to open its full chart & countdown view.
               </p>
             </div>
 
             <div className="flex items-center gap-1.5 flex-wrap font-mono">
-              {(['ALL', 'GBP/USD', 'XAU/USD', 'EUR/USD', 'USD/CAD', 'USD/JPY', 'GBP/JPY', 'AUD/USD', 'BTC/USD'] as const).map(
+              {(['ALL', 'GBP/USD', 'XAU/USD', 'EUR/USD', 'USD/CAD', 'USD/CHF', 'USD/JPY', 'GBP/JPY', 'EUR/JPY', 'AUD/USD', 'BTC/USD'] as const).map(
                 (p) => (
                   <button
                     key={p}
@@ -657,6 +718,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
             {visibleScorecards.map((card) => {
               const rawMkt = markets.find((x) => x.pair === card.pair);
               const preferredSide: 'BUY' | 'SELL' = card.buyScore >= card.sellScore ? 'BUY' : 'SELL';
+              const cardSwings = computeCandleSwingLevels(rawMkt?.candles);
               const computed = computeRealChartTradeParams({
                 targetPair: card.pair,
                 targetTf: rawMkt?.recommendedTf || 'M15',
@@ -666,12 +728,20 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                 ema50: card.ema50,
                 rsi: card.rsi,
                 atrPips: rawMkt?.atrPips,
+                swingLow: cardSwings.swingLow,
+                swingHigh: cardSwings.swingHigh,
                 biasOverride: preferredSide,
                 previousDirection: preferredSide,
                 previousTrendDirection: rawMkt?.trendDirection,
                 h1TrendDirection: rawMkt?.h1TrendDirection
               });
               const pctPos = card.change24hPct >= 0;
+              const loadedOrder = activeOrders[card.pair];
+              const orderMetrics = loadedOrder
+                ? computeLiveOrderMetrics(loadedOrder, card.livePrice, rawMkt?.atrPips)
+                : null;
+              const shownSl = loadedOrder ? loadedOrder.stopLoss : computed.stopLoss;
+              const shownTp = loadedOrder ? loadedOrder.tp2 : computed.tp2;
 
               return (
                 <div
@@ -686,7 +756,9 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                     }
                   }}
                   className={`p-4 rounded-2xl bg-slate-950 border transition-all cursor-pointer flex flex-col justify-between space-y-3.5 font-mono tabular-nums hover:-translate-y-0.5 ${
-                    card.isEntryBlockedGlobally
+                    loadedOrder
+                      ? 'border-[#00C261] shadow-[0_0_18px_rgba(0,194,97,0.16)]'
+                      : card.isEntryBlockedGlobally
                       ? 'border-red-500/40 hover:border-red-400'
                       : 'border-slate-800 hover:border-[#D4AF37]'
                   }`}
@@ -720,6 +792,42 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                       {card.isEntryBlockedGlobally ? 'WAIT / NOT SAFE' : card.primaryVerdictText}
                     </span>
                   </div>
+
+                  {/* Synchronized Loaded Order Live Status on Broker Page Card */}
+                  {loadedOrder && orderMetrics && (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className="p-2.5 rounded-xl bg-emerald-950/45 border border-[#00C261]/60 space-y-1 text-[10px]"
+                    >
+                      <div className="flex items-center justify-between font-black">
+                        <span className="text-[#00C261]">
+                          {loadedOrder.direction} BROKER ORDER ✓
+                        </span>
+                        <span className={orderMetrics.netProfitUsd >= 0 ? 'text-[#00C261]' : 'text-red-300'}>
+                          {orderMetrics.floatingPips >= 0 ? `+${orderMetrics.floatingPips}p` : `${orderMetrics.floatingPips}p`} ·{' '}
+                          {orderMetrics.netProfitUsd >= 0
+                            ? `+$${orderMetrics.netProfitUsd.toFixed(2)}`
+                            : `-$${Math.abs(orderMetrics.netProfitUsd).toFixed(2)}`}
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-slate-900 overflow-hidden">
+                        <div
+                          className="h-full bg-[#00C261] transition-all duration-300"
+                          style={{ width: `${orderMetrics.slToTpProgressPct}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-300">Progress: {orderMetrics.slToTpProgressPct}%</span>
+                        <button
+                          type="button"
+                          onClick={() => globalLiveStream.applySmartSlTpAction(card.pair, 'LOCK_PROFIT_55')}
+                          className="px-2 py-0.5 rounded bg-[#00C261] text-black font-black text-[9px]"
+                        >
+                          +Lock Profit SL
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Color-Coded Kenya EAT Entry Window Status + Live Countdown */}
                   <div
@@ -757,16 +865,51 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                     </div>
                   </div>
 
-                  {/* Compact Protected SL / TP Preview + Net Profit Expectancy */}
-                  <div className="p-2.5 rounded-xl bg-black/60 border border-slate-800/80 space-y-1.5 text-[11px]">
+                  {/* Compact Protected SL / TP Preview with Direct 1-Click Copy Buttons */}
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="p-2.5 rounded-xl bg-black/60 border border-slate-800/80 space-y-1.5 text-[11px]"
+                  >
                     <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <span className="text-[10px] text-red-400 block">SL ({computed.orderType})</span>
-                        <strong className="text-red-300">{computed.stopLoss}</strong>
+                      <div className="flex items-center justify-between gap-1">
+                        <div className="min-w-0">
+                          <span className="text-[10px] text-red-400 block">
+                            {loadedOrder ? 'Active SL' : `SL (${computed.orderType})`}
+                          </span>
+                          <strong className="text-red-300 truncate block">{shownSl}</strong>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copyLevel(shownSl, `brkcard-sl-${card.pair}`)}
+                          className="p-1 rounded bg-slate-900 hover:bg-red-950 text-red-300 border border-slate-700 shrink-0"
+                          title="Copy Stop Loss"
+                        >
+                          {copiedKey === `brkcard-sl-${card.pair}` ? (
+                            <Check className="w-3 h-3 text-[#00C261]" />
+                          ) : (
+                            <Copy className="w-3 h-3" />
+                          )}
+                        </button>
                       </div>
-                      <div>
-                        <span className="text-[10px] text-emerald-400 block">TP Target</span>
-                        <strong className="text-emerald-300">{computed.tp2}</strong>
+                      <div className="flex items-center justify-between gap-1">
+                        <div className="min-w-0">
+                          <span className="text-[10px] text-emerald-400 block">
+                            {loadedOrder ? 'Active TP' : 'TP Target'}
+                          </span>
+                          <strong className="text-emerald-300 truncate block">{shownTp}</strong>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copyLevel(shownTp, `brkcard-tp-${card.pair}`)}
+                          className="p-1 rounded bg-slate-900 hover:bg-emerald-950 text-[#00C261] border border-slate-700 shrink-0"
+                          title="Copy Take Profit"
+                        >
+                          {copiedKey === `brkcard-tp-${card.pair}` ? (
+                            <Check className="w-3 h-3 text-[#00C261]" />
+                          ) : (
+                            <Copy className="w-3 h-3" />
+                          )}
+                        </button>
                       </div>
                     </div>
                     <div className="pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px]">
@@ -779,7 +922,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
 
                   {/* Click Footer */}
                   <div className="pt-1 flex items-center justify-between text-[11px] text-[#D4AF37] font-bold">
-                    <span>Open Countdown & Chart</span>
+                    <span>{loadedOrder ? 'Manage SL / TP Progress' : 'Open Countdown & Chart'}</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </div>
                 </div>

@@ -59,8 +59,15 @@ export default function App() {
     } catch {}
   };
 
-  const handleSelectTab = (tab: PageTab) => {
+  const handleSelectTab = async (tab: PageTab) => {
     playClickSound();
+    if (tab === '/ai-scanner') {
+      const pendingPair = window.sessionStorage.getItem('pivotfx_pending_scanner_pair');
+      if (!pendingPair) {
+        const { globalLiveStream } = await import('./utils/liveMarketEngine');
+        globalLiveStream.setSelectedPair(null);
+      }
+    }
     setActiveTab(tab);
     if (tab === 'landing') {
       window.history.pushState(null, '', '#/');
@@ -71,10 +78,31 @@ export default function App() {
   };
 
   const handleOpenPairInScanner = async (pair: any) => {
+    playClickSound();
     const { globalLiveStream } = await import('./utils/liveMarketEngine');
     globalLiveStream.setSelectedPair(pair);
-    handleSelectTab('/ai-scanner');
+    setActiveTab('/ai-scanner');
+    window.history.pushState(null, '', '#/ai-scanner');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  useEffect(() => {
+    const handleOpenScannerView = () => {
+      playClickSound();
+      setActiveTab('/ai-scanner');
+      window.history.pushState(null, '', '#/ai-scanner');
+      setTimeout(() => {
+        const el = document.getElementById('scanner-tools');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      }, 120);
+    };
+    window.addEventListener('pivotfx:open-scanner-view', handleOpenScannerView);
+    return () => window.removeEventListener('pivotfx:open-scanner-view', handleOpenScannerView);
+  }, []);
 
   useEffect(() => {
     const handlePopState = () => {

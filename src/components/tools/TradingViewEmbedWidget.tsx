@@ -31,6 +31,10 @@ export const getTradingViewSymbol = (p: CurrencyPair): string => {
       return 'FX:USDJPY';
     case 'GBP/JPY':
       return 'FX:GBPJPY';
+    case 'USD/CHF':
+      return 'FX:USDCHF';
+    case 'EUR/JPY':
+      return 'FX:EURJPY';
     case 'XAU/USD':
       return 'OANDA:XAUUSD';
     case 'AUD/USD':
@@ -90,6 +94,8 @@ export const TradingViewEmbedWidget: React.FC<TradingViewEmbedWidgetProps> = ({
     'XAU/USD',
     'USD/JPY',
     'GBP/JPY',
+    'EUR/JPY',
+    'USD/CHF',
     'BTC/USD',
     'USD/CAD',
     'AUD/USD'

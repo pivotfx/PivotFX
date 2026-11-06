@@ -43,9 +43,57 @@ export interface BrokerInfo {
   realUrl: string;
 }
 
-export type CurrencyPair = 'EUR/USD' | 'GBP/USD' | 'USD/JPY' | 'GBP/JPY' | 'XAU/USD' | 'AUD/USD' | 'USD/CAD' | 'BTC/USD';
+export type CurrencyPair =
+  | 'EUR/USD'
+  | 'GBP/USD'
+  | 'USD/JPY'
+  | 'GBP/JPY'
+  | 'USD/CHF'
+  | 'EUR/JPY'
+  | 'XAU/USD'
+  | 'AUD/USD'
+  | 'USD/CAD'
+  | 'BTC/USD';
 
 export type Timeframe = 'M1' | 'M5' | 'M10' | 'M15' | 'H1' | 'H4' | 'D1';
+
+export interface SuggestedSignalLogEntry {
+  id: string;
+  pair: CurrencyPair;
+  timeframe: Timeframe;
+  broker: BrokerId;
+  direction: 'BUY' | 'SELL';
+  orderType?: string;
+  orderVerdict: string;
+  goAheadAssurance: string;
+  entryPrice: number;
+  stopLoss: number;
+  tp1: number;
+  tp2: number;
+  tp3: number;
+  slPips: number;
+  tpPips: number;
+  riskReward: string;
+  netProfitUsd: number;
+  netProfitKes: number;
+  confidence: number;
+  reasonSummary: string;
+  loggedAtEat: string;
+  suggestedTimestamp?: number;
+  status: 'SUGGESTED' | 'PLACED_WITH_BROKER' | 'CLOSED';
+  linkedOrderId?: string;
+}
+
+export interface TradeNotification {
+  id: string;
+  pair?: CurrencyPair;
+  type: 'ORDER_PLACED' | 'PROFIT_MILESTONE' | 'TP_HIT' | 'SL_UPDATED' | 'SL_WARNING' | 'AI_SIGNAL';
+  title: string;
+  message: string;
+  eatTimestamp: string;
+  timestampMs?: number;
+  read: boolean;
+}
 
 export interface PillarLesson {
   id: string;

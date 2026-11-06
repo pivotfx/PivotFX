@@ -234,7 +234,7 @@ export const TradingViewPage: React.FC<TradingViewPageProps> = ({
                 : 'bg-slate-900 text-slate-500 border-slate-800'
             }`}
           >
-            <span className="w-2 h-2 rounded-full bg-cyan-400" />
+            <span className="w-3 h-0.5 bg-cyan-400 inline-block" />
             EMA 20 {showEma20 ? 'ON' : 'OFF'}
           </button>
 
@@ -246,7 +246,7 @@ export const TradingViewPage: React.FC<TradingViewPageProps> = ({
                 : 'bg-slate-900 text-slate-500 border-slate-800'
             }`}
           >
-            <span className="w-2 h-2 rounded-full bg-amber-400" />
+            <span className="w-3 h-0.5 bg-amber-400 inline-block" />
             EMA 50 {showEma50 ? 'ON' : 'OFF'}
           </button>
 

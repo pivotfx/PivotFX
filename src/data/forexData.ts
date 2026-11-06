@@ -119,6 +119,8 @@ export const PAIRS_PRESETS: Record<CurrencyPair, { defaultPrice: number; pipDeci
   'GBP/USD': { defaultPrice: 1.34998, pipDecimals: 5, pipValueKes: 130 },
   'USD/JPY': { defaultPrice: 158.250, pipDecimals: 3, pipValueKes: 110 },
   'GBP/JPY': { defaultPrice: 213.635, pipDecimals: 3, pipValueKes: 110 },
+  'USD/CHF': { defaultPrice: 0.87850, pipDecimals: 5, pipValueKes: 130 },
+  'EUR/JPY': { defaultPrice: 172.850, pipDecimals: 3, pipValueKes: 110 },
   'XAU/USD': { defaultPrice: 3955.00, pipDecimals: 2, pipValueKes: 130 },
   'AUD/USD': { defaultPrice: 0.70151, pipDecimals: 5, pipValueKes: 130 },
   'USD/CAD': { defaultPrice: 1.39350, pipDecimals: 5, pipValueKes: 120 },
