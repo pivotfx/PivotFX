@@ -1007,9 +1007,11 @@ async function startServer() {
       server: { middlewareMode: true },
       appType: 'spa',
     });
+    app.use('/PivotFX', vite.middlewares);
     app.use(vite.middlewares);
   } else {
     const distDir = path.resolve(__dirname, 'dist');
+    app.use('/PivotFX', express.static(distDir));
     app.use(express.static(distDir));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distDir, 'index.html'));

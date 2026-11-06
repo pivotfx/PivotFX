@@ -69,20 +69,49 @@ export const Navbar: React.FC<NavbarProps> = ({
       setMarkets(streamState.markets);
     });
 
-    const handleNewNotif = () => {
+    const handleNewNotif = (e: any) => {
       if (!soundEnabledRef.current) return;
       try {
+        const notifType = e?.detail?.type;
         const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(980, audioCtx.currentTime);
-        gain.gain.setValueAtTime(0.035, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.14);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.14);
+        if (notifType === 'SL_WARNING') {
+          // Urgent two-tone warning alarm for structural reversal & invalidation risk
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(1040, audioCtx.currentTime);
+          osc.frequency.setValueAtTime(780, audioCtx.currentTime + 0.13);
+          gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.28);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.28);
+        } else if (notifType === 'TP_HIT' || notifType === 'PROFIT_MILESTONE') {
+          // Harmonious celebratory ascending chime for profit milestone
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(1320, audioCtx.currentTime + 0.18);
+          gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.22);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.22);
+        } else {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(980, audioCtx.currentTime);
+          gain.gain.setValueAtTime(0.035, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.14);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.14);
+        }
       } catch {}
     };
 

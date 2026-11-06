@@ -667,53 +667,67 @@ export function evaluateAllTradeFactors(p: {
     bearWeight += 24;
   }
 
-  // FACTOR 1: Candlestick Price Action, Multi-Candle Momentum & Liquidity Sweep (26 pts max)
+  // FACTOR 1: Candlestick Price Action, Multi-Candle Momentum & Liquidity Sweep (24 pts max)
   const prevRef = p.prev3Close ?? p.ema20;
   const microDeltaPips = Number(((p.livePrice - prevRef) * pipMultiplier).toFixed(1));
   const noiseFloorPips = isGold ? 12.0 : isBtc ? 65.0 : 1.5;
+  const significantDisplacementPips = noiseFloorPips * 2.2;
+
   if (p.isBearishPinOrSweep) {
-    bearWeight += 26;
+    bearWeight += 24;
+    bullWeight += 2;
     verdicts.push({
       name: '1. Candle & Liquidity Sweep',
       signal: 'SELL',
-      weight: '26%',
+      weight: '24%',
       detail: `Upper wick rejection / BSL sweep detected (${microDeltaPips >= 0 ? `+${microDeltaPips}` : microDeltaPips}p swing)`
     });
   } else if (p.isBullishPinOrAbsorption) {
-    bullWeight += 26;
+    bullWeight += 24;
+    bearWeight += 2;
     verdicts.push({
       name: '1. Candle & Liquidity Sweep',
       signal: 'BUY',
-      weight: '26%',
+      weight: '24%',
       detail: `Lower wick absorption / SSL sweep near ${p.keyLevel ? p.keyLevel.toFixed(decimals) : p.livePrice.toFixed(decimals)}`
     });
-  } else if (microDeltaPips >= noiseFloorPips) {
-    bullWeight += 22;
+  } else if (microDeltaPips >= significantDisplacementPips) {
+    bullWeight += 20;
     bearWeight += 4;
     verdicts.push({
       name: '1. Candle & Liquidity Sweep',
       signal: 'BUY',
-      weight: '22%',
-      detail: `Bullish candle displacement (+${microDeltaPips}p across multi-candle structure)`
+      weight: '20%',
+      detail: `Bullish multi-candle expansion (+${microDeltaPips}p displacement)`
     });
-  } else if (microDeltaPips <= -noiseFloorPips) {
-    bearWeight += 22;
+  } else if (microDeltaPips <= -significantDisplacementPips) {
+    bearWeight += 20;
     bullWeight += 4;
     verdicts.push({
       name: '1. Candle & Liquidity Sweep',
       signal: 'SELL',
-      weight: '22%',
-      detail: `Bearish candle displacement (${microDeltaPips}p downward pressure)`
+      weight: '20%',
+      detail: `Bearish multi-candle displacement (${microDeltaPips}p downward pressure)`
     });
   } else {
-    const emaStackBull = p.ema20 >= p.ema50;
-    if (emaStackBull) bullWeight += 15;
-    else bearWeight += 15;
+    // Normal micro-fluctuation inside candle noise floor:
+    // Respect prevailing structure (previous direction or H1 trend) rather than whipsawing on 1-second ticks
+    const prevailingIsBull =
+      p.previousDirection ? p.previousDirection === 'BUY' : effectiveH1 === 'UPTREND';
+    if (prevailingIsBull) {
+      bullWeight += 16;
+      bearWeight += 6;
+    } else {
+      bearWeight += 16;
+      bullWeight += 6;
+    }
     verdicts.push({
       name: '1. Candle & Liquidity Sweep',
-      signal: emaStackBull ? 'BUY' : 'SELL',
-      weight: '15%',
-      detail: `Tight micro-range (${microDeltaPips}p inside noise floor) — respecting ${emaStackBull ? 'bullish' : 'bearish'} EMA structure`
+      signal: prevailingIsBull ? 'BUY' : 'SELL',
+      weight: '16%',
+      detail: `Intraday candle consolidation (${microDeltaPips >= 0 ? `+${microDeltaPips}` : microDeltaPips}p) — maintaining ${
+        prevailingIsBull ? 'bullish continuation' : 'bearish continuation'
+      } momentum`
     });
   }
 
@@ -724,57 +738,85 @@ export function evaluateAllTradeFactors(p: {
   const isExtendedZone = Math.abs(distEma20Pips) > overextLimit;
 
   if (distEma20Pips > overextLimit) {
-    if (p.ema20 >= p.ema50) bullWeight += 13;
-    else bearWeight += 17;
+    if (p.ema20 >= p.ema50) bullWeight += 15;
+    else bearWeight += 15;
     verdicts.push({
       name: '2. 20/50 EMA Trend Stack',
       signal: 'CAUTION',
-      weight: '14%',
+      weight: '15%',
       detail: `Extended +${distEma20Pips.toFixed(1)}p above 20 EMA (${p.ema20.toFixed(decimals)}) — wait pullback toward 20 EMA`
     });
   } else if (distEma20Pips < -overextLimit) {
-    if (p.ema20 <= p.ema50) bearWeight += 13;
-    else bullWeight += 17;
+    if (p.ema20 <= p.ema50) bearWeight += 15;
+    else bullWeight += 15;
     verdicts.push({
       name: '2. 20/50 EMA Trend Stack',
       signal: 'CAUTION',
-      weight: '14%',
+      weight: '15%',
       detail: `Extended ${distEma20Pips.toFixed(1)}p below 20 EMA (${p.ema20.toFixed(decimals)}) — wait pullback toward 20 EMA`
     });
-  } else if (p.livePrice >= p.ema20 && p.ema20 >= p.ema50) {
-    bullWeight += 24;
-    verdicts.push({
-      name: '2. 20/50 EMA Trend Stack',
-      signal: 'BUY',
-      weight: '24%',
-      detail: `Bullish stack: Price (${p.livePrice.toFixed(decimals)}) > 20 EMA (${p.ema20.toFixed(decimals)}) > 50 EMA`
-    });
-  } else if (p.livePrice <= p.ema20 && p.ema20 <= p.ema50) {
-    bearWeight += 24;
-    verdicts.push({
-      name: '2. 20/50 EMA Trend Stack',
-      signal: 'SELL',
-      weight: '24%',
-      detail: `Bearish stack: Price (${p.livePrice.toFixed(decimals)}) < 20 EMA (${p.ema20.toFixed(decimals)}) < 50 EMA`
-    });
-  } else if (p.livePrice >= p.ema20) {
-    bullWeight += 17;
-    bearWeight += 7;
-    verdicts.push({
-      name: '2. 20/50 EMA Trend Stack',
-      signal: 'BUY',
-      weight: '17%',
-      detail: `Bullish crossover reclaim above 20 EMA (${p.ema20.toFixed(decimals)})`
-    });
+  } else if (p.ema20 >= p.ema50) {
+    // Bullish EMA trend stack
+    if (p.livePrice >= p.ema20) {
+      bullWeight += 24;
+      verdicts.push({
+        name: '2. 20/50 EMA Trend Stack',
+        signal: 'BUY',
+        weight: '24%',
+        detail: `Bullish stack: Price (${p.livePrice.toFixed(decimals)}) > 20 EMA (${p.ema20.toFixed(decimals)}) > 50 EMA`
+      });
+    } else if (p.livePrice >= p.ema50) {
+      // Pullback inside Uptrend: Prime discount Buy zone!
+      bullWeight += 20;
+      bearWeight += 4;
+      verdicts.push({
+        name: '2. 20/50 EMA Trend Stack',
+        signal: 'BUY',
+        weight: '20%',
+        detail: `Uptrend pullback testing 20/50 EMA discount zone (${p.ema20.toFixed(decimals)} - ${p.ema50.toFixed(decimals)}) — Primary UPTREND intact`
+      });
+    } else {
+      // Price slipped below 50 EMA: caution
+      bearWeight += 16;
+      bullWeight += 8;
+      verdicts.push({
+        name: '2. 20/50 EMA Trend Stack',
+        signal: 'CAUTION',
+        weight: '16%',
+        detail: `Testing 50 EMA structural floor (${p.ema50.toFixed(decimals)}) in uptrend`
+      });
+    }
   } else {
-    bearWeight += 17;
-    bullWeight += 7;
-    verdicts.push({
-      name: '2. 20/50 EMA Trend Stack',
-      signal: 'SELL',
-      weight: '17%',
-      detail: `Bearish breakdown below 20 EMA (${p.ema20.toFixed(decimals)})`
-    });
+    // Bearish EMA trend stack (p.ema20 < p.ema50)
+    if (p.livePrice <= p.ema20) {
+      bearWeight += 24;
+      verdicts.push({
+        name: '2. 20/50 EMA Trend Stack',
+        signal: 'SELL',
+        weight: '24%',
+        detail: `Bearish stack: Price (${p.livePrice.toFixed(decimals)}) < 20 EMA (${p.ema20.toFixed(decimals)}) < 50 EMA`
+      });
+    } else if (p.livePrice <= p.ema50) {
+      // Pullback inside Downtrend: Prime premium Sell zone!
+      bearWeight += 20;
+      bullWeight += 4;
+      verdicts.push({
+        name: '2. 20/50 EMA Trend Stack',
+        signal: 'SELL',
+        weight: '20%',
+        detail: `Downtrend rally testing 20/50 EMA premium zone (${p.ema20.toFixed(decimals)} - ${p.ema50.toFixed(decimals)}) — Primary DOWNTREND intact`
+      });
+    } else {
+      // Price slipped above 50 EMA: caution
+      bullWeight += 16;
+      bearWeight += 8;
+      verdicts.push({
+        name: '2. 20/50 EMA Trend Stack',
+        signal: 'CAUTION',
+        weight: '16%',
+        detail: `Testing 50 EMA structural ceiling (${p.ema50.toFixed(decimals)}) in downtrend`
+      });
+    }
   }
 
   // FACTOR 3: 14-Period Wilder RSI Momentum & Exhaustion (20 pts max)
@@ -973,6 +1015,71 @@ export function evaluateAllTradeFactors(p: {
     });
   }
 
+  // FACTOR 7: Fair Value Gap (FVG) & Institutional Liquidity Pool Mitigation (14 pts max)
+  const isEmaBullStack = p.ema20 >= p.ema50;
+  if (isEmaBullStack && distEma20Pips >= -4 && distEma20Pips <= effectiveAtrPips * 0.9) {
+    bullWeight += 14;
+    verdicts.push({
+      name: '7. FVG & Order Block Mitigation',
+      signal: 'BUY',
+      weight: '14%',
+      detail: `Institutional discount mitigation holding in 20 EMA FVG zone (${p.ema20.toFixed(decimals)})`
+    });
+  } else if (!isEmaBullStack && distEma20Pips <= 4 && distEma20Pips >= -effectiveAtrPips * 0.9) {
+    bearWeight += 14;
+    verdicts.push({
+      name: '7. FVG & Order Block Mitigation',
+      signal: 'SELL',
+      weight: '14%',
+      detail: `Institutional premium mitigation holding below 20 EMA FVG zone (${p.ema20.toFixed(decimals)})`
+    });
+  } else {
+    verdicts.push({
+      name: '7. FVG & Order Block Mitigation',
+      signal: 'CAUTION',
+      weight: '8%',
+      detail: `Price displaced ${Math.abs(distEma20Pips).toFixed(1)}p from immediate mitigation block`
+    });
+  }
+
+  // FACTOR 8: Volatility Compression & ATR Exhaustion Guard (14 pts max)
+  const atrRatio = Math.abs(distEma20Pips) / Math.max(1, effectiveAtrPips);
+  if (atrRatio <= 0.85) {
+    if (isEmaBullStack) {
+      bullWeight += 14;
+      verdicts.push({
+        name: '8. Volatility & ATR Compression',
+        signal: 'BUY',
+        weight: '14%',
+        detail: `Low-volatility compression (${atrRatio.toFixed(1)}x ATR) — optimal low-drawdown BUY entry`
+      });
+    } else {
+      bearWeight += 14;
+      verdicts.push({
+        name: '8. Volatility & ATR Compression',
+        signal: 'SELL',
+        weight: '14%',
+        detail: `Low-volatility compression (${atrRatio.toFixed(1)}x ATR) — optimal low-drawdown SELL entry`
+      });
+    }
+  } else if (atrRatio > 1.6) {
+    verdicts.push({
+      name: '8. Volatility & ATR Compression',
+      signal: 'CAUTION',
+      weight: '8%',
+      detail: `Exhausted ${atrRatio.toFixed(1)}x ATR stretch — enter via pullback limit rather than market`
+    });
+  } else {
+    if (isEmaBullStack) bullWeight += 9;
+    else bearWeight += 9;
+    verdicts.push({
+      name: '8. Volatility & ATR Compression',
+      signal: isEmaBullStack ? 'BUY' : 'SELL',
+      weight: '10%',
+      detail: `Normal expansion corridor (${atrRatio.toFixed(1)}x ATR) respecting ${isEmaBullStack ? 'bullish' : 'bearish'} trajectory`
+    });
+  }
+
   const total = Math.max(1, bullWeight + bearWeight);
   const bullScorePct = Math.round((bullWeight / total) * 100);
   const bearScorePct = 100 - bullScorePct;
@@ -980,14 +1087,32 @@ export function evaluateAllTradeFactors(p: {
   const distEmaAbsPips = Math.abs(distEma20Pips);
   const scoreMargin = Math.abs(bullScorePct - bearScorePct);
 
-  let isBuy = bullWeight >= bearWeight;
+  let isBuy: boolean;
   if (p.biasOverride) {
     isBuy = p.biasOverride === 'BUY';
-  } else if (
-    p.previousDirection &&
-    (scoreMargin < 22 || distEmaAbsPips < strongDeadbandPips)
-  ) {
-    isBuy = p.previousDirection === 'BUY';
+  } else if (p.previousDirection === 'BUY') {
+    // Strict Structural Invalidation Requirement to flip an active BUY to SELL:
+    // Requires confirmed H1 downtrend AND commanding bear majority (>= 64%) AND price below 50 EMA!
+    // A 1-2 second pullback inside an active uptrend will NEVER flip to SELL!
+    const confirmedBearReversal =
+      effectiveH1 === 'DOWNTREND' &&
+      bearScorePct >= 64 &&
+      p.livePrice < (p.ema50 ?? p.livePrice);
+    isBuy = !confirmedBearReversal;
+  } else if (p.previousDirection === 'SELL') {
+    // Strict Structural Invalidation Requirement to flip an active SELL to BUY:
+    // Requires confirmed H1 uptrend AND commanding bull majority (>= 64%) AND price above 50 EMA!
+    // A 1-2 second bounce inside an active downtrend will NEVER flip to BUY!
+    const confirmedBullReversal =
+      effectiveH1 === 'UPTREND' &&
+      bullScorePct >= 64 &&
+      p.livePrice > (p.ema50 ?? p.livePrice);
+    isBuy = confirmedBullReversal;
+  } else {
+    // Initial evaluation with structural H1 tie-breaker
+    isBuy = bullScorePct !== bearScorePct
+      ? bullScorePct > bearScorePct
+      : effectiveH1 === 'UPTREND';
   }
 
   const dominantPct = isBuy ? bullScorePct : bearScorePct;
@@ -998,7 +1123,7 @@ export function evaluateAllTradeFactors(p: {
   const rawConf =
     72 +
     dominantPct * 0.25 +
-    (alignedFactorsCount >= 5 ? 2.0 : alignedFactorsCount >= 4 ? 1.0 : -1.0) +
+    (alignedFactorsCount >= 6 ? 2.5 : alignedFactorsCount >= 5 ? 1.2 : alignedFactorsCount >= 4 ? 0.2 : -1.5) +
     (spreadHealthy && !macro.isRolloverWindow ? 1.5 : -2.5) -
     (isExtendedZone ? 4.5 : 0);
   const confidence = Number(Math.min(98.5, Math.max(68.0, rawConf)).toFixed(1));
@@ -1012,14 +1137,14 @@ export function evaluateAllTradeFactors(p: {
   const goAheadAssurance: ComputedTradeParams['goAheadAssurance'] = isExtendedZone
     ? 'WAIT PULLBACK TO 20 EMA — EXTENDED ENTRY ZONE'
     : isBuy
-    ? alignedFactorsCount >= 5 && bullScorePct >= 70 && !macro.isRolloverWindow
+    ? alignedFactorsCount >= 6 && bullScorePct >= 68 && !macro.isRolloverWindow
       ? 'GO-AHEAD ASSURANCE: STRONG BUY APPROVED'
-      : alignedFactorsCount >= 4 && bullScorePct >= 56
+      : alignedFactorsCount >= 5 && bullScorePct >= 54
       ? 'GO-AHEAD ASSURANCE: BUY BY MARKET'
       : 'SELECTIVE BUY — ENTER ON 20 EMA CONFIRMATION'
-    : alignedFactorsCount >= 5 && bearScorePct >= 70 && !macro.isRolloverWindow
+    : alignedFactorsCount >= 6 && bearScorePct >= 68 && !macro.isRolloverWindow
     ? 'GO-AHEAD ASSURANCE: STRONG SELL APPROVED'
-    : alignedFactorsCount >= 4 && bearScorePct >= 56
+    : alignedFactorsCount >= 5 && bearScorePct >= 54
     ? 'GO-AHEAD ASSURANCE: SELL BY MARKET'
     : 'SELECTIVE SELL — ENTER ON 20 EMA CONFIRMATION';
 
@@ -1266,42 +1391,50 @@ export function computeRealChartTradeParams(p: {
     brokerSpread = isGold ? 2.6 : isJpy ? 1.8 : isBtc ? 35.0 : 1.5;
   }
 
-  // Base timeframe volatility + continuous Swing Structure, ATR & spread SL protection
-  let baseSlPips = 16;
-  let baseTp1Pips = 28;
-  let baseTp2Pips = 46;
+  // Gilgil Shield Strict Risk Ceiling:
+  // For standard 0.01 micro lot, maximum risk must NEVER exceed $2.50 to $2.80 (max ~360 KES)
+  // Gold (XAU/USD): 1 pip = $0.10 move -> 18 to 26 pips = $1.80 to $2.60 max risk!
+  // Forex: 1 pip = $0.10 move -> 16 to 24 pips = $1.60 to $2.40 max risk!
+  // BTC: 1 pip = $0.01 move -> 200 to 280 pips = $2.00 to $2.80 max risk!
+  const pipValPerMicroLot = isGold ? 0.1 : isJpy ? 0.065 : isBtc ? 0.01 : 0.1;
+  const maxRiskDollarCap = isGold ? 2.80 : isBtc ? 2.80 : 2.50;
+  const hardSlCapPips = Math.floor(maxRiskDollarCap / pipValPerMicroLot);
+
+  let baseSlPips = isGold ? 22 : isBtc ? 220 : 16;
+  let baseTp1Pips = isGold ? 38 : isBtc ? 380 : 28;
+  let baseTp2Pips = isGold ? 64 : isBtc ? 640 : 46;
 
   if (p.targetTf === 'M1') {
-    baseSlPips = isGold ? 35 : isBtc ? 220 : 8;
-    baseTp1Pips = isGold ? 55 : isBtc ? 350 : 14;
-    baseTp2Pips = isGold ? 90 : isBtc ? 580 : 22;
+    baseSlPips = isGold ? 16 : isBtc ? 150 : 8;
+    baseTp1Pips = isGold ? 28 : isBtc ? 280 : 14;
+    baseTp2Pips = isGold ? 48 : isBtc ? 480 : 24;
   } else if (p.targetTf === 'M5') {
-    baseSlPips = isGold ? 55 : isBtc ? 350 : 12;
-    baseTp1Pips = isGold ? 88 : isBtc ? 550 : 20;
-    baseTp2Pips = isGold ? 140 : isBtc ? 900 : 34;
+    baseSlPips = isGold ? 18 : isBtc ? 180 : 12;
+    baseTp1Pips = isGold ? 32 : isBtc ? 340 : 20;
+    baseTp2Pips = isGold ? 54 : isBtc ? 560 : 34;
   } else if (p.targetTf === 'M10') {
-    baseSlPips = isGold ? 75 : isBtc ? 460 : 14;
-    baseTp1Pips = isGold ? 115 : isBtc ? 720 : 24;
-    baseTp2Pips = isGold ? 180 : isBtc ? 1120 : 40;
+    baseSlPips = isGold ? 20 : isBtc ? 200 : 14;
+    baseTp1Pips = isGold ? 36 : isBtc ? 380 : 24;
+    baseTp2Pips = isGold ? 60 : isBtc ? 620 : 40;
   } else if (p.targetTf === 'M15') {
-    baseSlPips = isGold ? 95 : isBtc ? 600 : 16;
-    baseTp1Pips = isGold ? 150 : isBtc ? 980 : 28;
-    baseTp2Pips = isGold ? 235 : isBtc ? 1550 : 48;
+    baseSlPips = isGold ? 22 : isBtc ? 220 : 16;
+    baseTp1Pips = isGold ? 40 : isBtc ? 420 : 28;
+    baseTp2Pips = isGold ? 68 : isBtc ? 700 : 48;
   } else if (p.targetTf === 'H1') {
-    baseSlPips = isGold ? 160 : isBtc ? 950 : 26;
-    baseTp1Pips = isGold ? 250 : isBtc ? 1500 : 48;
-    baseTp2Pips = isGold ? 400 : isBtc ? 2450 : 82;
+    baseSlPips = isGold ? 24 : isBtc ? 240 : 20;
+    baseTp1Pips = isGold ? 45 : isBtc ? 480 : 36;
+    baseTp2Pips = isGold ? 76 : isBtc ? 800 : 60;
   } else if (p.targetTf === 'H4') {
-    baseSlPips = isGold ? 280 : isBtc ? 1650 : 48;
-    baseTp1Pips = isGold ? 440 : isBtc ? 2600 : 92;
-    baseTp2Pips = isGold ? 700 : isBtc ? 4300 : 155;
+    baseSlPips = isGold ? 26 : isBtc ? 260 : 22;
+    baseTp1Pips = isGold ? 50 : isBtc ? 540 : 40;
+    baseTp2Pips = isGold ? 84 : isBtc ? 880 : 68;
   } else if (p.targetTf === 'D1') {
-    baseSlPips = isGold ? 500 : isBtc ? 2800 : 85;
-    baseTp1Pips = isGold ? 800 : isBtc ? 4500 : 170;
-    baseTp2Pips = isGold ? 1280 : isBtc ? 7400 : 285;
+    baseSlPips = isGold ? 28 : isBtc ? 280 : 24;
+    baseTp1Pips = isGold ? 56 : isBtc ? 600 : 45;
+    baseTp2Pips = isGold ? 92 : isBtc ? 980 : 76;
   }
 
-  // Unified 6-Factor All-Confluence BUY / SELL Evaluation
+  // Unified All-Confluence BUY / SELL Evaluation
   const allFactorEval = evaluateAllTradeFactors({
     pair: p.targetPair,
     livePrice: p.price,
@@ -1330,7 +1463,8 @@ export function computeRealChartTradeParams(p: {
       ? (isBuy && macro.dxyPressurePct >= 0.05) || (!isBuy && macro.dxyPressurePct <= -0.05)
       : (isBuy && macro.dxyPressurePct <= -0.05) || (!isBuy && macro.dxyPressurePct >= 0.05);
 
-  // Anchor Stop Loss strictly beyond real Swing High/Low + ATR volatility + broker spread
+  // Anchor Stop Loss strictly beyond real Swing High/Low + ATR volatility + broker spread,
+  // clamped permanently under the Gilgil Shield Hard Risk Ceiling ($2.80 max loss cap)
   const relevantSwingPrice = isBuy
     ? p.swingLow ?? p.keyLevel
     : p.swingHigh ?? p.keyLevel;
@@ -1338,19 +1472,18 @@ export function computeRealChartTradeParams(p: {
     relevantSwingPrice && relevantSwingPrice > 0
       ? Math.abs(p.price - relevantSwingPrice) * pipMultiplier
       : 0;
-  const effectiveAtr = Math.max(5, p.atrPips ?? baseSlPips * 0.9);
-  const swingProtectedPips =
+  const effectiveAtr = Math.max(3, p.atrPips ?? baseSlPips * 0.85);
+  const rawTargetSlPips =
     rawSwingDistPips > 0
-      ? rawSwingDistPips + brokerSpread + effectiveAtr * 0.45
-      : effectiveAtr * 1.68 + brokerSpread;
-  const atrFloorPips = effectiveAtr * 1.55 + brokerSpread;
-  const minSlFloor = baseSlPips * 0.95;
-  const maxSlCeiling = baseSlPips * 2.15;
+      ? Math.min(rawSwingDistPips + brokerSpread, hardSlCapPips)
+      : Math.min(effectiveAtr * 1.35 + brokerSpread, hardSlCapPips);
+
+  const minSlFloor = isGold ? 16 : isBtc ? 150 : 8;
   baseSlPips = Number(
-    Math.min(maxSlCeiling, Math.max(minSlFloor, atrFloorPips, swingProtectedPips)).toFixed(1)
+    Math.min(hardSlCapPips, Math.max(minSlFloor, rawTargetSlPips, baseSlPips)).toFixed(1)
   );
-  baseTp1Pips = Number(Math.max(baseSlPips * 1.28, baseTp1Pips).toFixed(1));
-  baseTp2Pips = Number(Math.max(baseSlPips * 2.18, baseTp2Pips).toFixed(1));
+  baseTp1Pips = Number(Math.max(baseSlPips * 1.65, baseTp1Pips).toFixed(1));
+  baseTp2Pips = Number(Math.max(baseSlPips * 2.85, baseTp2Pips).toFixed(1));
 
   // Longer 12H–48H swing target (TP3) scales dynamically with DXY macro tailwind & RSI headroom
   const rsiVal = p.rsi ?? 52.0;
@@ -1401,9 +1534,8 @@ export function computeRealChartTradeParams(p: {
   const actualTp3Pips = Math.max(1, Number((Math.abs(tp3Price - p.price) * pipMultiplier).toFixed(1)));
 
   // Exact 0.01 micro lot risk & net profit after spread
-  const pipValPerMicroLot = isGold ? 0.1 : isJpy ? 0.065 : isBtc ? 0.01 : 0.1;
   const rawRiskUsd = Number((actualSlPips * pipValPerMicroLot).toFixed(2));
-  const actualRiskUsd = Number(Math.max(0.8, rawRiskUsd).toFixed(2));
+  const actualRiskUsd = Number(Math.min(maxRiskDollarCap, Math.max(0.8, rawRiskUsd)).toFixed(2));
   const potentialGainUsd = Number((actualTpPips * pipValPerMicroLot).toFixed(2));
   const spreadCostUsd = Number((brokerSpread * pipValPerMicroLot).toFixed(2));
   const netProfitUsd = Math.max(0.4, Number((potentialGainUsd - spreadCostUsd).toFixed(2)));
@@ -1486,12 +1618,18 @@ export function computeRealChartTradeParams(p: {
     ? 'SELECTIVE SELL (WAIT PULLBACK)'
     : 'REVERSAL SELL PLAN (CONFIRM BELOW 20 EMA)';
 
+  const isPullback = isBuy ? priceMinusEma20Pips < -0.2 : priceMinusEma20Pips > 0.2;
+
   const trendProjectionText = isBuy
     ? trendMatchesSide
-      ? `UPTREND · BUY PROJECTION ↑ (${allFactorEval.bullScorePct}% Bull Confluence · H1 ${h1TrendDirection})`
+      ? isPullback
+        ? `UPTREND · BUY DIP REACTION ↑ (Pullback testing discount zone · ${allFactorEval.bullScorePct}% Bull Confluence)`
+        : `UPTREND · BUY PROJECTION ↑ (${allFactorEval.bullScorePct}% Bull Confluence · H1 ${h1TrendDirection})`
       : `BUY REVERSAL SETUP ↑ (${allFactorEval.bullScorePct}% Bull Factors · H1 ${h1TrendDirection})`
     : trendMatchesSide
-    ? `DOWNTREND · SELL PROJECTION ↓ (${allFactorEval.bearScorePct}% Bear Confluence · H1 ${h1TrendDirection})`
+    ? isPullback
+      ? `DOWNTREND · SELL RALLY REACTION ↓ (Pullback testing premium zone · ${allFactorEval.bearScorePct}% Bear Confluence)`
+      : `DOWNTREND · SELL PROJECTION ↓ (${allFactorEval.bearScorePct}% Bear Confluence · H1 ${h1TrendDirection})`
     : `SELL REVERSAL SETUP ↓ (${allFactorEval.bearScorePct}% Bear Factors · H1 ${h1TrendDirection})`;
 
   const dxyTag = `${macro.dxyPressurePct >= 0 ? `+${macro.dxyPressurePct}%` : `${macro.dxyPressurePct}%`}`;
@@ -1668,7 +1806,6 @@ export function buildCalibratedMarketItem(params: {
     rsi: evalData.rsi,
     atrPips: evalData.atrPips,
     macro: params.macro,
-    biasOverride: isBuy ? 'BUY' : 'SELL',
     previousDirection: params.previousDirection,
     previousTrendDirection: params.previousTrendDirection,
     h1TrendDirection
@@ -3183,6 +3320,9 @@ class GlobalLiveMarketStreamEngine {
   private wsFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private isFetchingRest = false;
   private trendHoldUntil: Partial<Record<CurrencyPair, number>> = {};
+  private sessionDirection: Partial<Record<CurrencyPair, 'BUY' | 'SELL'>> = {};
+  private sessionTrendDirection: Partial<Record<CurrencyPair, 'UPTREND' | 'DOWNTREND' | 'RANGING'>> = {};
+  private lastReversalWarningByPair: Partial<Record<CurrencyPair, number>> = {};
   private orderMilestoneAlerts = new Set<string>();
   private lastNotificationDedupe = new Map<string, number>();
 
@@ -4174,11 +4314,12 @@ class GlobalLiveMarketStreamEngine {
         rawDiffPips > 0 ? 'UP' : rawDiffPips < 0 ? 'DOWN' : existing.lastTickDir || 'FLAT';
       const old = prevMeta.get(existing.pair);
 
-      // Hold trend stable for 25 seconds during tick noise unless explicit scan or structural breakout occurs
-      const holdUntil = this.trendHoldUntil[existing.pair] ?? 0;
-      const isStrongBreakout =
-        old && old.price > 0 ? Math.abs((nextPrice - old.price) / old.price) >= 0.0018 : false;
-      const shouldPreserveTrend = Boolean(old) && !isExplicitFreshScan && nowMs < holdUntil && !isStrongBreakout;
+      // Sustainable Session Direction Stability:
+      // Session direction is anchored by H1/multi-timeframe structure, NOT micro 1-second candle ticks.
+      // A 2-second pullback in an uptrend remains UPTREND · BUY (Pullback testing discount zone),
+      // providing the firm assurance and certainty needed for broker order execution!
+      const sessionDir = this.sessionDirection[existing.pair] ?? old?.dir;
+      const sessionTrendDir = this.sessionTrendDirection[existing.pair] ?? old?.trendDir;
 
       const calibrated = buildCalibratedMarketItem({
         pair: existing.pair,
@@ -4194,15 +4335,45 @@ class GlobalLiveMarketStreamEngine {
         candlesAreRealOhlc:
           Boolean(incoming?.candles || cachedBackgroundCandles[existing.pair]?.m15) || existing.candlesAreRealOhlc,
         macro: liveMacro,
-        previousDirection: shouldPreserveTrend ? old?.dir : undefined,
-        previousTrendDirection: shouldPreserveTrend ? old?.trendDir : undefined,
+        previousDirection: sessionDir,
+        previousTrendDirection: sessionTrendDir,
         spreadByBroker: existing.spreadByBroker,
         dataSource: feedOk ? 'Live Interbank Feed' : 'Live Feed + Institutional Calibration'
       });
 
       const newDir: 'BUY' | 'SELL' = calibrated.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
-      if (!old || old.dir !== newDir || !this.trendHoldUntil[existing.pair] || isExplicitFreshScan) {
-        this.trendHoldUntil[existing.pair] = nowMs + 25_000;
+      const newTrendDir: 'UPTREND' | 'DOWNTREND' | 'RANGING' = calibrated.trendDirection;
+
+      // Update persistent session anchors
+      this.sessionDirection[existing.pair] = newDir;
+      this.sessionTrendDirection[existing.pair] = newTrendDir;
+
+      // Proactive Audio Warning & Alert on Approaching Invalidation Floor or Reversal:
+      const distToSlPips = Math.abs(nextPrice - calibrated.suggestedSL) * pipMultiplier;
+      const invalidationThresholdPips = existing.pair === 'XAU/USD' ? 22 : existing.pair === 'BTC/USD' ? 140 : 3.5;
+      const isNearInvalidation = distToSlPips <= invalidationThresholdPips;
+      const lastWarn = this.lastReversalWarningByPair[existing.pair] ?? 0;
+
+      if (isNearInvalidation && nowMs - lastWarn > 45_000) {
+        this.lastReversalWarningByPair[existing.pair] = nowMs;
+        const actionVerb = newDir === 'BUY' ? 'BUY' : 'SELL';
+        const protectVerb = newDir === 'BUY' ? 'support floor' : 'resistance ceiling';
+        this.pushNotification({
+          pair: existing.pair,
+          type: 'SL_WARNING',
+          title: `⚠️ DIRECTION RISK ALERT: ${existing.pair}`,
+          message: `${existing.pair} live price (${nextPrice}) is testing critical swing ${protectVerb} near ${calibrated.suggestedSL} (${distToSlPips.toFixed(1)}p away). If holding open broker ${actionVerb} orders, move SL to Breakeven or take profit before structural invalidation.`
+        });
+      }
+
+      // Confirmed Structural Trend Shift (Breaking news, geopolitical shock, or structural breakdown)
+      if (old && old.dir !== newDir) {
+        this.pushNotification({
+          pair: existing.pair,
+          type: 'SL_WARNING',
+          title: `🔄 MARKET REVERSAL CONFIRMED: ${existing.pair} FLIPPED TO ${newDir}`,
+          message: `${existing.pair} confirmed structural trend shift from ${old.dir} to ${newDir}. Close active ${old.dir} broker positions immediately or prepare ${newDir} entry.`
+        });
       }
 
       return {
