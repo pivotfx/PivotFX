@@ -53,7 +53,12 @@ export type CurrencyPair =
   | 'XAU/USD'
   | 'AUD/USD'
   | 'USD/CAD'
-  | 'BTC/USD';
+  | 'BTC/USD'
+  | 'ETH/USD'
+  | 'US30'
+  | 'NAS100'
+  | 'GER40'
+  | 'USOIL';
 
 export type Timeframe = 'M1' | 'M5' | 'M10' | 'M15' | 'H1' | 'H4' | 'D1';
 

@@ -153,13 +153,18 @@ export const Footer: React.FC<FooterProps> = ({
           </div>
         </div>
 
-        {/* Bottom Copyright */}
+        {/* Bottom Copyright & Ownership */}
         <div className="border-t border-slate-800 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-mono text-slate-500">
-          <div className="text-center sm:text-left">
-            © {new Date().getFullYear()} PivotFx — Prop Firm &amp; Forex Academy. All rights reserved.
+          <div className="text-center sm:text-left space-y-0.5">
+            <div>© {new Date().getFullYear()} PivotFx — Prop Firm &amp; Forex Academy. All rights reserved.</div>
+            <div className="text-[11px] text-slate-400">
+              Platform Architecture &amp; Ownership: <strong className="text-[#D4AF37]">Dennis.K.M</strong>
+            </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap justify-center">
             <span className="text-[#D4AF37]">Zero to Funded Trader</span>
+            <span aria-hidden="true">·</span>
+            <span className="text-slate-400">Dennis.K.M Prop Desk</span>
             <span aria-hidden="true">·</span>
             <span>Real-Time Quantitative Desk</span>
           </div>

@@ -22,6 +22,7 @@ interface LiveInteractiveCandleChartProps {
   stopLoss: number;
   tp1: number;
   tp2: number;
+  advisoryEntryPrice?: number;
   direction: 'BUY' | 'SELL';
   change24hPct: number;
   isLockedToCustom?: boolean;
@@ -40,6 +41,7 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   stopLoss,
   tp1,
   tp2,
+  advisoryEntryPrice,
   direction,
   change24hPct,
   isLockedToCustom = false,
@@ -48,6 +50,10 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
 }) => {
   const { decimals, pipMultiplier } = getPairSpecs(pair);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const [showEma20, setShowEma20] = useState<boolean>(true);
+  const [showEma50, setShowEma50] = useState<boolean>(true);
+  const [showValueZone, setShowValueZone] = useState<boolean>(true);
+  const [showAdvisoryLine, setShowAdvisoryLine] = useState<boolean>(true);
 
   const visibleCandles = candles.slice(-44);
   const closes = candles.map((c) => c.close);
@@ -80,6 +86,7 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
     stopLoss,
     tp1,
     tp2,
+    ...(advisoryEntryPrice && advisoryEntryPrice > 0 ? [advisoryEntryPrice] : [])
   ].filter((v) => !isNaN(v) && v > 0);
 
   const rawMin = allPrices.length ? Math.min(...allPrices) : livePrice * 0.995;
@@ -116,6 +123,21 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
 
   const ema20Points = buildPolyline(visEma20);
   const ema50Points = buildPolyline(visEma50);
+
+  // Dynamic 20/50 EMA Value Retracement Zone Cloud
+  const valueZonePolygon =
+    visEma20.length && visEma50.length
+      ? [
+          ...visEma20.map((v, i) => `${indexToX(i).toFixed(1)},${priceToY(v).toFixed(1)}`),
+          ...visEma50
+            .slice()
+            .reverse()
+            .map((v, i) => {
+              const origIdx = visEma50.length - 1 - i;
+              return `${indexToX(origIdx).toFixed(1)},${priceToY(v).toFixed(1)}`;
+            })
+        ].join(' ')
+      : '';
 
   const inspectedCandle =
     hoveredIdx !== null && visibleCandles[hoveredIdx]
@@ -163,18 +185,63 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
           </span>
         </div>
 
-        {/* OHLC Bar Readout & Legend */}
-        <div className="flex items-center gap-3 text-[11px] text-slate-300 flex-wrap">
+        {/* Interactive Indicator Toggles & Legend */}
+        <div className="flex items-center gap-2 text-[11px] text-slate-300 flex-wrap">
           {inspectedCandle && (
-            <div className="flex items-center gap-2 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+            <div className="flex items-center gap-2 bg-slate-950 px-2 py-0.5 rounded-lg border border-slate-800 text-[10px]">
               <span>O:{inspectedCandle.open.toFixed(decimals)}</span>
               <span className="text-emerald-400">H:{inspectedCandle.high.toFixed(decimals)}</span>
               <span className="text-red-400">L:{inspectedCandle.low.toFixed(decimals)}</span>
               <span className="text-white font-bold">C:{inspectedCandle.close.toFixed(decimals)}</span>
             </div>
           )}
-          <span className="text-cyan-400 font-bold">━ 20 EMA ({ema20.toFixed(decimals)})</span>
-          <span className="text-amber-400 font-bold">━ 50 EMA ({ema50.toFixed(decimals)})</span>
+          <button
+            type="button"
+            onClick={() => setShowEma20(!showEma20)}
+            className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
+              showEma20
+                ? 'bg-cyan-950/80 text-cyan-300 border-cyan-500/60'
+                : 'bg-slate-900 text-slate-500 border-slate-800'
+            }`}
+          >
+            20 EMA ({ema20.toFixed(decimals)})
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowEma50(!showEma50)}
+            className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
+              showEma50
+                ? 'bg-amber-950/80 text-amber-300 border-amber-500/60'
+                : 'bg-slate-900 text-slate-500 border-slate-800'
+            }`}
+          >
+            50 EMA ({ema50.toFixed(decimals)})
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowValueZone(!showValueZone)}
+            className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
+              showValueZone
+                ? 'bg-emerald-950/80 text-[#00C261] border-[#00C261]/60'
+                : 'bg-slate-900 text-slate-500 border-slate-800'
+            }`}
+            title="20/50 EMA Dynamic Retracement Cloud"
+          >
+            Value Cloud
+          </button>
+          {advisoryEntryPrice && advisoryEntryPrice > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAdvisoryLine(!showAdvisoryLine)}
+              className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
+                showAdvisoryLine
+                  ? 'bg-yellow-950/80 text-[#D4AF37] border-[#D4AF37]/60'
+                  : 'bg-slate-900 text-slate-500 border-slate-800'
+              }`}
+            >
+              1H Adv @ {advisoryEntryPrice.toFixed(decimals)}
+            </button>
+          )}
         </div>
       </div>
 
@@ -211,8 +278,17 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
             );
           })}
 
+          {/* 20/50 EMA Dynamic Value Zone Cloud (Pullback Retracement Zone) */}
+          {showValueZone && valueZonePolygon && (
+            <polygon
+              points={valueZonePolygon}
+              fill="rgba(212,175,55,0.08)"
+              stroke="none"
+            />
+          )}
+
           {/* 50 EMA Baseline Curve */}
-          {ema50Points && (
+          {showEma50 && ema50Points && (
             <polyline
               fill="none"
               stroke="#F59E0B"
@@ -223,13 +299,48 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
           )}
 
           {/* 20 EMA Dynamic Curve */}
-          {ema20Points && (
+          {showEma20 && ema20Points && (
             <polyline
               fill="none"
               stroke="#22D3EE"
               strokeWidth="2"
               points={ema20Points}
             />
+          )}
+
+          {/* 1H Advisory Pullback Limit Entry Ray */}
+          {showAdvisoryLine && advisoryEntryPrice && advisoryEntryPrice > 0 && (
+            <g key="advisory-entry-line">
+              <line
+                x1={padLeft}
+                y1={priceToY(advisoryEntryPrice)}
+                x2={svgWidth - padRight}
+                y2={priceToY(advisoryEntryPrice)}
+                stroke="#D4AF37"
+                strokeWidth="1.5"
+                strokeDasharray="4 3"
+              />
+              <rect
+                x={svgWidth - padRight + 3}
+                y={priceToY(advisoryEntryPrice) - 8}
+                width={padRight - 6}
+                height={16}
+                rx={4}
+                fill="#271E05"
+                stroke="#D4AF37"
+                strokeWidth="0.8"
+              />
+              <text
+                x={svgWidth - padRight + 7}
+                y={priceToY(advisoryEntryPrice) + 3}
+                fill="#D4AF37"
+                fontSize="9"
+                fontWeight="bold"
+                fontFamily="monospace"
+              >
+                ADV {advisoryEntryPrice.toFixed(decimals)}
+              </text>
+            </g>
           )}
 
           {/* Target & Stop Loss Horizontal Price Lines */}

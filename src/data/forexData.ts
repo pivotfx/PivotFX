@@ -125,6 +125,11 @@ export const PAIRS_PRESETS: Record<CurrencyPair, { defaultPrice: number; pipDeci
   'AUD/USD': { defaultPrice: 0.70151, pipDecimals: 5, pipValueKes: 130 },
   'USD/CAD': { defaultPrice: 1.39350, pipDecimals: 5, pipValueKes: 120 },
   'BTC/USD': { defaultPrice: 80491.43, pipDecimals: 2, pipValueKes: 130 },
+  'ETH/USD': { defaultPrice: 2845.50, pipDecimals: 2, pipValueKes: 130 },
+  'US30': { defaultPrice: 43850.0, pipDecimals: 1, pipValueKes: 130 },
+  'NAS100': { defaultPrice: 20950.0, pipDecimals: 1, pipValueKes: 130 },
+  'GER40': { defaultPrice: 19420.0, pipDecimals: 1, pipValueKes: 130 },
+  'USOIL': { defaultPrice: 71.45, pipDecimals: 2, pipValueKes: 130 },
 };
 
 // Gilgil Historical Case Studies (Calibrated to Contemporary Market Benchmarks)

@@ -484,6 +484,54 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
                       </span>
                     </div>
 
+                    {/* 1-Click Profit-Lock Assistant for Running Profitable Trades */}
+                    {metrics.netProfitUsd >= 0.5 && (
+                      <div className="p-3 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-[#0B1525] to-emerald-950/90 border border-[#00C261]/80 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs shadow-[0_0_20px_rgba(0,194,97,0.25)]">
+                        <div className="flex items-center gap-2.5">
+                          <span className="relative flex h-3 w-3 shrink-0">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00C261] opacity-75" />
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-[#00C261]" />
+                          </span>
+                          <div>
+                            <span className="font-black text-[#00C261] block text-sm">
+                              TRADE IN PROFIT: +${metrics.netProfitUsd.toFixed(2)} (+{metrics.floatingPips} pips)
+                            </span>
+                            <span className="text-[11px] text-slate-300">
+                              Institutional Edge: Lock your profit into MT4/MT5 now so this winning trade cannot lose!
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleApplySmartAction(ord.pair, 'LOCK_BREAKEVEN')}
+                            className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/50 font-bold text-xs transition"
+                          >
+                            1. Lock Breakeven ($0 Risk)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleApplySmartAction(ord.pair, 'LOCK_PROFIT_55')}
+                            className="px-3 py-1.5 rounded-xl bg-[#00C261] hover:bg-emerald-400 text-black font-black text-xs shadow-md transition"
+                          >
+                            2. Lock +55% (+$${(metrics.netProfitUsd * 0.55).toFixed(2)})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => copyValue(String(ord.stopLoss), `brk-sl-${ord.id}`)}
+                            className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 font-bold text-xs inline-flex items-center gap-1.5 transition"
+                          >
+                            {copiedKey === `brk-sl-${ord.id}` ? (
+                              <><Check className="w-3.5 h-3.5 text-[#00C261]" /><span>SL Copied!</span></>
+                            ) : (
+                              <><Copy className="w-3.5 h-3.5 text-[#D4AF37]" /><span>Copy SL for MT4</span></>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="w-full h-3 rounded-full bg-slate-950 overflow-hidden border border-slate-800">
                       <div
                         className={`h-full transition-all duration-300 ${
