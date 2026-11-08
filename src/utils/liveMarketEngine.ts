@@ -2115,16 +2115,16 @@ export function evaluateOrderTrendSustainability(
 ): TrendSustainabilityVerdict {
   const isH1Aligned = computed.h1TrendDirection === (computed.direction === 'BUY' ? 'UPTREND' : 'DOWNTREND');
   const factorPct = Math.round((computed.alignedFactorsCount / Math.max(1, computed.totalFactorsCount)) * 100);
-  const mtfGrade = computed.mtfAlignment?.grade || 'GRADE_B';
+  const mtfTier = computed.mtfAlignment?.tierGrade || 'GRADE B (72% EDGE)';
 
-  if (isH1Aligned && factorPct >= 75 && (mtfGrade === 'GRADE_A+' || mtfGrade === 'GRADE_A')) {
+  if (isH1Aligned && factorPct >= 75 && (mtfTier.includes('GRADE A+') || mtfTier.includes('GRADE A'))) {
     const integrity = Math.min(96, Math.max(88, computed.confidence));
     return {
       status: 'HIGH_SUSTAINABLE',
       integrityPct: integrity,
       badge: `HIGHLY SUSTAINABLE (${integrity}% INTEGRITY)`,
       headline: `Strong ${computed.direction} Trajectory Locked`,
-      structuralReason: `1H & H4 institutional structure aligned above/below 50 EMA. Low whipsaw risk across ${computed.timeHorizon || '12H'} horizon.`,
+      structuralReason: `1H & H4 institutional structure aligned above/below 50 EMA. Low whipsaw risk across 12H horizon.`,
       themeColor: '#00C261'
     };
   }

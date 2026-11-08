@@ -18,8 +18,20 @@ import {
   EntryMomentVerdict,
   TrendSustainabilityVerdict
 } from '../../utils/liveMarketEngine';
+import { EntryConfirmationController } from './EntryConfirmationController';
 import { LiveInteractiveCandleChart } from './LiveInteractiveCandleChart';
 import { ActiveMarketOrderPanel } from './ActiveMarketOrderPanel';
+import { ConfluenceMatrixModal } from '../prop/ConfluenceMatrixModal';
+import { PropDrawdownGuardModal } from '../prop/PropDrawdownGuardModal';
+import { NewsGuardModal } from '../prop/NewsGuardModal';
+import { PropTradingJournalModal } from '../prop/PropTradingJournalModal';
+import { audioAlertEngine } from '../../utils/audioAlerts';
+import {
+  getStoredJournalTrades,
+  getStoredPropAccount,
+  computeConfluenceMatrix
+} from '../../utils/propDeskStorage';
+import { JournalTrade, PropAccountConfig } from '../../types/propDesk';
 import {
   RefreshCw,
   Sparkles,
@@ -45,7 +57,11 @@ import {
   ChevronDown,
   ChevronUp,
   Lock,
-  Info
+  Info,
+  BookOpen,
+  Volume2,
+  VolumeX,
+  Radio
 } from 'lucide-react';
 
 export type { MarketScanData };
@@ -102,8 +118,20 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
   const [scanBanner, setScanBanner] = useState<string | null>(null);
   const [copiedCardPair, setCopiedCardPair] = useState<string | null>(null);
   const [copiedEa, setCopiedEa] = useState(false);
-  const [showEntryTimingModalPair, setShowEntryTimingModalPair] = useState<CurrencyPair | null>(null);
-  const [showSustainabilityModalPair, setShowSustainabilityModalPair] = useState<CurrencyPair | null>(null);
+
+  // Institutional Prop Desk Modules
+  const [showConfluenceModal, setShowConfluenceModal] = useState(false);
+  const [showDrawdownModal, setShowDrawdownModal] = useState(false);
+  const [showNewsModal, setShowNewsModal] = useState(false);
+  const [showJournalModal, setShowJournalModal] = useState(false);
+  const [propAccount, setPropAccount] = useState<PropAccountConfig>(() => getStoredPropAccount());
+  const [journalTrades, setJournalTrades] = useState<JournalTrade[]>(() => getStoredJournalTrades());
+  const [isAudioActive, setIsAudioActive] = useState<boolean>(() => audioAlertEngine.isEnabled());
+
+  const handleToggleSound = () => {
+    const nextState = audioAlertEngine.toggle();
+    setIsAudioActive(nextState);
+  };
 
   const handleQuickCopyValue = (val: string | number, key: string) => {
     try {
@@ -303,12 +331,97 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
     return getCurrentMacroContext(pctMap);
   })();
 
+  const confluenceItems = (() => {
+    const trends: Record<string, 'BUY' | 'SELL' | 'NEUTRAL'> = {};
+    markets.forEach((m) => {
+      trends[m.pair] = m.h1TrendDirection === 'UPTREND' || m.change24hPct >= 0 ? 'BUY' : 'SELL';
+    });
+    return computeConfluenceMatrix(trends);
+  })();
+
   const topLeader = filteredMarkets[0] || markets[0];
   const focusedMarket = selectedPair ? markets.find((m) => m.pair === selectedPair) || null : null;
   const TIMEFRAME_CHOICES: Timeframe[] = ['M1', 'M5', 'M10', 'M15', 'H1', 'H4', 'D1'];
 
   return (
     <div className="space-y-6">
+      {/* INSTITUTIONAL PROP DESK TOOLBAR */}
+      <div className="p-3.5 rounded-2xl bg-gradient-to-r from-[#0d1424] via-[#090e1a] to-[#0d1424] border border-amber-500/30 flex flex-wrap items-center justify-between gap-3 shadow-xl">
+        <div className="flex items-center space-x-2.5">
+          <span className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-bold font-mono uppercase tracking-wider flex items-center space-x-1.5">
+            <Award className="w-3.5 h-3.5 text-amber-400" />
+            <span>Dennis.K.M Prop Desk Suite</span>
+          </span>
+          <span className="text-[10px] text-slate-400 font-mono hidden md:inline">
+            Risk Model: 0.01 Micro Lot ($2 Max Risk)
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Confluence Matrix Button */}
+          <button
+            type="button"
+            onClick={() => setShowConfluenceModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-mono font-bold flex items-center space-x-1.5 transition active:scale-95"
+            title="Open Multi-Timeframe M5/M15/H1/H4 Confluence Grid"
+          >
+            <BarChart3 className="w-3.5 h-3.5 text-amber-400" />
+            <span>4-TF Confluence</span>
+          </button>
+
+          {/* Drawdown Guard Button */}
+          <button
+            type="button"
+            onClick={() => setShowDrawdownModal(true)}
+            className={`px-3 py-1.5 rounded-xl border text-xs font-mono font-bold flex items-center space-x-1.5 transition active:scale-95 ${
+              propAccount.isCircuitBreakerTripped
+                ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 animate-pulse'
+                : 'bg-slate-900 hover:bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+            }`}
+            title="Open Prop Firm Drawdown Meter & Circuit Breaker"
+          >
+            <Shield className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Drawdown Guard (${(propAccount.accountSize / 1000).toFixed(0)}K)</span>
+          </button>
+
+          {/* News Guard Button */}
+          <button
+            type="button"
+            onClick={() => setShowNewsModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-mono font-bold flex items-center space-x-1.5 transition active:scale-95"
+            title="High-Impact Red Folder Economic Calendar"
+          >
+            <Radio className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+            <span>News Guard</span>
+          </button>
+
+          {/* Prop Journal Button */}
+          <button
+            type="button"
+            onClick={() => setShowJournalModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-mono font-bold flex items-center space-x-1.5 transition active:scale-95"
+            title="Open Prop Trade Journal & Win Rate Analytics"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Prop Journal ({journalTrades.length})</span>
+          </button>
+
+          {/* Audio Chime Master Toggle */}
+          <button
+            type="button"
+            onClick={handleToggleSound}
+            className={`p-1.5 rounded-xl border transition ${
+              isAudioActive
+                ? 'bg-amber-500/20 text-amber-400 border-amber-500/40 hover:bg-amber-500/30'
+                : 'bg-slate-900 text-slate-500 border-slate-800 hover:text-slate-300'
+            }`}
+            title={isAudioActive ? 'Web Audio Chimes Active (Click to Mute)' : 'Web Audio Chimes Muted (Click to Unmute)'}
+          >
+            {isAudioActive ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+
       {/* 1. TOP SPEED SCANNER HEADER: LIVE SYNC + ALL-MARKET, 1H TREND-LOCK & DEEP AI SCAN BUTTONS */}
       <div className="p-5 sm:p-6 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
         <div className="space-y-1.5">
@@ -1007,254 +1120,18 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                       </div>
                     </div>
 
-                    {/* PRE-EXECUTION ADVISORY: ENTRY TIMING CONFIRMATION & TRAJECTORY SUSTAINABILITY */}
-                    {(() => {
-                      const entryMoment = evaluateOrderEntryMoment(focusedMarket.pair, computed, focusedMarket.price, kenyaTiming);
-                      const sustainability = evaluateOrderTrendSustainability(computed);
-                      const isEntryModalOpen = showEntryTimingModalPair === focusedMarket.pair;
-                      const isSustainModalOpen = showSustainabilityModalPair === focusedMarket.pair;
-
-                      return (
-                        <div className="space-y-2.5 pt-2 border-t border-slate-800/80">
-                          {/* 2 Action Buttons below Copy SL/TP */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                            {/* BUTTON 1: Entry Moment Confirmation */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowEntryTimingModalPair(isEntryModalOpen ? null : focusedMarket.pair);
-                                if (isSustainModalOpen) setShowSustainabilityModalPair(null);
-                              }}
-                              className={`p-3 rounded-2xl border text-left transition flex items-start justify-between gap-3 ${
-                                entryMoment.status === 'PRIME_NOW'
-                                  ? 'bg-emerald-950/40 border-[#00C261]/60 hover:bg-emerald-900/40 hover:border-[#00C261]'
-                                  : entryMoment.status === 'WAIT_PULLBACK'
-                                  ? 'bg-amber-950/40 border-amber-500/60 hover:bg-amber-900/40 hover:border-amber-400'
-                                  : 'bg-red-950/40 border-red-500/60 hover:bg-red-900/40 hover:border-red-400'
-                              }`}
-                            >
-                              <div className="space-y-1 min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  {entryMoment.status === 'PRIME_NOW' ? (
-                                    <CheckCircle2 className="w-4 h-4 text-[#00C261] shrink-0" />
-                                  ) : entryMoment.status === 'WAIT_PULLBACK' ? (
-                                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                                  ) : (
-                                    <Lock className="w-4 h-4 text-red-400 shrink-0" />
-                                  )}
-                                  <span
-                                    className="text-[11px] font-mono font-bold uppercase tracking-wider truncate"
-                                    style={{ color: entryMoment.themeColor }}
-                                  >
-                                    {entryMoment.status === 'PRIME_NOW'
-                                      ? 'ENTRY TIMING: PRIME MOMENT ✓'
-                                      : entryMoment.status === 'WAIT_PULLBACK'
-                                      ? `WAIT PULLBACK: ${entryMoment.advisoryPrice}`
-                                      : 'MARKET CLOSED · DO NOT ENTER'}
-                                  </span>
-                                </div>
-                                <p className="text-xs text-white font-medium leading-snug line-clamp-1">
-                                  {entryMoment.headline}
-                                </p>
-                                <p className="text-[10px] text-slate-300 font-mono flex items-center gap-1">
-                                  <span>{isEntryModalOpen ? 'Hide Entry Audit' : 'Confirm Right Moment to Enter Order'}</span>
-                                  <span className="text-[#D4AF37]">→</span>
-                                </p>
-                              </div>
-                              <div className="shrink-0 text-right">
-                                <span
-                                  className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase inline-block font-mono"
-                                  style={{
-                                    backgroundColor: `${entryMoment.themeColor}22`,
-                                    color: entryMoment.themeColor,
-                                    border: `1px solid ${entryMoment.themeColor}55`
-                                  }}
-                                >
-                                  {entryMoment.status === 'PRIME_NOW'
-                                    ? 'Safe to Copy SL/TP'
-                                    : entryMoment.status === 'WAIT_PULLBACK'
-                                    ? `Save ${entryMoment.discountPips}p`
-                                    : 'Session Halt'}
-                                </span>
-                                <div className="mt-1 text-slate-400 text-xs flex justify-end">
-                                  {isEntryModalOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                                </div>
-                              </div>
-                            </button>
-
-                            {/* BUTTON 2: Trajectory Sustainability Check */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowSustainabilityModalPair(isSustainModalOpen ? null : focusedMarket.pair);
-                                if (isEntryModalOpen) setShowEntryTimingModalPair(null);
-                              }}
-                              className={`p-3 rounded-2xl border text-left transition flex items-start justify-between gap-3 ${
-                                sustainability.status === 'HIGH_SUSTAINABLE'
-                                  ? 'bg-emerald-950/40 border-emerald-500/60 hover:bg-emerald-900/40 hover:border-[#00C261]'
-                                  : sustainability.status === 'MODERATE_SUSTAINABLE'
-                                  ? 'bg-cyan-950/40 border-cyan-500/60 hover:bg-cyan-900/40 hover:border-cyan-400'
-                                  : 'bg-amber-950/40 border-amber-500/60 hover:bg-amber-900/40 hover:border-amber-400'
-                              }`}
-                            >
-                              <div className="space-y-1 min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  <ShieldCheck
-                                    className="w-4 h-4 shrink-0"
-                                    style={{ color: sustainability.themeColor }}
-                                  />
-                                  <span
-                                    className="text-[11px] font-mono font-bold uppercase tracking-wider truncate"
-                                    style={{ color: sustainability.themeColor }}
-                                  >
-                                    SUSTAINABILITY: {sustainability.integrityPct}% INTEGRITY
-                                  </span>
-                                </div>
-                                <p className="text-xs text-white font-medium leading-snug line-clamp-1">
-                                  {sustainability.headline}
-                                </p>
-                                <p className="text-[10px] text-slate-300 font-mono flex items-center gap-1">
-                                  <span>{isSustainModalOpen ? 'Hide Trajectory Audit' : `Verify ${computed.direction} Trajectory Sustainability`}</span>
-                                  <span className="text-[#D4AF37]">→</span>
-                                </p>
-                              </div>
-                              <div className="shrink-0 text-right">
-                                <span
-                                  className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase inline-block font-mono"
-                                  style={{
-                                    backgroundColor: `${sustainability.themeColor}22`,
-                                    color: sustainability.themeColor,
-                                    border: `1px solid ${sustainability.themeColor}55`
-                                  }}
-                                >
-                                  {computed.h1TrendDirection || '1H LOCKED'}
-                                </span>
-                                <div className="mt-1 text-slate-400 text-xs flex justify-end">
-                                  {isSustainModalOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                                </div>
-                              </div>
-                            </button>
-                          </div>
-
-                          {/* EXPANDABLE DRAWER 1: Detailed Entry Moment Audit */}
-                          {isEntryModalOpen && (
-                            <div className="p-4 rounded-2xl bg-[#0B132B] border border-cyan-500/40 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
-                              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                                <div className="flex items-center gap-2">
-                                  <CheckCircle2 className="w-4 h-4 text-[#00C261]" />
-                                  <h5 className="text-xs font-bold font-mono text-white">
-                                    Pre-Execution Entry Moment Audit · {focusedMarket.pair} ({computed.direction})
-                                  </h5>
-                                </div>
-                                <span className="text-[10px] font-mono text-slate-400">
-                                  Auto-Evaluated Live @ {focusedMarket.price}
-                                </span>
-                              </div>
-
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs font-mono">
-                                <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-                                  <span className="text-[10px] text-slate-400 block">Current Live Price</span>
-                                  <strong className="text-sm text-white block">{focusedMarket.price}</strong>
-                                  <span className="text-[10px] text-slate-400 block">Active 0.5s Stream</span>
-                                </div>
-                                <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-                                  <span className="text-[10px] text-slate-400 block">Advisory Retest Entry</span>
-                                  <strong className="text-sm text-[#D4AF37] block">{computed.advisoryEntryPrice}</strong>
-                                  <span className="text-[10px] text-slate-400 block">20 EMA Pullback Value</span>
-                                </div>
-                                <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-                                  <span className="text-[10px] text-slate-400 block">Drawdown Savings</span>
-                                  <strong className="text-sm text-[#00C261] block">
-                                    {computed.advisoryDiscountPips ? `+${computed.advisoryDiscountPips} Pips Saved` : '0.0p (At Prime Zone)'}
-                                  </strong>
-                                  <span className="text-[10px] text-slate-400 block">Protects $2 Risk Limit</span>
-                                </div>
-                              </div>
-
-                              <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2 text-xs">
-                                <div className="flex items-center gap-2 text-white font-bold">
-                                  <Info className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                                  <span>Institutional Entry Advice (Avoid Rushed Entries):</span>
-                                </div>
-                                <p className="text-slate-300 leading-relaxed text-[11px]">
-                                  {entryMoment.actionGuidance}
-                                </p>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-[11px] text-slate-300">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[#00C261] font-bold">✓</span>
-                                    <span>Stop Loss distance {computed.slPips}p capped at $2.00 micro risk</span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[#00C261] font-bold">✓</span>
-                                    <span>R:R ratio {computed.riskReward} meets 1:2 institutional threshold</span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[#00C261] font-bold">✓</span>
-                                    <span>Kenya Session status: {kenyaTiming.windowBadgeShort} ({kenyaTiming.countdownFormatted})</span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[#00C261] font-bold">✓</span>
-                                    <span>Anti-whipsaw filter: 1H trend is authoritative</span>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* EXPANDABLE DRAWER 2: Detailed Sustainability Audit */}
-                          {isSustainModalOpen && (
-                            <div className="p-4 rounded-2xl bg-[#091524] border border-[#00C261]/40 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
-                              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                                <div className="flex items-center gap-2">
-                                  <ShieldCheck className="w-4 h-4 text-[#00C261]" />
-                                  <h5 className="text-xs font-bold font-mono text-white">
-                                    Trajectory Sustainability Audit · {focusedMarket.pair} {computed.direction} Trajectory
-                                  </h5>
-                                </div>
-                                <span className="text-[10px] font-mono text-[#00C261] font-bold">
-                                  {sustainability.integrityPct}% Trajectory Integrity
-                                </span>
-                              </div>
-
-                              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs font-mono">
-                                <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
-                                  <span className="text-[10px] text-slate-400 block">1H Anchor Trend</span>
-                                  <strong className="text-xs text-[#00C261] block">{computed.h1TrendDirection || 'UPTREND'}</strong>
-                                  <span className="text-[9px] text-slate-400">Institutional Baseline</span>
-                                </div>
-                                <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
-                                  <span className="text-[10px] text-slate-400 block">MTF Confluence</span>
-                                  <strong className="text-xs text-cyan-300 block">{computed.mtfAlignment?.grade || 'GRADE_A'}</strong>
-                                  <span className="text-[9px] text-slate-400">15M / 1H / 4H Stacked</span>
-                                </div>
-                                <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
-                                  <span className="text-[10px] text-slate-400 block">Factor Confluence</span>
-                                  <strong className="text-xs text-[#D4AF37] block">
-                                    {computed.alignedFactorsCount} / {computed.totalFactorsCount} Factors
-                                  </strong>
-                                  <span className="text-[9px] text-slate-400">Quantitative Consensus</span>
-                                </div>
-                                <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
-                                  <span className="text-[10px] text-slate-400 block">Whipsaw Risk</span>
-                                  <strong className="text-xs text-emerald-300 block">Low (Locked)</strong>
-                                  <span className="text-[9px] text-slate-400">Noise Filter Active</span>
-                                </div>
-                              </div>
-
-                              <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1.5 text-xs">
-                                <strong className="text-white block flex items-center gap-1.5 font-mono">
-                                  <Activity className="w-3.5 h-3.5 text-[#00C261]" />
-                                  <span>Why Temporary Counter-Candles Will NOT Break This Direction:</span>
-                                </strong>
-                                <p className="text-slate-300 text-[11px] leading-relaxed">
-                                  {sustainability.structuralReason} Even if you see 1–3 opposing candles on the 5-minute or 15-minute chart, the 1-Hour institutional EMA cloud and order block structure remain firmly intact. Do not panic or flip orders back and forth — let the math work toward TP1 ({computed.tp1}) and TP2 ({computed.tp2}).
-                                </p>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
+                    {/* ADVANCED ENTRY CONFIRMATION & TRAJECTORY SUSTAINABILITY STATE CONTROLLER */}
+                    <div className="pt-2 border-t border-slate-800/80">
+                      <EntryConfirmationController
+                        pair={focusedMarket.pair}
+                        computed={computed}
+                        kenyaTiming={kenyaTiming}
+                        livePrice={focusedMarket.price}
+                        timeframe={activeTf}
+                        lockedOrder={lockedOrder}
+                        variant="focused"
+                      />
+                    </div>
                     </div>
                   );
                 })()}
@@ -2010,80 +1887,19 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                       </div>
                     </div>
 
-                    {/* Entry Timing Confirmation & Sustainability Verification Buttons below Copy SL/TP */}
-                    {(() => {
-                      const entryMoment = evaluateOrderEntryMoment(m.pair, computed, m.price, kenyaTiming);
-                      const sustainability = evaluateOrderTrendSustainability(computed);
-
-                      return (
-                        <div className="grid grid-cols-2 gap-1.5 pt-1">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedPair(m.pair);
-                              setShowEntryTimingModalPair(m.pair);
-                              setShowSustainabilityModalPair(null);
-                            }}
-                            className={`p-1.5 rounded-lg border text-[10px] font-mono flex items-center justify-between gap-1 transition ${
-                              entryMoment.status === 'PRIME_NOW'
-                                ? 'bg-emerald-950/40 border-[#00C261]/50 text-[#00C261] hover:bg-emerald-900/50'
-                                : entryMoment.status === 'WAIT_PULLBACK'
-                                ? 'bg-amber-950/40 border-amber-500/50 text-amber-300 hover:bg-amber-900/50'
-                                : 'bg-red-950/40 border-red-500/50 text-red-300 hover:bg-red-900/50'
-                            }`}
-                            title={entryMoment.actionGuidance}
-                          >
-                            <span className="flex items-center gap-1 truncate font-bold">
-                              {entryMoment.status === 'PRIME_NOW' ? (
-                                <CheckCircle2 className="w-3 h-3 text-[#00C261] shrink-0" />
-                              ) : entryMoment.status === 'WAIT_PULLBACK' ? (
-                                <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
-                              ) : (
-                                <Lock className="w-3 h-3 text-red-400 shrink-0" />
-                              )}
-                              <span className="truncate">
-                                {entryMoment.status === 'PRIME_NOW'
-                                  ? 'Entry: Prime ✓'
-                                  : entryMoment.status === 'WAIT_PULLBACK'
-                                  ? `Wait ${entryMoment.advisoryPrice}`
-                                  : 'Closed'}
-                              </span>
-                            </span>
-                            <span className="text-[9px] text-slate-400 font-normal">Audit</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedPair(m.pair);
-                              setShowSustainabilityModalPair(m.pair);
-                              setShowEntryTimingModalPair(null);
-                            }}
-                            className={`p-1.5 rounded-lg border text-[10px] font-mono flex items-center justify-between gap-1 transition ${
-                              sustainability.status === 'HIGH_SUSTAINABLE'
-                                ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/50'
-                                : sustainability.status === 'MODERATE_SUSTAINABLE'
-                                ? 'bg-cyan-950/40 border-cyan-500/50 text-cyan-300 hover:bg-cyan-900/50'
-                                : 'bg-amber-950/40 border-amber-500/50 text-amber-300 hover:bg-amber-900/50'
-                            }`}
-                            title={sustainability.structuralReason}
-                          >
-                            <span className="flex items-center gap-1 truncate font-bold">
-                              <ShieldCheck
-                                className="w-3 h-3 shrink-0"
-                                style={{ color: sustainability.themeColor }}
-                              />
-                              <span className="truncate">
-                                {sustainability.integrityPct}% Locked
-                              </span>
-                            </span>
-                            <span className="text-[9px] text-slate-400 font-normal">Check</span>
-                          </button>
-                        </div>
-                      );
-                    })()}
+                    {/* ADVANCED ENTRY CONFIRMATION CONTROLLER (Compact Mode) */}
+                    <EntryConfirmationController
+                      pair={m.pair}
+                      computed={computed}
+                      kenyaTiming={kenyaTiming}
+                      livePrice={m.price}
+                      timeframe={m.recommendedTf}
+                      lockedOrder={loadedOrder}
+                      variant="compact"
+                      onInspectDetails={() => {
+                        setSelectedPair(m.pair);
+                      }}
+                    />
 
                     <div className="pt-1 border-t border-slate-800 flex items-center justify-between text-[10px]">
                       <span className="text-slate-400">
@@ -2149,6 +1965,38 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
           </div>
         </div>
       )}
+
+      {/* INSTITUTIONAL PROP DESK MODALS */}
+      <ConfluenceMatrixModal
+        isOpen={showConfluenceModal}
+        onClose={() => setShowConfluenceModal(false)}
+        items={confluenceItems}
+        selectedPair={selectedPair || 'GBP/USD'}
+        onSelectPair={(p) => {
+          setSelectedPair(p as CurrencyPair);
+          handleOpenPairCard(p as CurrencyPair);
+        }}
+      />
+
+      <PropDrawdownGuardModal
+        isOpen={showDrawdownModal}
+        onClose={() => setShowDrawdownModal(false)}
+        config={propAccount}
+        onUpdateConfig={(newCfg) => setPropAccount(newCfg)}
+      />
+
+      <NewsGuardModal
+        isOpen={showNewsModal}
+        onClose={() => setShowNewsModal(false)}
+        selectedPair={selectedPair || 'GBP/USD'}
+      />
+
+      <PropTradingJournalModal
+        isOpen={showJournalModal}
+        onClose={() => setShowJournalModal(false)}
+        trades={journalTrades}
+        onRefreshTrades={(updated) => setJournalTrades(updated)}
+      />
     </div>
   );
 };

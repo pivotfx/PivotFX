@@ -41,7 +41,8 @@ import {
   ChevronUp,
   Search,
   Check,
-  ChevronRight
+  ChevronRight,
+  Zap
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -145,16 +146,44 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
                 onClick={() => setShowCurriculumChamber(false)}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#D4AF37]/15 hover:bg-[#D4AF37]/25 text-[#D4AF37] border border-[#D4AF37]/40 text-xs font-mono font-bold transition"
               >
-                <span>← Return to Pillar {pillar.number} Tools</span>
+                <span>← Return to Pillar {pillar.number} Workstation</span>
               </button>
             )}
           </div>
 
-          <div className="flex items-center gap-2 text-xs font-mono">
-            <span className="text-slate-400">Masterclass Progress:</span>
-            <span className="text-[#D4AF37] font-bold">
-              {completedLessons.length} / {pillar.lessons.length} ({progressPercent}%)
-            </span>
+          {/* Mode Switcher: 100% Pillar Independent Workstation vs Dedicated Curriculum Chamber */}
+          <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-950/90 border border-slate-800">
+            <button
+              type="button"
+              onClick={() => {
+                setShowCurriculumChamber(false);
+                setSelectedLessonId(null);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                !showCurriculumChamber && !selectedLesson
+                  ? 'bg-[#D4AF37] text-black shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span>Live Workstation</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowCurriculumChamber(true);
+                setSelectedLessonId(null);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                showCurriculumChamber || selectedLesson
+                  ? 'bg-[#D4AF37] text-black shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Curriculum Chamber ({completedLessons.length}/{pillar.lessons.length})</span>
+            </button>
           </div>
         </div>
 
@@ -493,74 +522,23 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
               {pillar.id === '/macro-safety' && <MacroTradeSafetyTools onNavigatePillar={onNavigatePillar} />}
             </Suspense>
 
-            {/* Single Clean Clickable Masterclass Curriculum Card */}
-            <div
-              onClick={() => {
-                setShowCurriculumChamber(true);
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
+            {/* Subtle Pillar Independence Footer */}
+            <div className="pt-6 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-mono text-slate-400">
+              <span className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#00C261]" />
+                <span>Pillar {pillar.number} Dedicated Live Workstation Active</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
                   setShowCurriculumChamber(true);
                   window.scrollTo({ top: 0, behavior: 'smooth' });
-                }
-              }}
-              className="rounded-3xl p-6 sm:p-8 bg-[#0B1222] border border-[#D4AF37]/50 hover:border-[#D4AF37] transition cursor-pointer flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 group"
-            >
-              <div className="space-y-2 max-w-2xl">
-                <div className="flex items-center gap-2 text-xs font-mono text-slate-400 flex-wrap tabular-nums">
-                  <BookOpen className="w-4 h-4 text-[#D4AF37]" />
-                  <span className="text-[#D4AF37] font-bold">
-                    Pillar {pillar.number} Curriculum ({pillar.lessons.length} Lessons)
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span className="text-[#00C261] font-bold">
-                    {completedLessons.length} / {pillar.lessons.length} Completed ({progressPercent}%)
-                  </span>
-                </div>
-
-                <h3 className="text-xl sm:text-2xl font-black text-white group-hover:text-[#D4AF37] transition-colors">
-                  Masterclass Study Chamber: Lessons 01 – {pillar.lessons.length}
-                </h3>
-
-                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-                  Study all {pillar.lessons.length} institutional lessons, candlestick schematics, and MT4/MT5 checklists inside this isolated chamber.
-                </p>
-              </div>
-
-              <div
-                className="flex flex-col sm:flex-row lg:flex-col gap-2.5 w-full lg:w-auto shrink-0"
-                onClick={(e) => e.stopPropagation()}
+                }}
+                className="hover:text-[#D4AF37] transition flex items-center gap-1 text-slate-400 hover:text-[#D4AF37] underline"
               >
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCurriculumChamber(true);
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }}
-                  className="px-5 py-3 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition whitespace-nowrap"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span>Open Lessons 01–{pillar.lessons.length}</span>
-                </button>
-
-                {nextUnfinishedLesson && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedLessonId(nextUnfinishedLesson.id);
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }}
-                    className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-slate-700 font-mono font-bold text-xs flex items-center justify-center gap-1.5 transition whitespace-nowrap"
-                  >
-                    <span>Lesson {nextUnfinishedLesson.number}: {nextUnfinishedLesson.title.slice(0, 22)}...</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
+                <BookOpen className="w-3.5 h-3.5 text-[#D4AF37]" />
+                <span>Access Optional Pillar {pillar.number} Curriculum Chamber ({pillar.lessons.length} Lessons)</span>
+              </button>
             </div>
           </div>
         )}

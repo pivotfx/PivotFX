@@ -9,8 +9,22 @@ import {
   Layers,
   Sparkles,
   TrendingUp,
-  Activity
+  Activity,
+  Copy,
+  Check,
+  CheckCircle2,
+  AlertTriangle,
+  ShieldCheck,
+  ShieldAlert,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
+import {
+  globalLiveStream,
+  computeRealChartTradeParams,
+  evaluatePairKenyaTiming
+} from '../../utils/liveMarketEngine';
+import { EntryConfirmationController } from './EntryConfirmationController';
 
 interface TradingViewEmbedWidgetProps {
   pair: CurrencyPair;
@@ -43,6 +57,16 @@ export const getTradingViewSymbol = (p: CurrencyPair): string => {
       return 'FX:USDCAD';
     case 'BTC/USD':
       return 'BINANCE:BTCUSDT';
+    case 'ETH/USD':
+      return 'BINANCE:ETHUSDT';
+    case 'US30':
+      return 'FOREXCOM:DJI';
+    case 'NAS100':
+      return 'FOREXCOM:NAS100';
+    case 'GER40':
+      return 'FOREXCOM:GER40';
+    case 'USOIL':
+      return 'TVC:USOIL';
     default:
       return 'FX:GBPUSD';
   }
@@ -80,6 +104,17 @@ export const TradingViewEmbedWidget: React.FC<TradingViewEmbedWidgetProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [activeTab, setActiveTab] = useState<'standard' | 'advanced'>('advanced');
 
+  const streamState = globalLiveStream.getState();
+  const marketItem = streamState.markets.find((m) => m.pair === pair);
+  const currentPrice = marketItem?.price || 1.0;
+  const computed = computeRealChartTradeParams({
+    targetPair: pair,
+    targetTf: timeframe,
+    targetBroker: 'fxpesa',
+    price: currentPrice
+  });
+  const kenyaTiming = evaluatePairKenyaTiming(pair);
+
   const symbol = getTradingViewSymbol(pair);
   const interval = getTradingViewInterval(timeframe);
 
@@ -97,6 +132,11 @@ export const TradingViewEmbedWidget: React.FC<TradingViewEmbedWidgetProps> = ({
     'EUR/JPY',
     'USD/CHF',
     'BTC/USD',
+    'ETH/USD',
+    'US30',
+    'NAS100',
+    'GER40',
+    'USOIL',
     'USD/CAD',
     'AUD/USD'
   ];
@@ -203,6 +243,18 @@ export const TradingViewEmbedWidget: React.FC<TradingViewEmbedWidgetProps> = ({
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
           loading="lazy"
+        />
+      </div>
+
+      {/* TRADINGVIEW PRE-FLIGHT ENTRY CONFIRMATION & SUSTAINABILITY CONTROLLER */}
+      <div className="p-3 bg-[#0A1020] border-t border-slate-800">
+        <EntryConfirmationController
+          pair={pair}
+          computed={computed}
+          kenyaTiming={kenyaTiming}
+          livePrice={currentPrice}
+          timeframe={timeframe}
+          variant="focused"
         />
       </div>
 

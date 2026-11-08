@@ -153,6 +153,11 @@ const YAHOO_PAIR_SPECS: Array<{
   { pair: 'AUD/USD', yahooSymbol: 'AUDUSD=X', decimals: 5, defaultPrice: 0.6975, defaultPct: 0.31 },
   { pair: 'XAU/USD', yahooSymbol: 'GC=F', decimals: 2, defaultPrice: 3962.5, defaultPct: 0.85 },
   { pair: 'BTC/USD', yahooSymbol: 'BTC-USD', decimals: 2, defaultPrice: 80491.43, defaultPct: 3.43 },
+  { pair: 'ETH/USD', yahooSymbol: 'ETH-USD', decimals: 2, defaultPrice: 3412.5, defaultPct: 2.18 },
+  { pair: 'US30', yahooSymbol: '^DJI', decimals: 1, defaultPrice: 43810.0, defaultPct: 0.65 },
+  { pair: 'NAS100', yahooSymbol: '^IXIC', decimals: 1, defaultPrice: 20950.0, defaultPct: 0.88 },
+  { pair: 'GER40', yahooSymbol: '^GDAXI', decimals: 1, defaultPrice: 19420.0, defaultPct: 0.45 },
+  { pair: 'USOIL', yahooSymbol: 'CL=F', decimals: 2, defaultPrice: 71.45, defaultPct: -0.35 },
 ];
 
 let liveMarketsCache: CachedLiveMarketsPayload | null = null;
@@ -480,9 +485,13 @@ function buildDeterministicSuperNote(body: SuperAnalysisRequest) {
   const isJpy = pair.includes('JPY');
   const isGold = pair.includes('XAU');
   const isBtc = pair.includes('BTC');
-  const pipSize = isJpy ? 0.01 : isGold ? 0.1 : isBtc ? 1.0 : 0.0001;
-  const decimals = isJpy ? 3 : isGold ? 2 : isBtc ? 2 : 5;
-  const riskPips = isJpy ? 22 : isGold ? 45 : isBtc ? 160 : 20;
+  const isEth = pair.includes('ETH');
+  const isIndex = pair === 'US30' || pair === 'NAS100' || pair === 'GER40';
+  const isOil = pair.includes('OIL');
+
+  const pipSize = isJpy ? 0.01 : isGold ? 0.1 : isBtc ? 1.0 : isEth ? 0.5 : isIndex ? 1.0 : isOil ? 0.05 : 0.0001;
+  const decimals = isJpy ? 3 : isGold ? 2 : isBtc ? 2 : isEth ? 2 : isIndex ? 1 : isOil ? 2 : 5;
+  const riskPips = isJpy ? 22 : isGold ? 45 : isBtc ? 160 : isEth ? 40 : isIndex ? 50 : isOil ? 30 : 20;
   const sign = dir === 'BUY' ? 1 : -1;
 
   const ema20 = Number(body.ema20 ?? (price - sign * pipSize * 4).toFixed(decimals));

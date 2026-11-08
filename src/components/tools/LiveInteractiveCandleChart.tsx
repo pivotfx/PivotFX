@@ -144,9 +144,15 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
       ? visibleCandles[hoveredIdx]
       : visibleCandles[visibleCandles.length - 1];
 
-  const microStep = pair.includes('BTC') ? 25 : pair.includes('XAU') ? 0.5 : 0.2 / pipMultiplier;
-  const pipStep1 = pair.includes('BTC') ? 100 : pair.includes('XAU') ? 1.5 : 1 / pipMultiplier;
-  const pipStep10 = pair.includes('BTC') ? 500 : pair.includes('XAU') ? 10.0 : 10 / pipMultiplier;
+  const isBtc = pair.includes('BTC');
+  const isEth = pair.includes('ETH');
+  const isGold = pair.includes('XAU');
+  const isIndex = pair === 'US30' || pair === 'NAS100' || pair === 'GER40';
+  const isOil = pair.includes('OIL');
+
+  const microStep = isBtc ? 25 : isEth ? 2.5 : isIndex ? 5 : isGold ? 0.5 : isOil ? 0.05 : 0.2 / pipMultiplier;
+  const pipStep1 = isBtc ? 100 : isEth ? 10 : isIndex ? 25 : isGold ? 1.5 : isOil ? 0.2 : 1 / pipMultiplier;
+  const pipStep10 = isBtc ? 500 : isEth ? 50 : isIndex ? 100 : isGold ? 10.0 : isOil ? 1.0 : 10 / pipMultiplier;
 
   const handleNudge = (delta: number) => {
     const next = Math.max(1 / pipMultiplier, Number((livePrice + delta).toFixed(decimals)));
