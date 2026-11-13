@@ -129,7 +129,7 @@ export interface MultiTimeframeAlignment {
   h1: 'BULLISH' | 'BEARISH';
   h4: 'BULLISH' | 'BEARISH';
   alignedCount: number;
-  tierGrade: 'GRADE A+ (90%+ EDGE)' | 'GRADE A (82%+ EDGE)' | 'GRADE B (72% EDGE)' | 'GRADE C (WAIT PULLBACK)';
+  tierGrade: 'GRADE A+ (4/4 TF ALIGNED)' | 'GRADE A (3/4 TF ALIGNED)' | 'GRADE B (2/4 MIXED — WAIT)' | 'GRADE C (WAIT PULLBACK)';
   winRatePct: number;
   tierColor: string;
 }
@@ -209,6 +209,9 @@ export interface ComputedTradeParams {
   advisoryEntryPrice?: number;
   advisoryEntryNote?: string;
   advisoryDiscountPips?: number;
+  slVolatilityWarning?: string;
+  executionReadiness: 'READY_ENTER' | 'WAIT_PULLBACK' | 'NO_TRADE_CHOP' | 'NO_TRADE_CLOSED';
+  executionReadinessReason: string;
   riskConfig?: Partial<RiskManagementConfig>;
   riskPlan?: PositionSizeRiskPlan;
   limitPlan?: {
@@ -231,6 +234,7 @@ export interface RiskManagementConfig {
   accountBalanceUsd: number;
   riskPct: number;
   syncSlTpWithRisk: boolean;
+  targetProfitUsd?: number | null;
 }
 
 export interface PositionSizeRiskPlan {
@@ -252,6 +256,10 @@ export interface PositionSizeRiskPlan {
   syncSlTpWithRisk: boolean;
   isBelowMinBrokerRisk: boolean;
   minSafeRiskUsd: number;
+  targetProfitUsd: number | null;
+  targetProfitModeActive: boolean;
+  requiredTp2PipsForTarget: number | null;
+  targetProfitFeasibilityNote: string | null;
   calibrationSummary: string;
 }
 
@@ -441,7 +449,8 @@ export const DEFAULT_RISK_MANAGEMENT_CONFIG: RiskManagementConfig = {
   enabled: true,
   accountBalanceUsd: 200,
   riskPct: 1.0,
-  syncSlTpWithRisk: true
+  syncSlTpWithRisk: true,
+  targetProfitUsd: null
 };
 
 class PositionRiskConfigStore {
@@ -464,7 +473,11 @@ class PositionRiskConfigStore {
           typeof parsed.riskPct === 'number' && parsed.riskPct > 0
             ? Math.min(15, Math.max(0.1, parsed.riskPct))
             : DEFAULT_RISK_MANAGEMENT_CONFIG.riskPct,
-        syncSlTpWithRisk: parsed.syncSlTpWithRisk ?? true
+        syncSlTpWithRisk: parsed.syncSlTpWithRisk ?? true,
+        targetProfitUsd:
+          typeof parsed.targetProfitUsd === 'number' && parsed.targetProfitUsd >= 1
+            ? Math.min(1_000_000, Number(parsed.targetProfitUsd.toFixed(2)))
+            : null
       };
     } catch {
       return DEFAULT_RISK_MANAGEMENT_CONFIG;
@@ -484,11 +497,19 @@ class PositionRiskConfigStore {
       patch.riskPct !== undefined && !isNaN(patch.riskPct)
         ? Math.min(15, Math.max(0.1, Number(patch.riskPct)))
         : this.config.riskPct;
+    const nextTargetProfit =
+      patch.targetProfitUsd === null
+        ? null
+        : patch.targetProfitUsd !== undefined && !isNaN(Number(patch.targetProfitUsd)) && Number(patch.targetProfitUsd) >= 1
+        ? Math.min(1_000_000, Number(Number(patch.targetProfitUsd).toFixed(2)))
+        : this.config.targetProfitUsd ?? null;
+
     this.config = {
       enabled: patch.enabled ?? this.config.enabled,
       accountBalanceUsd: nextBalance,
       riskPct: nextRiskPct,
-      syncSlTpWithRisk: patch.syncSlTpWithRisk ?? this.config.syncSlTpWithRisk
+      syncSlTpWithRisk: patch.syncSlTpWithRisk ?? this.config.syncSlTpWithRisk,
+      targetProfitUsd: nextTargetProfit
     };
     try {
       if (typeof window !== 'undefined') {
@@ -520,7 +541,9 @@ export function computeDynamicPositionRiskPlan(params: {
   brokerSpread: number;
   riskConfig: RiskManagementConfig;
 }): PositionSizeRiskPlan {
-  const { isGold, isBtc, isEth, isIndex, isOil, pipValPerStandardLot, pipValPerMicroLot } = getPairSpecs(params.pair);
+  const { isGold, isBtc, isEth, isIndex, isOil, pipMultiplier, pipValPerStandardLot, pipValPerMicroLot } = getPairSpecs(
+    params.pair
+  );
   const accountBalanceUsd = Math.max(10, Number(params.riskConfig.accountBalanceUsd) || 200);
   const riskPct = Math.min(15, Math.max(0.1, Number(params.riskConfig.riskPct) || 1.0));
   const targetRiskUsd = Number((accountBalanceUsd * (riskPct / 100)).toFixed(2));
@@ -563,7 +586,34 @@ export function computeDynamicPositionRiskPlan(params: {
   const slAdjustedDeltaPips = Number((calibratedSlPips - structuralSlPips).toFixed(1));
   const isBelowMinBrokerRisk = targetRiskUsd < minSafeRiskUsd;
 
-  const calibrationSummary = !params.riskConfig.syncSlTpWithRisk
+  const rawTargetProfit = params.riskConfig.targetProfitUsd;
+  const targetProfitModeActive = typeof rawTargetProfit === 'number' && !isNaN(rawTargetProfit) && rawTargetProfit >= 1;
+  const targetProfitUsd = targetProfitModeActive ? Number(rawTargetProfit.toFixed(2)) : null;
+  const requiredTp2PipsForTarget =
+    targetProfitUsd !== null
+      ? Number((targetProfitUsd / Math.max(0.0001, pipValPerPositionUsd) + params.brokerSpread).toFixed(1))
+      : null;
+
+  let targetProfitFeasibilityNote: string | null = null;
+  if (targetProfitUsd !== null && requiredTp2PipsForTarget !== null) {
+    const movePriceDelta = Number((requiredTp2PipsForTarget / pipMultiplier).toFixed(isGold ? 2 : 4));
+    const impliedRr = Number((requiredTp2PipsForTarget / Math.max(1, calibratedSlPips)).toFixed(1));
+    const lots03Pips = Number((targetProfitUsd / (0.03 * pipValPerStandardLot) + params.brokerSpread).toFixed(1));
+    const lots05Pips = Number((targetProfitUsd / (0.05 * pipValPerStandardLot) + params.brokerSpread).toFixed(1));
+    if (impliedRr > 5.0) {
+      targetProfitFeasibilityNote = `$${targetProfitUsd.toFixed(2)} TP @ ${lotSize.toFixed(
+        2
+      )} Lots needs ${requiredTp2PipsForTarget}p (${isGold ? `$${movePriceDelta} Gold move` : `${requiredTp2PipsForTarget}p move`}, 1:${impliedRr} R:R — 24–48H swing; lock BE after +$2). At 0.03 Lots = ${lots03Pips}p; at 0.05 Lots = ${lots05Pips}p.`;
+    } else {
+      targetProfitFeasibilityNote = `$${targetProfitUsd.toFixed(2)} TP @ ${lotSize.toFixed(
+        2
+      )} Lots needs ${requiredTp2PipsForTarget}p (${isGold ? `$${movePriceDelta} Gold move` : `${requiredTp2PipsForTarget}p move`}, 1:${impliedRr} R:R) — fits normal intraday swing.`;
+    }
+  }
+
+  const calibrationSummary = targetProfitModeActive && requiredTp2PipsForTarget !== null
+    ? `Target Profit Mode (+$${targetProfitUsd!.toFixed(2)}): ${lotSize.toFixed(2)} Lots · SL ${calibratedSlPips}p ($${actualRiskUsd.toFixed(2)}) · TP2 ${requiredTp2PipsForTarget}p`
+    : !params.riskConfig.syncSlTpWithRisk
     ? `Fixed Structural SL (${structuralSlPips}p) · Scaled Volume: ${lotSize.toFixed(2)} Lots (~$${actualRiskUsd.toFixed(2)} risk)`
     : isBelowMinBrokerRisk
     ? `Target $${targetRiskUsd.toFixed(2)} is below minimum 0.01-lot stop ($${minSafeRiskUsd.toFixed(2)}); SL protected at ${calibratedSlPips}p floor`
@@ -592,6 +642,10 @@ export function computeDynamicPositionRiskPlan(params: {
     syncSlTpWithRisk: params.riskConfig.syncSlTpWithRisk,
     isBelowMinBrokerRisk,
     minSafeRiskUsd,
+    targetProfitUsd,
+    targetProfitModeActive,
+    requiredTp2PipsForTarget,
+    targetProfitFeasibilityNote,
     calibrationSummary
   };
 }
@@ -1300,13 +1354,13 @@ export function evaluateAllTradeFactors(p: {
         detail: `Strong USD basket (+${dxy}%) creates macro headwind on Gold`
       });
     } else {
-      bullWeight += 10;
-      bearWeight += 8;
+      bullWeight += 9;
+      bearWeight += 9;
       verdicts.push({
         name: '4. DXY Macro & Safe-Haven',
-        signal: 'BUY',
-        weight: '10%',
-        detail: `Gold equilibrium (${macro.riskRegime}) — follow 15m liquidity sweep`
+        signal: 'CAUTION',
+        weight: '9%',
+        detail: `Gold DXY neutral (${macro.riskRegime}) — follow 15m/1H EMA & liquidity structure`
       });
     }
   } else if (isIndex) {
@@ -1546,8 +1600,12 @@ export function evaluateAllTradeFactors(p: {
     isBuy = false;
   } else if (bullScorePct - bearScorePct >= 8) {
     isBuy = true;
-  } else if (p.previousDirection) {
-    // Narrow hysteresis band ONLY when bull/bear scores are closely balanced inside EMA consolidation
+  } else if (
+    p.previousDirection &&
+    Math.abs(bullScorePct - bearScorePct) < 6 &&
+    Math.abs(distEma20Pips) < effectiveAtrPips * 0.15
+  ) {
+    // Micro-deadband ONLY when bull/bear scores are dead-even right on the 20 EMA
     isBuy = p.previousDirection === 'BUY';
   } else if (effectiveH1 === 'UPTREND') {
     isBuy = bearScorePct < 54;
@@ -1800,6 +1858,11 @@ export function evaluateCandleSeriesAndTick(p: {
  */
 export function getUpcomingEconomicEvents(): HighImpactEconomicEvent[] {
   const now = new Date();
+  const nairobiWeekday = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Africa/Nairobi',
+    weekday: 'short'
+  }).format(now);
+  const isWeekend = nairobiWeekday === 'Sat' || nairobiWeekday === 'Sun';
   const eatHour = parseInt(
     now.toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', hour12: false }),
     10
@@ -1814,38 +1877,38 @@ export function getUpcomingEconomicEvents(): HighImpactEconomicEvent[] {
     {
       id: 'lon-bullion',
       currency: 'XAU/USD',
-      name: 'London Bullion Morning Fix Benchmark',
+      name: 'London Bullion Morning Fix Window (Weekday Recurring)',
       impact: 'HIGH' as const,
       eventHour: 11,
       eventMin: 30,
-      tradingDirective: 'Institutional liquidity peak: Gold spreads tighten to ~1.8 pips; optimal trend continuation.'
+      tradingDirective: 'Recurring London liquidity peak: verify live news calendar before Gold entries.'
     },
     {
       id: 'us-cpi-nfp',
       currency: 'USD',
-      name: 'US High-Impact Tier-1 Data Release (CPI / NFP / PPI)',
+      name: 'NY Morning Tier-1 Release Window (CPI / NFP Schedule Check)',
       impact: 'EXTREME' as const,
       eventHour: 15,
       eventMin: 30,
-      tradingDirective: 'Extreme volatility window: Hard $2.80 SL shield mandatory; avoid chasing slippage.'
+      tradingDirective: 'Recurring US macro release slot: confirm live ForexFactory calendar & guard against slippage.'
     },
     {
       id: 'comex-gold',
       currency: 'XAU/USD',
-      name: 'New York COMEX Bullion Pit Expansion',
+      name: 'New York COMEX Bullion Open Expansion (Weekday)',
       impact: 'HIGH' as const,
       eventHour: 16,
       eventMin: 20,
-      tradingDirective: 'Institutional volume surge: ride 12H TP2 expansions; lock running profits.'
+      tradingDirective: 'NY institutional open volatility: watch ATR vs SL width carefully on XAU/USD.'
     },
     {
       id: 'fomc-fed',
       currency: 'USD',
-      name: 'Federal Reserve Policy & Interest Rate Guidance',
+      name: 'Fed Afternoon Liquidity Window (Weekday)',
       impact: 'EXTREME' as const,
       eventHour: 21,
       eventMin: 0,
-      tradingDirective: 'Macro repricing event: lock trailing stops to breakeven (+0.00 risk).'
+      tradingDirective: 'Recurring late-NY repricing window: tighten trailing stops or reduce exposure.'
     }
   ];
 
@@ -1853,7 +1916,9 @@ export function getUpcomingEconomicEvents(): HighImpactEconomicEvent[] {
     const eventTotalMins = ev.eventHour * 60 + ev.eventMin;
     const diff = eventTotalMins - currentTotalMins;
     let status: HighImpactEconomicEvent['status'];
-    if (diff < -60) {
+    if (isWeekend) {
+      status = 'UPCOMING';
+    } else if (diff < -60) {
       status = 'PASSED';
     } else if (diff >= -60 && diff <= 20) {
       status = 'ACTIVE_NOW';
@@ -1872,7 +1937,7 @@ export function getUpcomingEconomicEvents(): HighImpactEconomicEvent[] {
       timeEAT,
       minutesUntil: diff,
       status,
-      tradingDirective: ev.tradingDirective
+      tradingDirective: isWeekend ? 'Weekend FX/Metals closed — window resumes Monday.' : ev.tradingDirective
     };
   });
 }
@@ -1908,16 +1973,16 @@ export function evaluateMultiTimeframeAlignment(p: {
   let tierColor: string;
 
   if (alignedCount === 4) {
-    tierGrade = 'GRADE A+ (90%+ EDGE)';
-    winRatePct = 91;
+    tierGrade = 'GRADE A+ (4/4 TF ALIGNED)';
+    winRatePct = 68;
     tierColor = '#00C261'; // emerald
   } else if (alignedCount === 3) {
-    tierGrade = 'GRADE A (82%+ EDGE)';
-    winRatePct = 83;
+    tierGrade = 'GRADE A (3/4 TF ALIGNED)';
+    winRatePct = 61;
     tierColor = '#D4AF37'; // gold
   } else {
-    tierGrade = 'GRADE B (72% EDGE)';
-    winRatePct = 72;
+    tierGrade = 'GRADE B (2/4 MIXED — WAIT)';
+    winRatePct = 52;
     tierColor = '#38BDF8'; // cyan / blue
   }
 
@@ -1983,7 +2048,11 @@ export function computeRealChartTradeParams(p: {
           enabled: p.riskConfig?.enabled ?? storedCfg.enabled,
           accountBalanceUsd: p.riskConfig?.accountBalanceUsd ?? storedCfg.accountBalanceUsd,
           riskPct: p.riskConfig?.riskPct ?? storedCfg.riskPct,
-          syncSlTpWithRisk: p.riskConfig?.syncSlTpWithRisk ?? storedCfg.syncSlTpWithRisk
+          syncSlTpWithRisk: p.riskConfig?.syncSlTpWithRisk ?? storedCfg.syncSlTpWithRisk,
+          targetProfitUsd:
+            p.riskConfig?.targetProfitUsd !== undefined
+              ? p.riskConfig.targetProfitUsd
+              : storedCfg.targetProfitUsd ?? null
         };
 
   // Baseline Gilgil Shield Risk Ceiling for uncustomized 0.01 micro lot
@@ -2094,28 +2163,39 @@ export function computeRealChartTradeParams(p: {
   const pipValueAtActiveLot = activeLotSize * pipValPerStandardLot;
   baseSlPips = riskPlan ? riskPlan.calibratedSlPips : structuralSlPips;
 
-  // Dynamically scale TP1, TP2, TP3 proportionally with risk-calibrated SL (preserving >= 1:1.65 TP1 / >= 1:2.85 TP2 R:R)
-  if (riskPlan && riskPlan.syncSlTpWithRisk) {
-    baseTp1Pips = Number((baseSlPips * 1.65).toFixed(1));
-    baseTp2Pips = Number((baseSlPips * 2.85).toFixed(1));
-  } else {
-    baseTp1Pips = Number(Math.max(baseSlPips * 1.65, baseTp1Pips).toFixed(1));
-    baseTp2Pips = Number(Math.max(baseSlPips * 2.85, baseTp2Pips).toFixed(1));
-  }
+  // Dynamically scale TP1, TP2, TP3 proportionally with risk-calibrated SL OR exact Target Profit ($ USD) goal
+  const minLogicalGapPips = Math.max(
+    brokerSpread * 1.6,
+    isGold ? 8 : isBtc ? 80 : isEth ? 8 : isIndex ? 18 : isOil ? 12 : 5
+  );
 
-  // Longer 12H–48H swing target (TP3) scales dynamically with DXY macro tailwind & RSI headroom
+  let baseTp3Pips: number;
   const rsiVal = p.rsi ?? 52.0;
   const rsiHeadroomFactor = isBuy
     ? Math.max(0.85, Math.min(1.22, (74 - rsiVal) / 24))
     : Math.max(0.85, Math.min(1.22, (rsiVal - 26) / 24));
   const macroExpansionMultiplier = dxySupportsActiveSide ? 1.65 : 1.45;
-  const baseTp3Pips = Number((baseTp2Pips * macroExpansionMultiplier * rsiHeadroomFactor).toFixed(1));
+
+  if (riskPlan?.targetProfitModeActive && riskPlan.requiredTp2PipsForTarget) {
+    baseTp2Pips = Number(
+      Math.max(baseSlPips * 1.6, minLogicalGapPips * 2.4, riskPlan.requiredTp2PipsForTarget).toFixed(1)
+    );
+    baseTp1Pips = Number(
+      Math.max(minLogicalGapPips * 1.35, Math.min(baseTp2Pips * 0.5, baseTp2Pips - minLogicalGapPips)).toFixed(1)
+    );
+    baseTp3Pips = Number((baseTp2Pips * 1.35).toFixed(1));
+  } else {
+    if (riskPlan && riskPlan.syncSlTpWithRisk) {
+      baseTp1Pips = Number((baseSlPips * 1.65).toFixed(1));
+      baseTp2Pips = Number((baseSlPips * 2.85).toFixed(1));
+    } else {
+      baseTp1Pips = Number(Math.max(baseSlPips * 1.65, baseTp1Pips).toFixed(1));
+      baseTp2Pips = Number(Math.max(baseSlPips * 2.85, baseTp2Pips).toFixed(1));
+    }
+    baseTp3Pips = Number((baseTp2Pips * macroExpansionMultiplier * rsiHeadroomFactor).toFixed(1));
+  }
 
   // Minimum safe pip separation so SL/TP NEVER collapse onto Entry / Live Candle price after rounding
-  const minLogicalGapPips = Math.max(
-    brokerSpread * 1.6,
-    isGold ? 8 : isBtc ? 80 : isEth ? 8 : isIndex ? 18 : isOil ? 12 : 5
-  );
   const safeSlPips = Math.max(minLogicalGapPips, baseSlPips);
   const safeTp1Pips = Math.max(minLogicalGapPips * 1.35, baseTp1Pips);
   const safeTp2Pips = Math.max(safeTp1Pips + minLogicalGapPips, baseTp2Pips);
@@ -2405,6 +2485,38 @@ export function computeRealChartTradeParams(p: {
       : `MT4 SELL LIMIT Validated: TP2 (${limitTp2.toFixed(decimals)}) < TP1 (${limitTp1.toFixed(decimals)}) < EP (${advisoryEntryPrice.toFixed(decimals)}) < SL (${limitSl.toFixed(decimals)})`
   };
 
+  const slVolatilityWarning =
+    p.atrPips && actualSlPips < effectiveAtr * 0.9
+      ? `HIGH VOLATILITY / TIGHT SL WARNING: Live ${p.targetTf} ATR is ${effectiveAtr.toFixed(
+          1
+        )}p (${isGold ? `$${(effectiveAtr / pipMultiplier).toFixed(2)}` : `${effectiveAtr.toFixed(1)}p`}/candle), wider than your ${actualSlPips}p SL (${isGold ? `$${(actualSlPips / pipMultiplier).toFixed(2)}` : `${actualSlPips}p`}). Sudden wick spikes can hit SL before the trend continues — wait for a 20 EMA retest or widen SL/increase risk budget.`
+      : undefined;
+
+  const pairTiming = evaluatePairKenyaTiming(p.targetPair);
+  const scoreMargin = Math.abs(allFactorEval.bullScorePct - allFactorEval.bearScorePct);
+  const h1AlignedWithOrder = h1TrendDirection === (isBuy ? 'UPTREND' : 'DOWNTREND');
+  let executionReadiness: ComputedTradeParams['executionReadiness'] = 'READY_ENTER';
+  let executionReadinessReason = `${allFactorEval.alignedFactorsCount}/${allFactorEval.totalFactorsCount} factors & 1H structure aligned inside pullback zone.`;
+
+  if (pairTiming.windowStatusCode === 'CLOSED_WAIT') {
+    executionReadiness = 'NO_TRADE_CLOSED';
+    executionReadinessReason = `Market closed (${pairTiming.currentWindowName}) — spreads spike at open.`;
+  } else if (
+    scoreMargin < 12 ||
+    allFactorEval.alignedFactorsCount < 4 ||
+    (!h1AlignedWithOrder && allFactorEval.alignedFactorsCount < 6)
+  ) {
+    executionReadiness = 'NO_TRADE_CHOP';
+    executionReadinessReason = !h1AlignedWithOrder
+      ? `1H ${h1TrendDirection} conflicts with ${p.targetTf} ${isBuy ? 'BUY' : 'SELL'} (${allFactorEval.alignedFactorsCount}/8 aligned) — stand aside until aligned.`
+      : `Low edge (${allFactorEval.bullScorePct}% vs ${allFactorEval.bearScorePct}%, ${allFactorEval.alignedFactorsCount}/8 factors) — chop zone, wait clearer expansion.`;
+  } else if (allFactorEval.isExtendedZone || Boolean(slVolatilityWarning)) {
+    executionReadiness = 'WAIT_PULLBACK';
+    executionReadinessReason = allFactorEval.isExtendedZone
+      ? `Price extended away from 20 EMA — use 20 EMA Limit (${advisoryEntryPrice}) rather than chasing.`
+      : `Candle ATR (${effectiveAtr.toFixed(1)}p) exceeds your ${actualSlPips}p SL — wait tight retest or increase SL budget.`;
+  }
+
   return {
     direction: isBuy ? 'BUY' : 'SELL',
     orderType,
@@ -2456,6 +2568,9 @@ export function computeRealChartTradeParams(p: {
     advisoryEntryPrice,
     advisoryEntryNote,
     advisoryDiscountPips,
+    slVolatilityWarning,
+    executionReadiness,
+    executionReadinessReason,
     riskConfig: activeRiskCfg,
     riskPlan,
     limitPlan
@@ -2524,38 +2639,38 @@ export function evaluateOrderTrendSustainability(
 ): TrendSustainabilityVerdict {
   const isH1Aligned = computed.h1TrendDirection === (computed.direction === 'BUY' ? 'UPTREND' : 'DOWNTREND');
   const factorPct = Math.round((computed.alignedFactorsCount / Math.max(1, computed.totalFactorsCount)) * 100);
-  const mtfTier = computed.mtfAlignment?.tierGrade || 'GRADE B (72% EDGE)';
+  const mtfTier = computed.mtfAlignment?.tierGrade || 'GRADE B (2/4 MIXED — WAIT)';
 
-  if (isH1Aligned && factorPct >= 75 && (mtfTier.includes('GRADE A+') || mtfTier.includes('GRADE A'))) {
-    const integrity = Math.min(96, Math.max(88, computed.confidence));
+  if (isH1Aligned && factorPct >= 75 && (mtfTier.includes('GRADE A+') || mtfTier.includes('GRADE A')) && !computed.slVolatilityWarning) {
+    const integrity = Math.min(82, Math.max(68, Math.round(computed.confidence * 0.85)));
     return {
       status: 'HIGH_SUSTAINABLE',
       integrityPct: integrity,
-      badge: `HIGHLY SUSTAINABLE (${integrity}% INTEGRITY)`,
-      headline: `Strong ${computed.direction} Trajectory Locked`,
-      structuralReason: `1H & H4 institutional structure aligned above/below 50 EMA. Low whipsaw risk across 12H horizon.`,
+      badge: `ALIGNED STRUCTURE (${integrity}% CONFLUENCE)`,
+      headline: `Aligned ${computed.direction} Structure (Manage Risk Actively)`,
+      structuralReason: `1H & M15 EMA structure align in ${computed.direction} direction with ${computed.alignedFactorsCount}/${computed.totalFactorsCount} factors. Still respect your SL — sharp NY spikes can reverse intraday swings.`,
       themeColor: '#00C261'
     };
   }
 
   if (isH1Aligned || factorPct >= 60) {
-    const integrity = Math.min(84, Math.max(74, computed.confidence));
+    const integrity = Math.min(68, Math.max(54, Math.round(computed.confidence * 0.76)));
     return {
       status: 'MODERATE_SUSTAINABLE',
       integrityPct: integrity,
-      badge: `MODERATE SUSTAINABILITY (${integrity}%)`,
-      headline: `Selective ${computed.direction} Trajectory`,
-      structuralReason: 'Primary trend intact but entering consolidation. Scale out 50% at TP1 and move SL to Breakeven.',
+      badge: `MODERATE CONFLUENCE (${integrity}%)`,
+      headline: `Selective ${computed.direction} — Confirm Candle Close`,
+      structuralReason: 'Partial alignment only. Scale out 50% at TP1 and move SL to Breakeven early if momentum stalls.',
       themeColor: '#38BDF8'
     };
   }
 
   return {
     status: 'CHOP_CAUTION',
-    integrityPct: 65,
-    badge: 'TRANSITIONAL / CHOP RISK',
-    headline: 'Compression Zone — Reduced Lot Recommended',
-    structuralReason: 'Counter-timeframe friction detected. Limit risk to 0.01 micro lot ($2.00 cap).',
+    integrityPct: 48,
+    badge: 'CONFLICTED / CHOP RISK — STAND ASIDE',
+    headline: 'Mixed Timeframes — Do Not Rush New Order',
+    structuralReason: 'Higher and lower timeframes conflict or volatility exceeds SL. Wait for clear breakout or reduce lot size.',
     themeColor: '#F59E0B'
   };
 }
@@ -2608,11 +2723,18 @@ export function buildCalibratedMarketItem(params: {
     }
   }
 
+  const isHigherTf =
+    params.recommendedTf === 'H1' || params.recommendedTf === 'H4' || params.recommendedTf === 'D1';
+  const activeBaseCandles =
+    isHigherTf && params.h1Candles && params.h1Candles.length >= 22
+      ? params.h1Candles
+      : params.candles;
+
   const evalData = evaluateCandleSeriesAndTick({
     pair: params.pair,
     timeframe: params.recommendedTf,
     livePrice: params.price,
-    baseCandles: params.candles,
+    baseCandles: activeBaseCandles,
     candlesAreRealOhlc: params.candlesAreRealOhlc,
     change24hPct: effectivePct,
     macro: params.macro,
@@ -2643,7 +2765,8 @@ export function buildCalibratedMarketItem(params: {
     macro: params.macro,
     previousDirection: params.previousDirection,
     previousTrendDirection: params.previousTrendDirection,
-    h1TrendDirection
+    h1TrendDirection,
+    riskConfig: positionRiskStore.getConfig()
   });
 
   const trendDirection: 'UPTREND' | 'DOWNTREND' | 'RANGING' = isNeutral
@@ -2919,7 +3042,7 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
   buildCalibratedMarketItem({
     pair: 'US30',
     symbol: 'Wall Street 30 / Dow',
-    price: 52300.0,
+    price: 52547.0,
     change24hPct: -0.35,
     recommendedTf: 'H1',
     recommendedSession: 'New York Session (16:30 - 23:00 EAT)',
@@ -2934,7 +3057,7 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
   buildCalibratedMarketItem({
     pair: 'NAS100',
     symbol: 'US Tech 100 / Nasdaq',
-    price: 25360.0,
+    price: 28412.0,
     change24hPct: -0.42,
     recommendedTf: 'H1',
     recommendedSession: 'New York Session (16:30 - 23:00 EAT)',
@@ -3051,7 +3174,7 @@ async function fetchWithFastTimeout(
 
 export interface SuperAiLiveNote {
   pair: CurrencyPair;
-  source: 'gemini-3.8-flash' | 'quantitative-engine';
+  source: 'gemini-4-hydrogen' | 'gemini-3.8-flash' | 'quantitative-engine';
   headline: string;
   note: string;
   invalidationNote: string;
@@ -3106,8 +3229,8 @@ export async function fetchPairLiveCandleSnapshot(
     let liveConnected = false;
 
     try {
-      // 1. Primary server-side institutional Yahoo/Interbank aggregator (/api/live-markets)
-      const serverRes = await fetchWithFastTimeout('/api/live-markets', {}, 2100).catch(() => null);
+      // 1. Primary server-side institutional live markets aggregator (/api/live-markets)
+      const serverRes = await fetchWithFastTimeout('/api/live-markets', {}, 4000).catch(() => null);
       if (serverRes && serverRes.ok) {
         const srvJson = await serverRes.json();
         const q = srvJson?.quotes?.[pair];
@@ -3380,14 +3503,15 @@ const inFlightSnapshotPromiseRef: { current: Promise<{ markets: MarketScanData[]
  * via server institutional cache + direct exchange fallback.
  */
 export async function fetchLiveMarketSnapshot(
-  currentMarkets: MarketScanData[] = INITIAL_MARKETS_DATA
+  currentMarkets: MarketScanData[] = INITIAL_MARKETS_DATA,
+  forceServerRefresh = false
 ): Promise<{ markets: MarketScanData[]; syncedAt: string; liveFeedConnected: boolean }> {
-  if (inFlightSnapshotPromiseRef.current) {
+  if (inFlightSnapshotPromiseRef.current && !forceServerRefresh) {
     return inFlightSnapshotPromiseRef.current;
   }
 
   const runSnapshot = async (): Promise<{ markets: MarketScanData[]; syncedAt: string; liveFeedConnected: boolean }> => {
-    void refreshBackgroundRealOhlcCandles(false);
+    void refreshBackgroundRealOhlcCandles(forceServerRefresh);
 
     const liveMap: Partial<Record<CurrencyPair, { price: number; pct: number; dailyOpen?: number }>> = {};
     const candleMap: Partial<Record<CurrencyPair, OhlcCandle[]>> = {};
@@ -3407,7 +3531,8 @@ export async function fetchLiveMarketSnapshot(
 
     try {
       // 1. Primary server-side institutional live markets aggregator (/api/live-markets)
-      const serverRes = await fetchWithFastTimeout('/api/live-markets', {}, 2100).catch(() => null);
+      const endpoint = forceServerRefresh ? '/api/live-markets?force=1' : '/api/live-markets';
+      const serverRes = await fetchWithFastTimeout(endpoint, {}, 4000).catch(() => null);
       if (serverRes && serverRes.ok) {
         const srvJson = await serverRes.json();
         const quotes = srvJson?.quotes || {};
@@ -4108,7 +4233,7 @@ export interface DailyMacroAiDirective {
   overallSafety: string;
   hourlyOutlook: string;
   catalystSummary: string;
-  source: 'gemini-3.8-flash' | 'quantitative-engine';
+  source: 'gemini-4-hydrogen' | 'gemini-3.8-flash' | 'quantitative-engine';
   syncedAt: string;
 }
 
@@ -4657,6 +4782,7 @@ class GlobalLiveMarketStreamEngine {
         ? params.customEntryPrice
         : market.price;
 
+    const activeCfg = positionRiskStore.getConfig();
     const computed = computeRealChartTradeParams({
       targetPair: market.pair,
       targetTf: timeframe,
@@ -4672,32 +4798,57 @@ class GlobalLiveMarketStreamEngine {
       macro,
       biasOverride: params.direction,
       previousDirection: params.direction,
-      h1TrendDirection: market.h1TrendDirection
+      h1TrendDirection: market.h1TrendDirection,
+      riskConfig: activeCfg
     });
 
-    const { decimals } = getPairSpecs(market.pair);
+    const { decimals, pipMultiplier, pipValPerStandardLot } = getPairSpecs(market.pair);
+    const resolvedLotSize = Number((params.lotSize || computed.lotSize || 0.01).toFixed(2));
     const finalEntry = Number(entryToUse.toFixed(decimals));
     const finalSl =
       params.customStopLoss && !isNaN(params.customStopLoss) && params.customStopLoss > 0
         ? Number(params.customStopLoss.toFixed(decimals))
         : computed.stopLoss;
-    const finalTp2 =
-      params.customTp && !isNaN(params.customTp) && params.customTp > 0
-        ? Number(params.customTp.toFixed(decimals))
-        : computed.tp2;
+
+    let finalTp1 = computed.tp1;
+    let finalTp2 = computed.tp2;
+    let finalTp3 = computed.tp3;
+
+    // If trader selected a specific Target Profit ($ USD) and a custom lot size (e.g. $30 at 0.03 Lots), calibrate TP1/TP2/TP3 to exact lot size
+    if (
+      !(params.customTp && !isNaN(params.customTp) && params.customTp > 0) &&
+      activeCfg.targetProfitUsd &&
+      activeCfg.targetProfitUsd >= 1 &&
+      resolvedLotSize !== computed.lotSize
+    ) {
+      const pipValAtLot = resolvedLotSize * pipValPerStandardLot;
+      const neededPips = Math.max(
+        10,
+        activeCfg.targetProfitUsd / Math.max(0.0001, pipValAtLot) + computed.brokerSpread
+      );
+      const tp2Delta = neededPips / pipMultiplier;
+      const tp1Delta = (neededPips * 0.5) / pipMultiplier;
+      const tp3Delta = (neededPips * 1.35) / pipMultiplier;
+      const isBuySide = params.direction === 'BUY';
+      finalTp1 = Number((isBuySide ? finalEntry + tp1Delta : finalEntry - tp1Delta).toFixed(decimals));
+      finalTp2 = Number((isBuySide ? finalEntry + tp2Delta : finalEntry - tp2Delta).toFixed(decimals));
+      finalTp3 = Number((isBuySide ? finalEntry + tp3Delta : finalEntry - tp3Delta).toFixed(decimals));
+    } else if (params.customTp && !isNaN(params.customTp) && params.customTp > 0) {
+      finalTp2 = Number(params.customTp.toFixed(decimals));
+    }
 
     const newOrder: ActiveMarketOrder = {
       id: `ord_${Date.now()}_${market.pair.replace('/', '')}`,
       pair: market.pair,
       direction: params.direction,
-      lotSize: Number((params.lotSize || computed.lotSize || 0.01).toFixed(2)),
+      lotSize: resolvedLotSize,
       broker,
       timeframe,
       entryPrice: finalEntry,
       stopLoss: finalSl,
-      tp1: computed.tp1,
+      tp1: finalTp1,
       tp2: finalTp2,
-      tp3: computed.tp3,
+      tp3: finalTp3,
       initialStopLoss: finalSl,
       initialTp2: finalTp2,
       loadedAtEat: this.formatNowEat(),
@@ -5090,7 +5241,10 @@ class GlobalLiveMarketStreamEngine {
         const resolvedMacro = data.catalystWatch || data.macroNote || macro.dxySummary;
         const noteObj: SuperAiLiveNote = {
           pair: m.pair,
-          source: data.source === 'gemini-3.8-flash' ? 'gemini-3.8-flash' : 'quantitative-engine',
+          source:
+            data.source === 'gemini-4-hydrogen' || data.source === 'gemini-3.8-flash'
+              ? 'gemini-4-hydrogen'
+              : 'quantitative-engine',
           headline:
             data.headline ||
             `${m.pair} (${activeTf}) · ${computed.direction} @ ${computed.entryPrice} (R:R ${computed.riskReward})`,
@@ -5331,7 +5485,11 @@ class GlobalLiveMarketStreamEngine {
     // Dynamic sorting strictly from Top % down to Least % across all markets!
     this.markets = sortMarketsByTopPercent(updatedList, 'PCT_DESC');
     this.syncActiveOrdersWithMarkets();
-    if (scanMode === 'auto_1s' && this.dailyMacroDirective.source !== 'gemini-3.8-flash') {
+    if (
+      scanMode === 'auto_1s' &&
+      this.dailyMacroDirective.source !== 'gemini-4-hydrogen' &&
+      this.dailyMacroDirective.source !== 'gemini-3.8-flash'
+    ) {
       this.dailyMacroDirective = buildInitialMacroDirective(this.markets);
     }
 
@@ -5398,6 +5556,14 @@ class GlobalLiveMarketStreamEngine {
       };
 
       socket.onerror = () => {};
+      socket.onclose = () => {
+        if (this.ws === socket) {
+          this.ws = null;
+          setTimeout(() => {
+            if (this.listeners.size > 0) this.connectBinanceWebSocket();
+          }, 4000);
+        }
+      };
     } catch {}
   }
 
@@ -5455,6 +5621,14 @@ class GlobalLiveMarketStreamEngine {
       };
 
       kws.onerror = () => {};
+      kws.onclose = () => {
+        if (this.krakenWs === kws) {
+          this.krakenWs = null;
+          setTimeout(() => {
+            if (this.listeners.size > 0) this.connectKrakenWebSocket();
+          }, 4500);
+        }
+      };
     } catch {}
   }
 
@@ -5462,7 +5636,8 @@ class GlobalLiveMarketStreamEngine {
     if (this.isFetchingRest) return;
     this.isFetchingRest = true;
     try {
-      const snap = await fetchLiveMarketSnapshot(this.markets);
+      const force = scanMode === 'rescan' || scanMode === 'deep_ai';
+      const snap = await fetchLiveMarketSnapshot(this.markets, force);
       const updates: Partial<
         Record<
           CurrencyPair,
@@ -5547,7 +5722,10 @@ class GlobalLiveMarketStreamEngine {
             overallSafety: data.dailyMacroDirective.overallSafety || localDirective.overallSafety,
             hourlyOutlook: data.dailyMacroDirective.hourlyOutlook || localDirective.hourlyOutlook,
             catalystSummary: data.dailyMacroDirective.catalystSummary || localDirective.catalystSummary,
-            source: data.source === 'gemini-3.8-flash' ? 'gemini-3.8-flash' : 'quantitative-engine',
+            source:
+              data.source === 'gemini-4-hydrogen' || data.source === 'gemini-3.8-flash'
+                ? 'gemini-4-hydrogen'
+                : 'quantitative-engine',
             syncedAt: nowEat
           };
         }
@@ -5557,7 +5735,10 @@ class GlobalLiveMarketStreamEngine {
             if (pData) {
               this.superAiNotes[pairKey] = {
                 pair: pairKey,
-                source: data.source === 'gemini-3.8-flash' ? 'gemini-3.8-flash' : 'quantitative-engine',
+                source:
+                  data.source === 'gemini-4-hydrogen' || data.source === 'gemini-3.8-flash'
+                    ? 'gemini-4-hydrogen'
+                    : 'quantitative-engine',
                 headline: pData.headline || `${pairKey} Super AI Verdict`,
                 note: pData.note || '',
                 invalidationNote: pData.invalidationNote || '',

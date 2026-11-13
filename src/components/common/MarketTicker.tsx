@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowUpRight, ArrowDownRight, Activity } from 'lucide-react';
-import { fetchLiveMarketSnapshot, INITIAL_MARKETS_DATA } from '../../utils/liveMarketEngine';
+import { globalLiveStream, getPairSpecs, INITIAL_MARKETS_DATA } from '../../utils/liveMarketEngine';
 
 interface TickerItem {
   pair: string;
@@ -13,13 +13,11 @@ interface TickerItem {
 }
 
 const toTickerItems = (markets: typeof INITIAL_MARKETS_DATA): TickerItem[] => {
-  const priorityPairs = ['GBP/USD', 'EUR/USD', 'XAU/USD', 'USD/JPY', 'GBP/JPY', 'AUD/USD'];
+  const priorityPairs = ['GBP/USD', 'EUR/USD', 'XAU/USD', 'USD/JPY', 'BTC/USD', 'NAS100', 'USOIL', 'GBP/JPY'];
   return priorityPairs.map((pairName) => {
     const m = markets.find((x) => x.pair === pairName) || markets[0];
-    const isJpy = m.pair.includes('JPY');
-    const isGold = m.pair.includes('XAU');
-    const decimals = isJpy ? 3 : isGold ? 2 : 5;
-    const pipUnit = isJpy ? 0.01 : isGold ? 0.1 : 0.0001;
+    const { decimals, pipMultiplier } = getPairSpecs(m.pair);
+    const pipUnit = 1 / pipMultiplier;
     const spread = m.spreadByBroker.fxpesa?.spread || 1.1;
     const ask = Number((m.price + spread * pipUnit).toFixed(decimals));
     return {
@@ -35,25 +33,19 @@ const toTickerItems = (markets: typeof INITIAL_MARKETS_DATA): TickerItem[] => {
 };
 
 export const MarketTicker: React.FC = () => {
-  const [rates, setRates] = useState<TickerItem[]>(() => toTickerItems(INITIAL_MARKETS_DATA));
-  const [liveConnected, setLiveConnected] = useState<boolean>(false);
+  const [rates, setRates] = useState<TickerItem[]>(() =>
+    toTickerItems(globalLiveStream.getState().markets)
+  );
+  const [liveConnected, setLiveConnected] = useState<boolean>(
+    () => globalLiveStream.getState().liveFeedConnected
+  );
 
   useEffect(() => {
-    let mounted = true;
-
-    const syncTicker = async () => {
-      const { markets, liveFeedConnected } = await fetchLiveMarketSnapshot(INITIAL_MARKETS_DATA);
-      if (!mounted) return;
-      setRates(toTickerItems(markets));
-      setLiveConnected(liveFeedConnected);
-    };
-
-    syncTicker();
-    const interval = setInterval(syncTicker, 60000);
-    return () => {
-      mounted = false;
-      clearInterval(interval);
-    };
+    const unsubscribe = globalLiveStream.subscribe((streamState) => {
+      setRates(toTickerItems(streamState.markets));
+      setLiveConnected(streamState.liveFeedConnected);
+    });
+    return () => unsubscribe();
   }, []);
 
   return (

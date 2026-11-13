@@ -225,7 +225,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
       mode === 'h1_trend_lock'
         ? '1H INSTITUTIONAL TREND-LOCK SCAN'
         : mode === 'deep_ai'
-        ? 'DEEP AI SCAN (ALL 10 MARKETS)'
+        ? `DEEP AI SCAN (ALL ${updatedState.markets.length} MARKETS)`
         : mode === 'rescan'
         ? 'LIVE RESCAN (TOP % → LEAST)'
         : 'SCAN ALL MARKETS';
@@ -237,7 +237,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
       const netKes = leader.netProfitKes ?? Math.round(netUsd * 130);
       setScanBanner(
         mode === 'h1_trend_lock'
-          ? `1H TREND-LOCK ACTIVE ✓ · All 10 pairs anchored to 1H 20/50 EMA structure · Pullback candles classified as Retracements (Sell Rally in Downtrend / Buy Dip in Uptrend) · Top Setup: ${leader.pair} ${dirWord} @ ${leader.price}`
+          ? `1H TREND-LOCK ACTIVE ✓ · All ${updatedState.markets.length} pairs anchored to 1H 20/50 EMA structure · Pullback candles classified as Retracements (Sell Rally in Downtrend / Buy Dip in Uptrend) · Top Setup: ${leader.pair} ${dirWord} @ ${leader.price}`
           : `${modeLabel} (${updatedState.syncedAt}) · #1 Top % Leader: ${leader.pair} (${pctStr}) · ${leader.trendDirection} · ORDER ${dirWord} @ ${leader.price} · Est. Net +$${netUsd.toFixed(2)} (+${netKes} KES) · SL ${leader.suggestedSL} · TP ${leader.suggestedTP2}`
       );
       setTimeout(() => setScanBanner(null), 6500);
@@ -498,7 +498,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
             type="button"
             onClick={() => handleRunScan('h1_trend_lock')}
             disabled={isScanning}
-            title="Lock all 10 pairs to 1H timeframe, eliminate counter-candle noise, and enforce 20/50 EMA trend fidelity"
+            title="Lock all 15 pairs to 1H timeframe, eliminate counter-candle noise, and enforce 20/50 EMA trend fidelity"
             className={`px-4 py-2.5 rounded-xl font-mono font-black text-xs uppercase tracking-wider flex items-center gap-1.5 transition whitespace-nowrap shrink-0 border ${
               activeScanMode === 'h1_trend_lock'
                 ? 'bg-[#D4AF37] text-black border-[#D4AF37] shadow-lg shadow-[#D4AF37]/20'
@@ -526,7 +526,9 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
         <div className="space-y-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="px-2.5 py-0.5 rounded-lg bg-[#D4AF37] text-black font-black">
-              {dailyMacroDirective.source === 'gemini-3.8-flash' ? 'SUPER AI MACRO DIRECTIVE' : 'AI SESSION DIRECTIVE'}
+              {dailyMacroDirective.source === 'gemini-4-hydrogen' || dailyMacroDirective.source === 'gemini-3.8-flash'
+                ? 'SUPER AI MACRO DIRECTIVE'
+                : 'AI SESSION DIRECTIVE'}
             </span>
             <strong className="text-white text-sm">{dailyMacroDirective.headline}</strong>
           </div>
@@ -611,8 +613,6 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
             swingHigh: focusedSwings.swingHigh,
             macro: macroContext,
             biasOverride: selectedSideMode === 'AUTO' ? undefined : selectedSideMode,
-            previousDirection: focusedMarket.bias === 'NEUTRAL_CHOP' ? undefined : aiRecommendedSide,
-            previousTrendDirection: focusedMarket.trendDirection,
             h1TrendDirection: focusedMarket.h1TrendDirection,
             riskConfig
           });
@@ -673,7 +673,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
 
           return (
             <div className="space-y-5 font-mono tabular-nums">
-              {/* Top Independent Card Action Toolbar + Back to All 10 Cards */}
+              {/* Top Independent Card Action Toolbar + Back to All Cards */}
               <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2 flex-wrap">
                   <button
@@ -682,7 +682,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                     className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] hover:text-white border border-slate-700 text-xs font-bold transition whitespace-nowrap"
                   >
                     <ArrowLeft className="w-4 h-4" />
-                    <span>Back to All 10 Cards (Top % → Least)</span>
+                    <span>Back to All {markets.length} Cards (Top % → Least)</span>
                   </button>
 
                   <button
@@ -971,8 +971,8 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                             <Shield className="w-3.5 h-3.5" />
                             <span>
                               {isHighWinRateSetup
-                                ? 'HIGH WIN-RATE SETUP (88%+ CONFLUENCE)'
-                                : 'SELECTIVE SETUP (PATIENCE CONFIRMATION)'}
+                                ? `ALIGNED 1H+M15 SETUP (${computed.alignedFactorsCount}/${computed.totalFactorsCount} FACTORS)`
+                                : 'SELECTIVE SETUP (WAIT CONFIRMATION)'}
                             </span>
                           </span>
                           <span className="text-cyan-300 font-bold">
@@ -1177,7 +1177,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                         <div className="flex items-center gap-2 text-[11px] text-slate-400">
                           <span>
                             {aiNote
-                              ? `${aiNote.source === 'gemini-3.8-flash' ? 'Super AI Live' : 'Quant Stream'} · ${aiNote.syncedAt}`
+                              ? `${aiNote.source === 'gemini-4-hydrogen' || aiNote.source === 'gemini-3.8-flash' ? 'Super AI Live' : 'Quant Stream'} · ${aiNote.syncedAt}`
                               : `Synced · ${lastScannedTime}`}
                           </span>
                           <button
@@ -1440,7 +1440,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                     className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/50 font-black text-xs flex items-center gap-1.5 transition"
                   >
                     <ArrowLeft className="w-4 h-4" />
-                    <span>Back to All 10 Cards (Top % → Least)</span>
+                    <span>Back to All {markets.length} Cards (Top % → Least)</span>
                   </button>
                 </div>
               </div>
@@ -1477,19 +1477,6 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
               swingLow: topSwings.swingLow,
               swingHigh: topSwings.swingHigh,
               macro: macroContext,
-              biasOverride:
-                topLeader.bias === 'NEUTRAL_CHOP'
-                  ? undefined
-                  : topLeader.bias === 'STRONG_SELL'
-                  ? 'SELL'
-                  : 'BUY',
-              previousDirection:
-                topLeader.bias === 'NEUTRAL_CHOP'
-                  ? undefined
-                  : topLeader.bias === 'STRONG_SELL'
-                  ? 'SELL'
-                  : 'BUY',
-              previousTrendDirection: topLeader.trendDirection,
               h1TrendDirection: topLeader.h1TrendDirection,
               riskConfig
             });
@@ -1526,8 +1513,22 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                       <Award className="w-3.5 h-3.5" />
                       <span>#1 TOP % MOVER · {topComputed.orderVerdictLabel}</span>
                     </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-[#00C261] text-black font-black">
-                      {topComputed.goAheadAssurance}
+                    <span
+                      className={`px-2.5 py-1 rounded-lg font-black ${
+                        topComputed.executionReadiness === 'READY_ENTER'
+                          ? 'bg-[#00C261] text-black'
+                          : topComputed.executionReadiness === 'WAIT_PULLBACK'
+                          ? 'bg-amber-400 text-black'
+                          : 'bg-red-500/80 text-white'
+                      }`}
+                    >
+                      {topComputed.executionReadiness === 'READY_ENTER'
+                        ? `READY: ${topComputed.direction}`
+                        : topComputed.executionReadiness === 'WAIT_PULLBACK'
+                        ? `WAIT PULLBACK (${topComputed.direction})`
+                        : topComputed.executionReadiness === 'NO_TRADE_CLOSED'
+                        ? 'CLOSED'
+                        : 'CHOP · STAND ASIDE'}
                     </span>
                     <span className="text-cyan-300 font-bold">
                       TF: {customTfs[topLeader.pair] || topLeader.recommendedTf} · {topComputed.trendDirection}
@@ -1706,11 +1707,6 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                 swingLow: cardSwings.swingLow,
                 swingHigh: cardSwings.swingHigh,
                 macro: macroContext,
-                biasOverride:
-                  m.bias === 'NEUTRAL_CHOP' ? undefined : m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
-                previousDirection:
-                  m.bias === 'NEUTRAL_CHOP' ? undefined : m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
-                previousTrendDirection: m.trendDirection,
                 h1TrendDirection: m.h1TrendDirection,
                 riskConfig
               });
@@ -1761,10 +1757,22 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                       </span>
                       <span
                         className={`px-2 py-0.5 rounded font-black ${
-                          isBuy ? 'bg-[#00C261]/20 text-[#00C261]' : 'bg-red-500/20 text-red-300'
+                          computed.executionReadiness === 'READY_ENTER'
+                            ? isBuy
+                              ? 'bg-[#00C261]/20 text-[#00C261]'
+                              : 'bg-red-500/20 text-red-300'
+                            : computed.executionReadiness === 'WAIT_PULLBACK'
+                            ? 'bg-amber-500/20 text-amber-300'
+                            : 'bg-slate-800 text-slate-300 border border-slate-700'
                         }`}
                       >
-                        GO-AHEAD: {computed.direction}
+                        {computed.executionReadiness === 'READY_ENTER'
+                          ? `READY: ${computed.direction}`
+                          : computed.executionReadiness === 'WAIT_PULLBACK'
+                          ? 'WAIT PULLBACK'
+                          : computed.executionReadiness === 'NO_TRADE_CLOSED'
+                          ? 'CLOSED'
+                          : 'STAND ASIDE'}
                       </span>
                     </div>
 

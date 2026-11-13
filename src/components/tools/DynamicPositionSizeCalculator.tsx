@@ -6,6 +6,7 @@ import {
   DEFAULT_RISK_MANAGEMENT_CONFIG,
   RiskManagementConfig,
   computeDynamicPositionRiskPlan,
+  getPairSpecs,
   positionRiskStore
 } from '../../utils/liveMarketEngine';
 import { getStoredPropAccount } from '../../utils/propDeskStorage';
@@ -16,6 +17,7 @@ import {
   RotateCcw,
   ShieldCheck,
   SlidersHorizontal,
+  Target,
   TrendingDown,
   TrendingUp,
   Wallet
@@ -31,6 +33,7 @@ interface DynamicPositionSizeCalculatorProps {
 
 const BALANCE_PRESETS = [100, 250, 500, 1000, 5000, 10000];
 const RISK_PCT_PRESETS = [0.5, 1.0, 1.5, 2.0, 3.0];
+const TARGET_PROFIT_PRESETS = [10, 20, 30, 50, 100];
 
 export const DynamicPositionSizeCalculator: React.FC<DynamicPositionSizeCalculatorProps> = ({
   pair,
@@ -48,6 +51,11 @@ export const DynamicPositionSizeCalculator: React.FC<DynamicPositionSizeCalculat
   const [riskPctInput, setRiskPctInput] = useState<string>(() =>
     String(positionRiskStore.getConfig().riskPct)
   );
+  const [targetProfitInput, setTargetProfitInput] = useState<string>(() =>
+    positionRiskStore.getConfig().targetProfitUsd
+      ? String(positionRiskStore.getConfig().targetProfitUsd)
+      : ''
+  );
 
   useEffect(() => {
     const unsub = positionRiskStore.subscribe((nextCfg) => {
@@ -64,6 +72,13 @@ export const DynamicPositionSizeCalculator: React.FC<DynamicPositionSizeCalculat
           ? String(nextCfg.riskPct)
           : prev;
       });
+      setTargetProfitInput((prev) => {
+        if (!nextCfg.targetProfitUsd) return '';
+        const parsed = parseFloat(prev);
+        return Math.abs(parsed - nextCfg.targetProfitUsd) > 0.001
+          ? String(nextCfg.targetProfitUsd)
+          : prev;
+      });
     });
     return () => unsub();
   }, []);
@@ -77,6 +92,7 @@ export const DynamicPositionSizeCalculator: React.FC<DynamicPositionSizeCalculat
       riskConfig
     });
 
+  const { isGold, pipMultiplier, pipValPerStandardLot } = getPairSpecs(pair);
   const decimals = computed.decimals;
   const isBuy = computed.direction === 'BUY';
 
@@ -96,6 +112,18 @@ export const DynamicPositionSizeCalculator: React.FC<DynamicPositionSizeCalculat
     }
   };
 
+  const handleTargetProfitChange = (raw: string) => {
+    setTargetProfitInput(raw);
+    if (raw.trim() === '') {
+      positionRiskStore.setConfig({ targetProfitUsd: null });
+      return;
+    }
+    const num = parseFloat(raw);
+    if (!isNaN(num) && num >= 1) {
+      positionRiskStore.setConfig({ targetProfitUsd: num });
+    }
+  };
+
   const handleSyncPropBalance = () => {
     const prop = getStoredPropAccount();
     const bal = prop.currentBalance || prop.accountSize || 10000;
@@ -106,6 +134,7 @@ export const DynamicPositionSizeCalculator: React.FC<DynamicPositionSizeCalculat
     positionRiskStore.resetToDefault();
     setBalanceInput(String(DEFAULT_RISK_MANAGEMENT_CONFIG.accountBalanceUsd));
     setRiskPctInput(String(DEFAULT_RISK_MANAGEMENT_CONFIG.riskPct));
+    setTargetProfitInput('');
   };
 
   const deltaLabel =
@@ -141,6 +170,11 @@ export const DynamicPositionSizeCalculator: React.FC<DynamicPositionSizeCalculat
               >
                 {pair} · {computed.direction}
               </span>
+              {riskPlan.targetProfitModeActive && riskPlan.targetProfitUsd && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-500/20 text-[#00C261] border border-[#00C261]/50">
+                  TARGET TP: +${riskPlan.targetProfitUsd.toFixed(2)}
+                </span>
+              )}
             </div>
             <p className="text-[10px] text-slate-400 truncate">
               Inputs sync live lots, Stop Loss, TP1–TP3 &amp; interactive chart risk zones in real time
@@ -281,7 +315,7 @@ export const DynamicPositionSizeCalculator: React.FC<DynamicPositionSizeCalculat
           </div>
         </div>
 
-        {/* SL/TP Sync Mode Toggle */}
+        {/* SL/TP Mode Toggle */}
         <div className="lg:col-span-3 p-3 rounded-xl bg-slate-950/90 border border-slate-800 flex flex-col justify-between gap-2">
           <div className="flex items-center justify-between gap-1">
             <span className="text-[11px] font-bold text-slate-300 uppercase flex items-center gap-1">
@@ -316,6 +350,119 @@ export const DynamicPositionSizeCalculator: React.FC<DynamicPositionSizeCalculat
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Target TP Profit ($ USD) Goal Strip */}
+      <div className="p-3 rounded-xl bg-slate-950/90 border border-emerald-500/35 space-y-2.5 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <label
+            htmlFor={`target-profit-${pair}`}
+            className="text-[11px] font-black text-emerald-300 uppercase flex items-center gap-1.5"
+          >
+            <Target className="w-3.5 h-3.5 text-[#00C261]" />
+            <span>Target TP2 Profit Goal ($ USD)</span>
+          </label>
+          <span className="text-[10px] text-slate-400">
+            {riskPlan.targetProfitModeActive && riskPlan.targetProfitUsd
+              ? `Locked to +$${riskPlan.targetProfitUsd.toFixed(2)} Net TP2 (${Math.round(
+                  riskPlan.targetProfitUsd * 130
+                ).toLocaleString()} KES)`
+              : 'Auto Structural R:R Mode (1:2.85)'}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setTargetProfitInput('');
+              positionRiskStore.setConfig({ targetProfitUsd: null });
+            }}
+            className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold border transition ${
+              !riskPlan.targetProfitModeActive
+                ? 'bg-[#D4AF37] text-black border-[#D4AF37] font-black'
+                : 'bg-slate-900 text-slate-400 hover:text-white border-slate-800'
+            }`}
+          >
+            Auto R:R
+          </button>
+
+          {TARGET_PROFIT_PRESETS.map((usd) => {
+            const active = riskPlan.targetProfitUsd !== null && Math.abs(riskPlan.targetProfitUsd - usd) < 0.01;
+            return (
+              <button
+                key={usd}
+                type="button"
+                onClick={() => positionRiskStore.setConfig({ targetProfitUsd: usd })}
+                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold border transition ${
+                  active
+                    ? 'bg-[#00C261] text-black border-[#00C261] font-black'
+                    : 'bg-slate-900 text-emerald-300 hover:bg-emerald-950/60 border-slate-800'
+                }`}
+              >
+                +${usd} TP
+              </button>
+            );
+          })}
+
+          <div className="relative w-28 ml-auto">
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#00C261] font-black text-xs">
+              $
+            </span>
+            <input
+              id={`target-profit-${pair}`}
+              type="number"
+              min={1}
+              max={1000000}
+              step="any"
+              placeholder="Custom $"
+              value={targetProfitInput}
+              onChange={(e) => handleTargetProfitChange(e.target.value)}
+              className="w-full pl-6 pr-2 py-1.5 rounded-lg bg-[#0B111E] border border-slate-700 focus:border-[#00C261] text-white font-black text-xs outline-none"
+            />
+          </div>
+        </div>
+
+        {/* Lot-to-Pip Breakdown Strip when Target Profit ($ USD) Mode is Active */}
+        {riskPlan.targetProfitModeActive && riskPlan.targetProfitUsd && (
+          <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
+            {riskPlan.targetProfitFeasibilityNote && (
+              <p className="text-[11px] text-emerald-200 font-sans leading-relaxed">
+                <strong className="font-mono text-[#00C261]">TARGET MATH: </strong>
+                {riskPlan.targetProfitFeasibilityNote}
+              </p>
+            )}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[10px]">
+              {[0.01, 0.02, 0.03, 0.05].map((sampleLot) => {
+                const pipsNeeded = Number(
+                  (
+                    riskPlan.targetProfitUsd! / Math.max(0.0001, sampleLot * pipValPerStandardLot) +
+                    computed.brokerSpread
+                  ).toFixed(1)
+                );
+                const priceMove = (pipsNeeded / pipMultiplier).toFixed(decimals);
+                const isCurrentLot = Math.abs(computed.lotSize - sampleLot) < 0.005;
+                return (
+                  <div
+                    key={sampleLot}
+                    className={`px-2 py-1.5 rounded-lg border ${
+                      isCurrentLot
+                        ? 'bg-emerald-950/60 border-[#00C261]/60 text-[#00C261]'
+                        : 'bg-slate-900/90 border-slate-800 text-slate-300'
+                    }`}
+                  >
+                    <span className="font-black block">
+                      {sampleLot.toFixed(2)} Lots {isCurrentLot ? '✓' : ''}
+                    </span>
+                    <span className="text-[9px] opacity-90 block">
+                      {pipsNeeded}p ({isGold ? `$${priceMove}` : `${priceMove}`})
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Live Calibrated Outputs Triad / Quad */}
@@ -408,3 +555,4 @@ export const DynamicPositionSizeCalculator: React.FC<DynamicPositionSizeCalculat
     </div>
   );
 };
+

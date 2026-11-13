@@ -151,13 +151,13 @@ const YAHOO_PAIR_SPECS: Array<{
   { pair: 'EUR/JPY', yahooSymbol: 'EURJPY=X', decimals: 3, defaultPrice: 183.79, defaultPct: 0.21 },
   { pair: 'USD/CAD', yahooSymbol: 'USDCAD=X', decimals: 5, defaultPrice: 1.39485, defaultPct: -0.22 },
   { pair: 'AUD/USD', yahooSymbol: 'AUDUSD=X', decimals: 5, defaultPrice: 0.6975, defaultPct: 0.31 },
-  { pair: 'XAU/USD', yahooSymbol: 'GC=F', decimals: 2, defaultPrice: 3897.5, defaultPct: -0.45 },
-  { pair: 'BTC/USD', yahooSymbol: 'BTC-USD', decimals: 2, defaultPrice: 69300.0, defaultPct: -0.85 },
-  { pair: 'ETH/USD', yahooSymbol: 'ETH-USD', decimals: 2, defaultPrice: 1960.0, defaultPct: -1.15 },
-  { pair: 'US30', yahooSymbol: '^DJI', decimals: 1, defaultPrice: 52300.0, defaultPct: -0.35 },
-  { pair: 'NAS100', yahooSymbol: '^IXIC', decimals: 1, defaultPrice: 25360.0, defaultPct: -0.42 },
-  { pair: 'GER40', yahooSymbol: '^GDAXI', decimals: 1, defaultPrice: 26760.0, defaultPct: 0.28 },
-  { pair: 'USOIL', yahooSymbol: 'CL=F', decimals: 2, defaultPrice: 88.6, defaultPct: -0.35 },
+  { pair: 'XAU/USD', yahooSymbol: 'GC=F', decimals: 2, defaultPrice: 3901.0, defaultPct: -0.05 },
+  { pair: 'BTC/USD', yahooSymbol: 'BTC-USD', decimals: 2, defaultPrice: 69700.0, defaultPct: -1.5 },
+  { pair: 'ETH/USD', yahooSymbol: 'ETH-USD', decimals: 2, defaultPrice: 1975.0, defaultPct: -1.5 },
+  { pair: 'US30', yahooSymbol: 'YM=F', decimals: 1, defaultPrice: 52547.0, defaultPct: 0.1 },
+  { pair: 'NAS100', yahooSymbol: 'NQ=F', decimals: 1, defaultPrice: 28412.0, defaultPct: 0.1 },
+  { pair: 'GER40', yahooSymbol: '^GDAXI', decimals: 1, defaultPrice: 26740.0, defaultPct: -0.1 },
+  { pair: 'USOIL', yahooSymbol: 'CL=F', decimals: 2, defaultPrice: 88.4, defaultPct: -0.35 },
 ];
 
 let liveMarketsCache: CachedLiveMarketsPayload | null = null;
@@ -314,48 +314,64 @@ async function aggregateAllLiveMarkets(): Promise<CachedLiveMarketsPayload> {
   const quotes: Record<string, ServerPairQuote> = {};
   let anyLive = false;
 
-  // Fetch M15 charts for all 10 symbols + H1 charts in parallel with fast timeout
-  const m15Settled = await Promise.allSettled(
-    YAHOO_PAIR_SPECS.map((spec) =>
-      fetchYahooChartCandles(spec.yahooSymbol, '15m', '2d', spec.decimals)
-    )
-  );
-  const h1Settled = await Promise.allSettled(
-    YAHOO_PAIR_SPECS.map((spec) =>
-      fetchYahooChartCandles(spec.yahooSymbol, '1h', '5d', spec.decimals)
-    )
-  );
+  const swissquotePairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'USD/CAD', 'AUD/USD', 'XAU/USD'] as const;
 
-  // Also query Kraken, Coinbase & true Spot Gold (gold-api.com) as parallel redundancy
-  const [krakenSettled, coinbaseSettled, goldApiSettled] = await Promise.allSettled([
-    fetch(
-      'https://api.kraken.com/0/public/Ticker?pair=EURUSD,GBPUSD,USDJPY,USDCHF,USDCAD,AUDUSD,ETHUSD,XBTUSD',
-      { signal: AbortSignal.timeout(1800) }
-    ).then((r) => (r.ok ? r.json() : null)),
-    fetch('https://api.coinbase.com/v2/exchange-rates?currency=USD', {
-      signal: AbortSignal.timeout(1600),
-    }).then((r) => (r.ok ? r.json() : null)),
-    fetch('https://api.gold-api.com/price/XAU', {
-      signal: AbortSignal.timeout(1800),
-    }).then((r) => (r.ok ? r.json() : null)),
+  // Execute M15 Yahoo OHLC, H1 Yahoo OHLC, Kraken, Coinbase, Gold-API, and Swissquote BBO in ONE parallel wave
+  const [m15Settled, h1Settled, extraSettled] = await Promise.all([
+    Promise.allSettled(
+      YAHOO_PAIR_SPECS.map((spec) =>
+        fetchYahooChartCandles(spec.yahooSymbol, '15m', '2d', spec.decimals)
+      )
+    ),
+    Promise.allSettled(
+      YAHOO_PAIR_SPECS.map((spec) =>
+        fetchYahooChartCandles(spec.yahooSymbol, '1h', '5d', spec.decimals)
+      )
+    ),
+    Promise.allSettled([
+      fetch(
+        'https://api.kraken.com/0/public/Ticker?pair=EURUSD,GBPUSD,USDJPY,USDCHF,USDCAD,AUDUSD,ETHUSD,XBTUSD',
+        { signal: AbortSignal.timeout(1600) }
+      ).then((r) => (r.ok ? r.json() : null)),
+      fetch('https://api.coinbase.com/v2/exchange-rates?currency=USD', {
+        signal: AbortSignal.timeout(1500),
+      }).then((r) => (r.ok ? r.json() : null)),
+      fetch('https://api.gold-api.com/price/XAU', {
+        signal: AbortSignal.timeout(1400),
+      }).then((r) => (r.ok ? r.json() : null)),
+      Promise.allSettled(
+        swissquotePairs.map((p) =>
+          fetch(`https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/${p}`, {
+            signal: AbortSignal.timeout(1400),
+          })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => ({ pair: p, data }))
+        )
+      ),
+    ]),
   ]);
 
-  const fallbackRates: Record<string, { price: number; open?: number }> = {};
+  const [krakenSettled, coinbaseSettled, goldApiSettled, swissquoteSettled] = extraSettled;
+
+  const fallbackRates: Record<string, { price: number; open?: number; spotProvider?: string }> = {};
 
   if (goldApiSettled.status === 'fulfilled' && goldApiSettled.value?.price > 1500) {
-    fallbackRates['XAU/USD'] = { price: Number(Number(goldApiSettled.value.price).toFixed(2)) };
+    fallbackRates['XAU/USD'] = {
+      price: Number(Number(goldApiSettled.value.price).toFixed(2)),
+      spotProvider: 'gold-api-spot',
+    };
   }
 
   if (coinbaseSettled.status === 'fulfilled' && coinbaseSettled.value?.data?.rates) {
     const r = coinbaseSettled.value.data.rates;
-    if (r.EUR) fallbackRates['EUR/USD'] = { price: Number((1 / parseFloat(r.EUR)).toFixed(5)) };
-    if (r.GBP) fallbackRates['GBP/USD'] = { price: Number((1 / parseFloat(r.GBP)).toFixed(5)) };
-    if (r.JPY) fallbackRates['USD/JPY'] = { price: Number(parseFloat(r.JPY).toFixed(3)) };
-    if (r.CHF) fallbackRates['USD/CHF'] = { price: Number(parseFloat(r.CHF).toFixed(5)) };
-    if (r.CAD) fallbackRates['USD/CAD'] = { price: Number(parseFloat(r.CAD).toFixed(5)) };
-    if (r.AUD) fallbackRates['AUD/USD'] = { price: Number((1 / parseFloat(r.AUD)).toFixed(5)) };
-    if (r.BTC) fallbackRates['BTC/USD'] = { price: Number((1 / parseFloat(r.BTC)).toFixed(2)) };
-    if (r.ETH) fallbackRates['ETH/USD'] = { price: Number((1 / parseFloat(r.ETH)).toFixed(2)) };
+    if (r.EUR) fallbackRates['EUR/USD'] = { price: Number((1 / parseFloat(r.EUR)).toFixed(5)), spotProvider: 'coinbase-spot' };
+    if (r.GBP) fallbackRates['GBP/USD'] = { price: Number((1 / parseFloat(r.GBP)).toFixed(5)), spotProvider: 'coinbase-spot' };
+    if (r.JPY) fallbackRates['USD/JPY'] = { price: Number(parseFloat(r.JPY).toFixed(3)), spotProvider: 'coinbase-spot' };
+    if (r.CHF) fallbackRates['USD/CHF'] = { price: Number(parseFloat(r.CHF).toFixed(5)), spotProvider: 'coinbase-spot' };
+    if (r.CAD) fallbackRates['USD/CAD'] = { price: Number(parseFloat(r.CAD).toFixed(5)), spotProvider: 'coinbase-spot' };
+    if (r.AUD) fallbackRates['AUD/USD'] = { price: Number((1 / parseFloat(r.AUD)).toFixed(5)), spotProvider: 'coinbase-spot' };
+    if (r.BTC) fallbackRates['BTC/USD'] = { price: Number((1 / parseFloat(r.BTC)).toFixed(2)), spotProvider: 'coinbase-spot' };
+    if (r.ETH) fallbackRates['ETH/USD'] = { price: Number((1 / parseFloat(r.ETH)).toFixed(2)), spotProvider: 'coinbase-spot' };
   }
 
   if (krakenSettled.status === 'fulfilled' && krakenSettled.value?.result) {
@@ -365,14 +381,40 @@ async function aggregateAllLiveMarkets(): Promise<CachedLiveMarketsPayload> {
       const lastP = parseFloat(entry?.c?.[0]);
       const openP = parseFloat(entry?.o);
       if (isNaN(lastP) || lastP <= 0) continue;
-      if (k.includes('EUR')) fallbackRates['EUR/USD'] = { price: Number(lastP.toFixed(5)), open: openP };
-      else if (k.includes('GBP')) fallbackRates['GBP/USD'] = { price: Number(lastP.toFixed(5)), open: openP };
-      else if (k.includes('JPY')) fallbackRates['USD/JPY'] = { price: Number(lastP.toFixed(3)), open: openP };
-      else if (k.includes('CHF')) fallbackRates['USD/CHF'] = { price: Number(lastP.toFixed(5)), open: openP };
-      else if (k.includes('CAD')) fallbackRates['USD/CAD'] = { price: Number(lastP.toFixed(5)), open: openP };
-      else if (k.includes('AUD')) fallbackRates['AUD/USD'] = { price: Number(lastP.toFixed(5)), open: openP };
-      else if (k.includes('ETH') && lastP > 500) fallbackRates['ETH/USD'] = { price: Number(lastP.toFixed(2)), open: openP };
-      else if (k.includes('XBT') && lastP > 5000) fallbackRates['BTC/USD'] = { price: Number(lastP.toFixed(2)), open: openP };
+      if (k.includes('EUR')) fallbackRates['EUR/USD'] = { price: Number(lastP.toFixed(5)), open: openP, spotProvider: 'kraken-spot' };
+      else if (k.includes('GBP')) fallbackRates['GBP/USD'] = { price: Number(lastP.toFixed(5)), open: openP, spotProvider: 'kraken-spot' };
+      else if (k.includes('JPY')) fallbackRates['USD/JPY'] = { price: Number(lastP.toFixed(3)), open: openP, spotProvider: 'kraken-spot' };
+      else if (k.includes('CHF')) fallbackRates['USD/CHF'] = { price: Number(lastP.toFixed(5)), open: openP, spotProvider: 'kraken-spot' };
+      else if (k.includes('CAD')) fallbackRates['USD/CAD'] = { price: Number(lastP.toFixed(5)), open: openP, spotProvider: 'kraken-spot' };
+      else if (k.includes('AUD')) fallbackRates['AUD/USD'] = { price: Number(lastP.toFixed(5)), open: openP, spotProvider: 'kraken-spot' };
+      else if (k.includes('ETH') && lastP > 500) fallbackRates['ETH/USD'] = { price: Number(lastP.toFixed(2)), open: openP, spotProvider: 'kraken-spot' };
+      else if (k.includes('XBT') && lastP > 5000) fallbackRates['BTC/USD'] = { price: Number(lastP.toFixed(2)), open: openP, spotProvider: 'kraken-spot' };
+    }
+  }
+
+  // Swissquote Real-Time Institutional BBO Spot CFD overrides lagging REST snapshots for FX & Gold
+  const swissquoteLiveSet = new Set<string>();
+  if (swissquoteSettled.status === 'fulfilled' && Array.isArray(swissquoteSettled.value)) {
+    for (const item of swissquoteSettled.value) {
+      if (item.status !== 'fulfilled' || !item.value) continue;
+      const { pair, data } = item.value;
+      if (!Array.isArray(data) || !data[0]) continue;
+      const profiles = Array.isArray(data[0].spreadProfilePrices) ? data[0].spreadProfilePrices : [];
+      const preferred =
+        profiles.find((p: any) => p?.spreadProfile === 'elite') ||
+        profiles.find((p: any) => p?.spreadProfile === 'prime') ||
+        profiles[0];
+      if (preferred && typeof preferred.bid === 'number' && typeof preferred.ask === 'number') {
+        const midSpot = (preferred.bid + preferred.ask) / 2;
+        const dec = pair === 'USD/JPY' ? 3 : pair === 'XAU/USD' ? 2 : 5;
+        if (midSpot > 0 && (pair !== 'XAU/USD' || midSpot > 1500)) {
+          fallbackRates[pair] = {
+            price: Number(midSpot.toFixed(dec)),
+            spotProvider: 'swissquote-spot-cfd',
+          };
+          swissquoteLiveSet.add(pair);
+        }
+      }
     }
   }
 
@@ -417,38 +459,40 @@ async function aggregateAllLiveMarkets(): Promise<CachedLiveMarketsPayload> {
       }
     }
 
-    // For XAU/USD, align live spot to gold-api Spot Gold (matches OANDA:XAUUSD) if available
-    if (spec.pair === 'XAU/USD' && fb && fb.price > 1500) {
+    // Prefer real-time millisecond Swissquote Spot CFD for XAU/USD and all major FX pairs, aligning OHLC candles cleanly
+    if ((spec.pair === 'XAU/USD' || swissquoteLiveSet.has(spec.pair)) && fb && fb.price > 0) {
       const spotPrice = fb.price;
-      if (m15Candles.length > 0 && Math.abs(spotPrice - price) / price < 0.015) {
+      const basisLimit = spec.pair === 'XAU/USD' ? 0.03 : 0.01;
+      if (m15Candles.length > 0 && Math.abs(spotPrice - price) / price < basisLimit) {
         const spotBasisRatio = spotPrice / m15Candles[m15Candles.length - 1].close;
         m15Candles = m15Candles.map((c) => ({
           time: c.time,
-          open: Number((c.open * spotBasisRatio).toFixed(2)),
-          high: Number((c.high * spotBasisRatio).toFixed(2)),
-          low: Number((c.low * spotBasisRatio).toFixed(2)),
-          close: Number((c.close * spotBasisRatio).toFixed(2)),
+          open: Number((c.open * spotBasisRatio).toFixed(spec.decimals)),
+          high: Number((c.high * spotBasisRatio).toFixed(spec.decimals)),
+          low: Number((c.low * spotBasisRatio).toFixed(spec.decimals)),
+          close: Number((c.close * spotBasisRatio).toFixed(spec.decimals)),
         }));
         if (h1Candles.length > 0) {
           h1Candles = h1Candles.map((c) => ({
             time: c.time,
-            open: Number((c.open * spotBasisRatio).toFixed(2)),
-            high: Number((c.high * spotBasisRatio).toFixed(2)),
-            low: Number((c.low * spotBasisRatio).toFixed(2)),
-            close: Number((c.close * spotBasisRatio).toFixed(2)),
+            open: Number((c.open * spotBasisRatio).toFixed(spec.decimals)),
+            high: Number((c.high * spotBasisRatio).toFixed(spec.decimals)),
+            low: Number((c.low * spotBasisRatio).toFixed(spec.decimals)),
+            close: Number((c.close * spotBasisRatio).toFixed(spec.decimals)),
           }));
         }
-        dailyOpen = Number((dailyOpen * spotBasisRatio).toFixed(2));
+        dailyOpen = Number((dailyOpen * spotBasisRatio).toFixed(spec.decimals));
       }
       price = spotPrice;
-      source = source === 'yahoo-finance' ? 'gold-api-spot+yahoo-ohlc' : 'gold-api-spot';
+      const spotLabel = fb.spotProvider || 'spot-feed';
+      source = source === 'yahoo-finance' ? `${spotLabel}+yahoo-ohlc` : spotLabel;
       anyLive = true;
     } else if (source !== 'yahoo-finance' && fb && fb.price > 0) {
       price = fb.price;
       if (fb.open && fb.open > 0) {
         dailyOpen = Number(fb.open.toFixed(spec.decimals));
       }
-      source = 'kraken-coinbase-fallback';
+      source = fb.spotProvider || 'kraken-coinbase-fallback';
       anyLive = true;
     }
 
@@ -475,48 +519,54 @@ async function aggregateAllLiveMarkets(): Promise<CachedLiveMarketsPayload> {
 
   if (gbpQ && jpyQ) {
     const gj = quotes['GBP/JPY'];
-    if (gj.source === 'cached-baseline' || gj.m15Candles.length < 15) {
+    const useDerivedCross =
+      swissquoteLiveSet.has('GBP/USD') ||
+      swissquoteLiveSet.has('USD/JPY') ||
+      gj.source === 'cached-baseline' ||
+      gj.m15Candles.length < 15;
+    if (useDerivedCross) {
       const derivedPrice = Number((gbpQ.price * jpyQ.price).toFixed(3));
       const derivedOpen = Number((gbpQ.dailyOpenPrice * jpyQ.dailyOpenPrice).toFixed(3));
       const m15Cross = gj.m15Candles.length >= 15 ? gj.m15Candles : buildCrossCandles(gbpQ.m15Candles, jpyQ.m15Candles, 3);
       const h1Cross = gj.h1Candles.length >= 15 ? gj.h1Candles : buildCrossCandles(gbpQ.h1Candles, jpyQ.h1Candles, 3);
       quotes['GBP/JPY'] = {
         pair: 'GBP/JPY',
-        price: gj.source === 'yahoo-finance' ? gj.price : derivedPrice,
-        dailyOpenPrice: gj.source === 'yahoo-finance' ? gj.dailyOpenPrice : derivedOpen,
+        price: derivedPrice,
+        dailyOpenPrice: derivedOpen,
         change24hPct:
-          gj.source === 'yahoo-finance'
-            ? gj.change24hPct
-            : derivedOpen > 0
+          derivedOpen > 0
             ? Number((((derivedPrice - derivedOpen) / derivedOpen) * 100).toFixed(2))
             : gj.change24hPct,
         m15Candles: m15Cross,
         h1Candles: h1Cross,
-        source: gj.source === 'yahoo-finance' ? gj.source : 'derived-interbank-cross',
+        source: swissquoteLiveSet.has('GBP/USD') ? 'swissquote-spot-cross' : 'derived-interbank-cross',
       };
     }
   }
 
   if (eurQ && jpyQ) {
     const ej = quotes['EUR/JPY'];
-    if (ej.source === 'cached-baseline' || ej.m15Candles.length < 15) {
+    const useDerivedCross =
+      swissquoteLiveSet.has('EUR/USD') ||
+      swissquoteLiveSet.has('USD/JPY') ||
+      ej.source === 'cached-baseline' ||
+      ej.m15Candles.length < 15;
+    if (useDerivedCross) {
       const derivedPrice = Number((eurQ.price * jpyQ.price).toFixed(3));
       const derivedOpen = Number((eurQ.dailyOpenPrice * jpyQ.dailyOpenPrice).toFixed(3));
       const m15Cross = ej.m15Candles.length >= 15 ? ej.m15Candles : buildCrossCandles(eurQ.m15Candles, jpyQ.m15Candles, 3);
       const h1Cross = ej.h1Candles.length >= 15 ? ej.h1Candles : buildCrossCandles(eurQ.h1Candles, jpyQ.h1Candles, 3);
       quotes['EUR/JPY'] = {
         pair: 'EUR/JPY',
-        price: ej.source === 'yahoo-finance' ? ej.price : derivedPrice,
-        dailyOpenPrice: ej.source === 'yahoo-finance' ? ej.dailyOpenPrice : derivedOpen,
+        price: derivedPrice,
+        dailyOpenPrice: derivedOpen,
         change24hPct:
-          ej.source === 'yahoo-finance'
-            ? ej.change24hPct
-            : derivedOpen > 0
+          derivedOpen > 0
             ? Number((((derivedPrice - derivedOpen) / derivedOpen) * 100).toFixed(2))
             : ej.change24hPct,
         m15Candles: m15Cross,
         h1Candles: h1Cross,
-        source: ej.source === 'yahoo-finance' ? ej.source : 'derived-interbank-cross',
+        source: swissquoteLiveSet.has('EUR/USD') ? 'swissquote-spot-cross' : 'derived-interbank-cross',
       };
     }
   }
@@ -529,6 +579,174 @@ async function aggregateAllLiveMarkets(): Promise<CachedLiveMarketsPayload> {
   };
   liveMarketsCache = payload;
   return payload;
+}
+
+let inFlightFastSpotPromise: Promise<void> | null = null;
+let lastFullOhlcFetchMs = 0;
+
+function patchCandleTailWithSpot(candles: OhlcBar[], spotPrice: number): OhlcBar[] {
+  if (!candles.length || !(spotPrice > 0)) return candles;
+  const copy = candles.slice();
+  const last = copy[copy.length - 1];
+  copy[copy.length - 1] = {
+    ...last,
+    high: Math.max(last.high, spotPrice),
+    low: Math.min(last.low, spotPrice),
+    close: spotPrice,
+  };
+  return copy;
+}
+
+async function refreshFastSpotQuotes(): Promise<void> {
+  if (!liveMarketsCache) {
+    lastFullOhlcFetchMs = Date.now();
+    await aggregateAllLiveMarkets();
+    return;
+  }
+  if (inFlightFastSpotPromise || inFlightLiveMarketsPromise) {
+    return inFlightFastSpotPromise || undefined;
+  }
+
+  inFlightFastSpotPromise = (async () => {
+    try {
+      const swissquotePairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'USD/CAD', 'AUD/USD', 'XAU/USD'] as const;
+      const fastYahooSpecs = YAHOO_PAIR_SPECS.filter(
+        (s) => s.pair === 'BTC/USD' || s.pair === 'ETH/USD' || s.pair === 'US30' || s.pair === 'NAS100' || s.pair === 'GER40' || s.pair === 'USOIL'
+      );
+
+      const [sqSettled, yhSettled] = await Promise.all([
+        Promise.allSettled(
+          swissquotePairs.map((p) =>
+            fetch(`https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/${p}`, {
+              signal: AbortSignal.timeout(1200),
+            })
+              .then((r) => (r.ok ? r.json() : null))
+              .then((data) => ({ pair: p, data }))
+          )
+        ),
+        Promise.allSettled(
+          fastYahooSpecs.map(async (spec) => {
+            const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+              spec.yahooSymbol
+            )}?interval=1m&range=1d&includePrePost=true&_t=${Date.now()}`;
+            const r = await fetch(url, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) PivotFx/2.0',
+                Accept: 'application/json',
+              },
+              signal: AbortSignal.timeout(1400),
+            });
+            if (!r.ok) return null;
+            const json: any = await r.json();
+            const meta = json?.chart?.result?.[0]?.meta;
+            const p = meta?.regularMarketPrice;
+            if (typeof p === 'number' && p > 0) {
+              return { pair: spec.pair, price: Number(p.toFixed(spec.decimals)), decimals: spec.decimals };
+            }
+            return null;
+          })
+        ),
+      ]);
+
+      const nextQuotes: Record<string, ServerPairQuote> = { ...liveMarketsCache!.quotes };
+      let updatedAny = false;
+
+      for (const item of sqSettled) {
+        if (item.status !== 'fulfilled' || !item.value) continue;
+        const { pair, data } = item.value;
+        if (!Array.isArray(data) || !data[0]) continue;
+        const profiles = Array.isArray(data[0].spreadProfilePrices) ? data[0].spreadProfilePrices : [];
+        const preferred =
+          profiles.find((p: any) => p?.spreadProfile === 'elite') ||
+          profiles.find((p: any) => p?.spreadProfile === 'prime') ||
+          profiles[0];
+        if (preferred && typeof preferred.bid === 'number' && typeof preferred.ask === 'number') {
+          const midSpot = (preferred.bid + preferred.ask) / 2;
+          const dec = pair === 'USD/JPY' ? 3 : pair === 'XAU/USD' ? 2 : 5;
+          if (midSpot > 0 && (pair !== 'XAU/USD' || midSpot > 1500) && nextQuotes[pair]) {
+            const rounded = Number(midSpot.toFixed(dec));
+            const prevQ = nextQuotes[pair];
+            const chg =
+              prevQ.dailyOpenPrice > 0
+                ? Number((((rounded - prevQ.dailyOpenPrice) / prevQ.dailyOpenPrice) * 100).toFixed(2))
+                : prevQ.change24hPct;
+            nextQuotes[pair] = {
+              ...prevQ,
+              price: rounded,
+              change24hPct: chg,
+              m15Candles: patchCandleTailWithSpot(prevQ.m15Candles, rounded),
+              h1Candles: patchCandleTailWithSpot(prevQ.h1Candles, rounded),
+            };
+            updatedAny = true;
+          }
+        }
+      }
+
+      for (const item of yhSettled) {
+        if (item.status === 'fulfilled' && item.value && nextQuotes[item.value.pair]) {
+          const { pair, price } = item.value;
+          const prevQ = nextQuotes[pair];
+          const chg =
+            prevQ.dailyOpenPrice > 0
+              ? Number((((price - prevQ.dailyOpenPrice) / prevQ.dailyOpenPrice) * 100).toFixed(2))
+              : prevQ.change24hPct;
+          nextQuotes[pair] = {
+            ...prevQ,
+            price,
+            change24hPct: chg,
+            m15Candles: patchCandleTailWithSpot(prevQ.m15Candles, price),
+            h1Candles: patchCandleTailWithSpot(prevQ.h1Candles, price),
+          };
+          updatedAny = true;
+        }
+      }
+
+      const eurQ = nextQuotes['EUR/USD'];
+      const gbpQ = nextQuotes['GBP/USD'];
+      const jpyQ = nextQuotes['USD/JPY'];
+      if (gbpQ && jpyQ && nextQuotes['GBP/JPY']) {
+        const gjPrice = Number((gbpQ.price * jpyQ.price).toFixed(3));
+        const prevGj = nextQuotes['GBP/JPY'];
+        nextQuotes['GBP/JPY'] = {
+          ...prevGj,
+          price: gjPrice,
+          change24hPct:
+            prevGj.dailyOpenPrice > 0
+              ? Number((((gjPrice - prevGj.dailyOpenPrice) / prevGj.dailyOpenPrice) * 100).toFixed(2))
+              : prevGj.change24hPct,
+          m15Candles: patchCandleTailWithSpot(prevGj.m15Candles, gjPrice),
+          h1Candles: patchCandleTailWithSpot(prevGj.h1Candles, gjPrice),
+        };
+      }
+      if (eurQ && jpyQ && nextQuotes['EUR/JPY']) {
+        const ejPrice = Number((eurQ.price * jpyQ.price).toFixed(3));
+        const prevEj = nextQuotes['EUR/JPY'];
+        nextQuotes['EUR/JPY'] = {
+          ...prevEj,
+          price: ejPrice,
+          change24hPct:
+            prevEj.dailyOpenPrice > 0
+              ? Number((((ejPrice - prevEj.dailyOpenPrice) / prevEj.dailyOpenPrice) * 100).toFixed(2))
+              : prevEj.change24hPct,
+          m15Candles: patchCandleTailWithSpot(prevEj.m15Candles, ejPrice),
+          h1Candles: patchCandleTailWithSpot(prevEj.h1Candles, ejPrice),
+        };
+      }
+
+      if (updatedAny) {
+        liveMarketsCache = {
+          fetchedAt: Date.now(),
+          syncedAt: formatEatNow(),
+          liveFeedConnected: true,
+          quotes: nextQuotes,
+        };
+      }
+    } finally {
+      inFlightFastSpotPromise = null;
+    }
+  })();
+
+  return inFlightFastSpotPromise;
 }
 
 function buildDeterministicSuperNote(body: SuperAnalysisRequest) {
@@ -636,7 +854,7 @@ function buildDeterministicBatchScan(body: BatchScanRequest) {
 
   const topSummary = topMarket
     ? `#1 Leader ${topMarket.pair} (${topMarket.change24hPct >= 0 ? `+${topMarket.change24hPct}%` : `${topMarket.change24hPct}%`}) locks ${topMarket.trendDirection} -> ${topMarket.direction} @ ${topMarket.price}.`
-    : 'All 10 institutional instruments synchronized.';
+    : 'All 15 institutional instruments synchronized.';
 
   const dailyMacroDirective = {
     headline: favoredBiasText,
@@ -831,18 +1049,25 @@ async function startServer() {
     try {
       const force = req.query.force === '1' || req.query.force === 'true';
       const now = Date.now();
-      if (!force && liveMarketsCache && now - liveMarketsCache.fetchedAt < 1500) {
+      if (!force && liveMarketsCache && now - liveMarketsCache.fetchedAt < 3500) {
         res.json(liveMarketsCache);
         return;
       }
 
-      if (!inFlightLiveMarketsPromise) {
-        inFlightLiveMarketsPromise = aggregateAllLiveMarkets().finally(() => {
-          inFlightLiveMarketsPromise = null;
-        });
+      if (force || !liveMarketsCache) {
+        if (!inFlightLiveMarketsPromise) {
+          lastFullOhlcFetchMs = now;
+          inFlightLiveMarketsPromise = aggregateAllLiveMarkets().finally(() => {
+            inFlightLiveMarketsPromise = null;
+          });
+        }
+        const data = await inFlightLiveMarketsPromise;
+        res.json(data);
+        return;
       }
-      const data = await inFlightLiveMarketsPromise;
-      res.json(data);
+
+      await refreshFastSpotQuotes();
+      res.json(liveMarketsCache);
     } catch {
       if (liveMarketsCache) {
         res.json(liveMarketsCache);
@@ -895,11 +1120,11 @@ async function startServer() {
         .join('\n');
 
       const response = await aiClient.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-4-hydrogen',
         contents: prompt,
         config: {
           systemInstruction:
-            'You are an institutional FX quantitative execution desk assistant. Reply with 2 concise, plain-English sentences covering the locked trend direction, whether to enter now or wait for a 20 EMA pullback, exact structure-protected SL and TP1/TP2/TP3 targets, and 0.01 micro lot risk discipline. Do not use markdown headers or bullet points.',
+            'You are an institutional FX quantitative execution desk assistant. Reply with 2 concise, plain-English sentences covering the locked trend direction, whether to enter now or wait for a 20 EMA pullback, exact structure-protected SL and TP1/TP2/TP3 targets, and strict micro-lot risk discipline. Do not use markdown headers or bullet points.',
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           abortSignal: AbortSignal.timeout(4500),
         },
@@ -909,7 +1134,7 @@ async function startServer() {
       if (aiText && aiText.length > 20) {
         res.json({
           ...baseline,
-          source: 'gemini-3.8-flash',
+          source: 'gemini-4-hydrogen',
           note: aiText,
           tacticalNote: aiText,
         });
@@ -944,7 +1169,7 @@ async function startServer() {
         .join('\n');
 
       const response = await aiClient.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-4-hydrogen',
         contents: prompt,
         config: {
           systemInstruction:
@@ -967,7 +1192,7 @@ async function startServer() {
         const parsed = JSON.parse(raw);
         res.json({
           ...baseline,
-          source: 'gemini-3.8-flash',
+          source: 'gemini-4-hydrogen',
           headline: parsed?.headline || baseline.headline,
           recommendation: parsed?.recommendation || baseline.recommendation,
         });
@@ -1007,7 +1232,7 @@ async function startServer() {
       ].join('\n\n');
 
       const response = await aiClient.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-4-hydrogen',
         contents: prompt,
         config: {
           systemInstruction:
@@ -1057,7 +1282,7 @@ async function startServer() {
             }
           }
         }
-        baseline.source = 'gemini-3.8-flash';
+        baseline.source = 'gemini-4-hydrogen';
       }
       res.json(baseline);
     } catch {
@@ -1084,6 +1309,24 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`PivotFx institutional desk server listening on http://0.0.0.0:${PORT}`);
+    // Pre-warm cache immediately and keep 2.5s fast spot + 18s OHLC background warmer running
+    lastFullOhlcFetchMs = Date.now();
+    void aggregateAllLiveMarkets().catch(() => {});
+    setInterval(() => {
+      const nowMs = Date.now();
+      if (nowMs - lastFullOhlcFetchMs >= 18_000) {
+        if (!inFlightLiveMarketsPromise) {
+          lastFullOhlcFetchMs = nowMs;
+          inFlightLiveMarketsPromise = aggregateAllLiveMarkets()
+            .catch(() => liveMarketsCache!)
+            .finally(() => {
+              inFlightLiveMarketsPromise = null;
+            });
+        }
+      } else {
+        void refreshFastSpotQuotes().catch(() => {});
+      }
+    }, 2500);
   });
 }
 

@@ -34,7 +34,7 @@ import {
 } from 'lucide-react';
 
 interface PositionCoachAdvice {
-  source: 'gemini-3.8-flash' | 'quantitative-engine';
+  source: 'gemini-4-hydrogen' | 'gemini-3.8-flash' | 'quantitative-engine';
   actionBadge: string;
   headline: string;
   recommendation: string;
@@ -48,7 +48,7 @@ interface TradeLogAndNotificationsViewProps {
   onSelectPairForChart?: (pair: CurrencyPair) => void;
 }
 
-const ALL_TEN_PAIRS: CurrencyPair[] = [
+const ALL_MARKET_PAIRS: CurrencyPair[] = [
   'EUR/USD',
   'GBP/USD',
   'USD/JPY',
@@ -58,7 +58,12 @@ const ALL_TEN_PAIRS: CurrencyPair[] = [
   'XAU/USD',
   'AUD/USD',
   'USD/CAD',
-  'BTC/USD'
+  'BTC/USD',
+  'ETH/USD',
+  'US30',
+  'NAS100',
+  'GER40',
+  'USOIL'
 ];
 
 export const TradeLogAndNotificationsView: React.FC<TradeLogAndNotificationsViewProps> = ({
@@ -442,7 +447,7 @@ export const TradeLogAndNotificationsView: React.FC<TradeLogAndNotificationsView
                   }}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-white font-bold outline-none focus:border-[#D4AF37]"
                 >
-                  {ALL_TEN_PAIRS.map((p) => (
+                  {ALL_MARKET_PAIRS.map((p) => (
                     <option key={p} value={p}>
                       {p}
                     </option>
@@ -752,8 +757,8 @@ export const TradeLogAndNotificationsView: React.FC<TradeLogAndNotificationsView
                           </span>
                         </div>
                         <span className="text-[10px] text-slate-400">
-                          {coachAdvice.source === 'gemini-3.8-flash'
-                            ? 'Gemini 3.8 Flash Live Coach'
+                          {coachAdvice.source === 'gemini-4-hydrogen' || coachAdvice.source === 'gemini-3.8-flash'
+                            ? 'Super AI Live Coach'
                             : 'Quantitative Risk Coach'}{' '}
                           · {coachAdvice.syncedAt}
                         </span>

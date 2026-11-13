@@ -662,80 +662,95 @@ InpMagicNumber=777129
     try {
       const pipMultiplier = pair.includes('JPY') ? 100 : pair.includes('XAU') ? 10 : pair.includes('BTC') ? 1 : 10000;
       const distFromEma20Pips = Math.abs(currentPrice - ema20) * pipMultiplier;
-        const computed = computeRealChartTradeParams({
-          targetPair: pair,
-          targetTf: timeframe,
-          targetBroker: broker,
-          price: currentPrice,
-          keyLevel,
-          ema20,
-          ema50,
-          rsi
-        });
+      const matchedCamMkt = liveMarkets.find((m) => m.pair === pair);
+      const camSwings = computeCandleSwingLevels(matchedCamMkt?.candles);
+      const pctMapCam: Partial<Record<CurrencyPair, number>> = {};
+      liveMarkets.forEach((m) => {
+        pctMapCam[m.pair] = m.change24hPct;
+      });
+      const camMacro = getCurrentMacroContext(pctMapCam);
+      const computed = computeRealChartTradeParams({
+        targetPair: pair,
+        targetTf: timeframe,
+        targetBroker: broker,
+        price: currentPrice,
+        keyLevel,
+        ema20,
+        ema50,
+        rsi,
+        atrPips: matchedCamMkt?.atrPips,
+        swingLow: camSwings.swingLow,
+        swingHigh: camSwings.swingHigh,
+        macro: camMacro,
+        h1TrendDirection: matchedCamMkt?.h1TrendDirection,
+        riskConfig
+      });
 
-        const score = Math.round(computed.confidence);
-        const verdict =
-          computed.direction === 'BUY'
-            ? `HIGH PROBABILITY BUY (${patternType.toUpperCase()})`
-            : `HIGH PROBABILITY SELL (${patternType.toUpperCase()})`;
+      const score = Math.round(computed.confidence);
+      const verdict =
+        computed.executionReadiness === 'NO_TRADE_CHOP' || computed.executionReadiness === 'NO_TRADE_CLOSED'
+          ? `WAIT / STAND ASIDE (${computed.executionReadiness})`
+          : computed.direction === 'BUY'
+          ? `HIGH PROBABILITY BUY (${patternType.toUpperCase()})`
+          : `HIGH PROBABILITY SELL (${patternType.toUpperCase()})`;
 
-        const brokerSpreadCostUsd = (computed.brokerSpread * 0.01 * 10 * (pair.includes('XAU') ? 0.1 : 0.1)).toFixed(2);
-        const decimals = computed.decimals;
+      const brokerSpreadCostUsd = computed.spreadCostUsd.toFixed(2);
+      const decimals = computed.decimals;
 
-        setCameraAnalysisResult({
-          imageSrc,
-          pair,
-          timeframe,
-          session,
-          broker,
-          currentPrice: computed.entryPrice,
-          keyLevel,
-          pattern: patternType,
-          score,
-          confidencePercent: computed.confidence,
-          orderType: computed.orderType,
-          verdict,
-          entryPrice: computed.entryPrice,
-          suggestedSL: computed.stopLoss,
-          suggestedTP: computed.tp2,
-          tp1Price: computed.tp1,
-          slPips: computed.slPips,
-          tpPips: computed.tpPips,
-          riskReward: computed.riskReward,
-          suggestedLot: computed.lotSize,
-          actualRiskUsd: computed.actualRiskUsd,
-          potentialGainUsd: computed.potentialGainUsd,
-          brokerSpreadPips: computed.brokerSpread,
-          brokerSpreadCostUsd,
-          mt4SafetyProof: computed.mt4SafetyProof,
-          ocrExtracted: {
-            detectedPair: pair,
-            detectedTimeframe: timeframe,
-            detectedPrice: computed.entryPrice,
-            detectedWickPeak: keyLevel,
-            wickExcessPips: (Math.abs(keyLevel - currentPrice) * pipMultiplier).toFixed(1),
-            fvgZone: `${(currentPrice - 6 / pipMultiplier).toFixed(decimals)} - ${(currentPrice + 6 / pipMultiplier).toFixed(decimals)}`,
-            obStatus: 'Defended Mean Threshold (50%)',
-            status: '100% INGESTED'
-          },
-          confluences: [
-            `Session Timing: ${session} aligns with institutional bank liquidity.`,
-            `Spread Check: ${broker.toUpperCase()} typical spread is ~${computed.brokerSpread} pips ($${brokerSpreadCostUsd} on 0.01 lot).`,
-            `Mean Reversion: Price positioned ${distFromEma20Pips.toFixed(1)} pips from 20 EMA (${ema20}).`,
-            `Momentum Engine: RSI (14) at ${rsi} confirms institutional positioning.`,
-            `${computed.mt4SafetyProof}`,
-            `Gilgil $2 Protection: Mathematical risk hard-capped at $2.00 (260 KES).`
-          ],
-          mt4Steps: [
-            `1. Open MT4/MT5 -> Select ${computed.brokerSymbol} (${timeframe}) -> Press F9 (New Order Ticket)`,
-            `2. Type: ${computed.orderType} @ ${computed.entryPrice}`,
-            `3. Volume: STRICTLY ${computed.lotSize} Micro Lot (Gilgil $2 Capital Shield)`,
-            `4. Set Stop Loss: ${computed.stopLoss} (-${computed.slPips} pips)`,
-            `5. Set Take Profit: ${computed.tp2} (+${computed.tpPips} pips)`,
-            `6. Scale-Out Protocol: Close 50% at ${computed.tp1} & move SL to Breakeven`
-          ],
-          notes: traderNotes || computed.trajectory,
-        });
+      setCameraAnalysisResult({
+        imageSrc,
+        pair,
+        timeframe,
+        session,
+        broker,
+        currentPrice: computed.entryPrice,
+        keyLevel,
+        pattern: patternType,
+        score,
+        confidencePercent: computed.confidence,
+        orderType: computed.orderType,
+        verdict,
+        entryPrice: computed.entryPrice,
+        suggestedSL: computed.stopLoss,
+        suggestedTP: computed.tp2,
+        tp1Price: computed.tp1,
+        slPips: computed.slPips,
+        tpPips: computed.tpPips,
+        riskReward: computed.riskReward,
+        suggestedLot: computed.lotSize,
+        actualRiskUsd: computed.actualRiskUsd,
+        potentialGainUsd: computed.potentialGainUsd,
+        brokerSpreadPips: computed.brokerSpread,
+        brokerSpreadCostUsd,
+        mt4SafetyProof: computed.mt4SafetyProof,
+        ocrExtracted: {
+          detectedPair: pair,
+          detectedTimeframe: timeframe,
+          detectedPrice: computed.entryPrice,
+          detectedWickPeak: keyLevel,
+          wickExcessPips: (Math.abs(keyLevel - currentPrice) * pipMultiplier).toFixed(1),
+          fvgZone: `${(currentPrice - 6 / pipMultiplier).toFixed(decimals)} - ${(currentPrice + 6 / pipMultiplier).toFixed(decimals)}`,
+          obStatus: 'Defended Mean Threshold (50%)',
+          status: '100% INGESTED'
+        },
+        confluences: [
+          `Execution Gate: ${computed.executionReadiness} — ${computed.executionReadinessReason}`,
+          `Spread Check: ${broker.toUpperCase()} typical spread is ~${computed.brokerSpread} pips ($${brokerSpreadCostUsd} on ${computed.lotSize.toFixed(2)} lot).`,
+          `Mean Reversion: Price positioned ${distFromEma20Pips.toFixed(1)} pips from 20 EMA (${ema20}).`,
+          `Momentum Engine: RSI (14) at ${rsi} · 1H ${computed.h1TrendDirection}.`,
+          `${computed.mt4SafetyProof}`,
+          `Dynamic Capital Protection: ${computed.lotSize.toFixed(2)} lots capped at $${computed.actualRiskUsd.toFixed(2)} (${riskConfig.riskPct}% of $${riskConfig.accountBalanceUsd.toLocaleString()}).`
+        ],
+        mt4Steps: [
+          `1. Open MT4/MT5 -> Select ${computed.brokerSymbol} (${timeframe}) -> Press F9 (New Order Ticket)`,
+          `2. Type: ${computed.orderType} @ ${computed.entryPrice}`,
+          `3. Volume: ${computed.lotSize.toFixed(2)} Lots ($${computed.actualRiskUsd.toFixed(2)} Max Risk)`,
+          `4. Set Stop Loss: ${computed.stopLoss} (-${computed.slPips} pips)`,
+          `5. Set Take Profit: ${computed.tp2} (+${computed.tpPips} pips)`,
+          `6. Scale-Out Protocol: Close 50% at ${computed.tp1} & move SL to Breakeven`
+        ],
+        notes: traderNotes || computed.trajectory,
+      });
       } catch (err) {
         console.error('Vision analysis calculation error:', err);
       } finally {
@@ -832,7 +847,9 @@ InpMagicNumber=777129
         swingLow: swings.swingLow,
         swingHigh: swings.swingHigh,
         macro: currentMacro,
-        biasOverride: manualDirection
+        h1TrendDirection: matchedMktForSwing?.h1TrendDirection,
+        biasOverride: manualDirection,
+        riskConfig
       });
 
       const isBuy = computed.direction === 'BUY';
@@ -840,11 +857,11 @@ InpMagicNumber=777129
       const distFromEma20Pips = Math.abs(targetPrice - targetEma20) * pipMultiplier;
 
       const confidencePercent = Number(
-        Math.min(98.2, computed.confidence + (mode === 'deep_ai' ? 1.4 : -1.2)).toFixed(1)
+        Math.min(88, Math.max(42, computed.confidence + (mode === 'deep_ai' ? 1.0 : -1.0))).toFixed(1)
       );
       const score = Math.round(confidencePercent);
       const verdict: 'WAIT' | 'RISKY' | 'HIGH_PROBABILITY_BUY' | 'HIGH_PROBABILITY_SELL' =
-        prefill?.bias === 'NEUTRAL_CHOP' || computed.isExtendedZone
+        computed.executionReadiness !== 'READY_ENTER'
           ? 'WAIT'
           : isBuy
           ? 'HIGH_PROBABILITY_BUY'
@@ -855,12 +872,17 @@ InpMagicNumber=777129
       const projection = computed.trajectory;
 
       const reasons: string[] = [
+        `New-Order Gate [${computed.executionReadiness}]: ${computed.executionReadinessReason}`,
         `${computed.mt4SafetyProof}`,
-        `Anchored to live chart candlestick @ ${computed.entryPrice} on ${activeTf} timeframe.`,
+        `Anchored to live chart candlestick @ ${computed.entryPrice} on ${activeTf} timeframe (1H ${computed.h1TrendDirection}).`,
         `EMA Stack Context: 20 EMA at ${targetEma20}, 50 EMA at ${targetEma50} (${distFromEma20Pips.toFixed(1)} pips offset).`,
         `Momentum & Liquidity: RSI (14) at ${targetRsi} · Sweep pool @ ${targetKeyLevel}.`,
-        `Gilgil Sizing Shield: Strictly 0.01 micro lot ($${computed.actualRiskUsd.toFixed(2)} / 260 KES max loss cap).`
+        `Dynamic Risk Shield: ${computed.lotSize.toFixed(2)} lots ($${computed.actualRiskUsd.toFixed(2)} max risk · ${riskConfig.riskPct}% of $${riskConfig.accountBalanceUsd.toLocaleString()}).`
       ];
+
+      if (computed.slVolatilityWarning) {
+        reasons.unshift(computed.slVolatilityWarning);
+      }
 
       if (computed.isExtendedZone && computed.entryTimingWarning) {
         reasons.unshift(computed.entryTimingWarning);
@@ -1000,7 +1022,12 @@ InpMagicNumber=777129
     setAdvisorMessages((prev) => [...prev, userMsg]);
     setAdvisorLoading(false);
 
-    const isBuy = m.bias === 'STRONG_BUY';
+    const chatSwings = computeCandleSwingLevels(m.candles);
+    const pctMapChat: Partial<Record<CurrencyPair, number>> = {};
+    liveMarkets.forEach((lm) => {
+      pctMapChat[lm.pair] = lm.change24hPct;
+    });
+    const chatMacro = getCurrentMacroContext(pctMapChat);
     const computed = computeRealChartTradeParams({
       targetPair: m.pair,
       targetTf: timeframe,
@@ -1010,9 +1037,15 @@ InpMagicNumber=777129
       ema20: m.ema20,
       ema50: m.ema50,
       rsi: m.rsi,
-      biasOverride: isBuy ? 'BUY' : 'SELL'
+      atrPips: m.atrPips,
+      swingLow: chatSwings.swingLow,
+      swingHigh: chatSwings.swingHigh,
+      macro: chatMacro,
+      h1TrendDirection: m.h1TrendDirection,
+      riskConfig
     });
 
+    const isBuy = computed.direction === 'BUY';
     const orderType = computed.orderType;
     const slDistancePips = computed.slPips;
     const tpDistancePips = computed.tpPips;
@@ -1021,46 +1054,45 @@ InpMagicNumber=777129
 
     const mt4Steps = [
       `1. Open MT4/MT5 -> Select ${cleanSymbol} (Timeframe: ${timeframe}) -> Press F9 (New Order Ticket)`,
-      `2. Type: ${orderType} (Instant Algorithmic Execution)`,
-      `3. Volume: STRICTLY 0.01 Micro Lot (Gilgil $2.00 / 260 KES Capital Shield)`,
+      `2. Type: ${orderType} (${computed.executionReadiness})`,
+      `3. Volume: ${computed.lotSize.toFixed(2)} Lots ($${computed.actualRiskUsd.toFixed(2)} Max Risk)`,
       `4. Set Stop Loss: ${computed.stopLoss.toFixed(decimals)} (-${slDistancePips} pips)`,
       `5. Set Take Profit: ${computed.tp2.toFixed(decimals)} (+${tpDistancePips} pips)`,
       `6. Scale-Out Protocol: Close 50% at ${computed.tp1.toFixed(decimals)} & move SL to Breakeven`
     ];
 
     const confluences = [
-      `Timeframe Alignment: ${timeframe} institutional order flow with verified stop clearance.`,
-      `Session Timing: ${m.recommendedSession} aligns with institutional order books.`,
-      `Broker Execution: ${broker.toUpperCase()} typical spread is ~${computed.brokerSpread} pips.`,
-      `Indicator Matrix: 20 EMA at ${m.ema20}, 50 EMA at ${m.ema50}, RSI at ${m.rsi}.`,
+      `Execution Gate: ${computed.executionReadiness} — ${computed.executionReadinessReason}`,
+      `Session Timing: ${m.recommendedSession} · Spread ~${computed.brokerSpread} pips on ${broker.toUpperCase()}.`,
+      `Indicator Matrix: 20 EMA at ${m.ema20}, 50 EMA at ${m.ema50}, RSI at ${m.rsi}, 1H ${computed.h1TrendDirection}.`,
       `Institutional Footprint: ${m.ictPattern}.`,
-      `Trajectory: ${m.projection}`,
-      `Gilgil $2 Shield: 0.01 micro lot caps risk strictly at $2.00 (260 KES).`
+      `Trajectory: ${computed.trajectory}`,
+      `Risk Shield: ${computed.lotSize.toFixed(2)} lots capped at $${computed.actualRiskUsd.toFixed(2)} (${riskConfig.riskPct}%).`
     ];
 
     const aiMsg: AdvisorMessage = {
       id: `ai-${Date.now()}`,
       sender: 'ai',
-      text: `**${mode === 'deep_ai' ? 'DEEP AI INSTITUTIONAL' : 'REAL CONFLUENCE'} AUDIT FOR ${m.pair} (${m.symbol}) [${timeframe}]:**\n• **Order Type:** ${orderType}\n• **Entry Price:** ${m.price}\n• **Stop Loss:** ${computed.stopLoss} (-${slDistancePips} pips)\n• **Take Profit 1:** ${computed.tp1} (50% scale-out & move SL to Breakeven)\n• **Take Profit 2:** ${computed.tp2} (+${tpDistancePips} pips final target)\n• **Risk:Reward:** ${computed.riskReward}\n• **Max Risk:** $2.00 / 260 KES strictly on 0.01 micro lot\n• **MT4 Ticket:** Symbol ${cleanSymbol} on ${broker.toUpperCase()} (~${computed.brokerSpread}p spread)`,
-      verdict: isBuy || m.bias === 'STRONG_SELL' ? 'GREEN_LIGHT' : 'CAUTION',
-      lotCap: '0.01 Micro Lot ($2.00 Max Risk)',
+      text: `**${mode === 'deep_ai' ? 'DEEP AI INSTITUTIONAL' : 'REAL CONFLUENCE'} AUDIT FOR ${m.pair} (${m.symbol}) [${timeframe}]:**\n• **Gate Status:** ${computed.executionReadiness} — ${computed.executionReadinessReason}\n• **Order Type:** ${orderType}\n• **Entry Price:** ${computed.entryPrice}\n• **Stop Loss:** ${computed.stopLoss} (-${slDistancePips} pips)\n• **Take Profit 1:** ${computed.tp1} (50% scale-out & move SL to Breakeven)\n• **Take Profit 2:** ${computed.tp2} (+${tpDistancePips} pips final target)\n• **Risk:Reward:** ${computed.riskReward}\n• **Max Risk:** $${computed.actualRiskUsd.toFixed(2)} on ${computed.lotSize.toFixed(2)} lots\n• **MT4 Ticket:** Symbol ${cleanSymbol} on ${broker.toUpperCase()} (~${computed.brokerSpread}p spread)`,
+      verdict: computed.executionReadiness === 'READY_ENTER' ? 'GREEN_LIGHT' : 'CAUTION',
+      lotCap: `${computed.lotSize.toFixed(2)} Lots ($${computed.actualRiskUsd.toFixed(2)} Max Risk)`,
       timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
       tradeCard: {
         pair: m.pair,
         timeframe,
         orderType,
-        direction: isBuy ? 'BUY' : 'SELL',
-        entryPrice: m.price,
+        direction: computed.direction,
+        entryPrice: computed.entryPrice,
         stopLoss: computed.stopLoss,
         tp1: computed.tp1,
         tp2: computed.tp2,
         slPips: slDistancePips,
         tpPips: tpDistancePips,
         riskReward: computed.riskReward,
-        lotSize: 0.01,
+        lotSize: computed.lotSize,
         actualRiskUsd: computed.actualRiskUsd,
         potentialGainUsd: computed.potentialGainUsd,
-        confidence: m.confidence,
+        confidence: computed.confidence,
         pattern: m.ictPattern,
         trend: m.trend,
         brokerSymbol: cleanSymbol,
@@ -1097,9 +1129,14 @@ InpMagicNumber=777129
 
       const queryLower = textToQuery.toLowerCase();
 
-      // 1. Detect if user specifies pair
+      // 1. Detect if user specifies pair (all 15 supported markets)
       let targetPair: CurrencyPair = pair;
       if (queryLower.includes('gold') || queryLower.includes('xau')) targetPair = 'XAU/USD';
+      else if (queryLower.includes('eth') || queryLower.includes('ethereum')) targetPair = 'ETH/USD';
+      else if (queryLower.includes('us30') || queryLower.includes('dow')) targetPair = 'US30';
+      else if (queryLower.includes('nas100') || queryLower.includes('nasdaq') || queryLower.includes('ustec')) targetPair = 'NAS100';
+      else if (queryLower.includes('ger40') || queryLower.includes('dax') || queryLower.includes('de40')) targetPair = 'GER40';
+      else if (queryLower.includes('usoil') || queryLower.includes('wti') || queryLower.includes('crude') || queryLower.includes('oil')) targetPair = 'USOIL';
       else if (queryLower.includes('eur/jpy') || queryLower.includes('eurjpy') || queryLower.includes('euppy')) targetPair = 'EUR/JPY';
       else if (queryLower.includes('usd/chf') || queryLower.includes('usdchf') || queryLower.includes('swissy') || queryLower.includes('franc')) targetPair = 'USD/CHF';
       else if (queryLower.includes('fiber') || queryLower.includes('eur/usd') || queryLower.includes('eurusd') || queryLower.includes('euro') || queryLower.includes('usd/euro') || queryLower.includes('usd euro') || queryLower.includes('usdeur')) targetPair = 'EUR/USD';
@@ -1182,7 +1219,9 @@ InpMagicNumber=777129
           atrPips: matchedMarket?.atrPips,
           swingLow: swingsAdvisor.swingLow,
           swingHigh: swingsAdvisor.swingHigh,
-          macro: advisorMacro
+          macro: advisorMacro,
+          h1TrendDirection: matchedMarket?.h1TrendDirection,
+          riskConfig
         });
 
         const orderType = computed.orderType;
@@ -1191,45 +1230,49 @@ InpMagicNumber=777129
 
         const mt4Steps = [
           `1. Open MT4/MT5 -> Select ${cleanSymbol} (Timeframe: ${targetTf}) -> Press F9 (New Order Ticket)`,
-          `2. Order Type: ${orderType} (Instant Algorithmic Execution)`,
-          `3. Volume: STRICTLY 0.01 Micro Lot (Gilgil $2.00 / 260 KES Capital Shield)`,
+          `2. Order Type: ${orderType} (${computed.executionReadiness})`,
+          `3. Volume: ${computed.lotSize.toFixed(2)} Lots ($${computed.actualRiskUsd.toFixed(2)} Max Risk)`,
           `4. Input Stop Loss: ${computed.stopLoss.toFixed(decimals)} (-${computed.slPips} pips)`,
           `5. Input Take Profit: ${computed.tp2.toFixed(decimals)} (+${computed.tpPips} pips)`,
           `6. Scale-Out Protocol: Close 50% at ${computed.tp1.toFixed(decimals)} & move SL to Breakeven`
         ];
 
         const confluences = [
-          `Chart Synchronized: Scaled for ${targetTf} timeframe volatility at live price ${targetPrice}.`,
-          `Broker Execution: ${broker.toUpperCase()} typical spread is ~${computed.brokerSpread} pips.`,
-          `Indicator Matrix: 20 EMA at ${targetEma20}, 50 EMA at ${targetEma50}, RSI at ${targetRsi}.`,
-          `MT4 Ticket: Clean symbol ${cleanSymbol} with zero invalid SL/TP rejection guarantee.`,
-          `Gilgil Shield: Strictly 0.01 micro lot with $2.00 (260 KES) hard loss cap.`,
+          `Execution Gate: ${computed.executionReadiness} — ${computed.executionReadinessReason}`,
+          `Chart Synchronized: Scaled for ${targetTf} volatility (${broker.toUpperCase()} ~${computed.brokerSpread}p spread).`,
+          `Indicator Matrix: 20 EMA at ${targetEma20}, 50 EMA at ${targetEma50}, RSI at ${targetRsi}, 1H ${computed.h1TrendDirection}.`,
+          `Risk Shield: ${computed.lotSize.toFixed(2)} lots capped at $${computed.actualRiskUsd.toFixed(2)} (${riskConfig.riskPct}% of $${riskConfig.accountBalanceUsd.toLocaleString()}).`,
           `CMA Investor Safety: Zero negative balance debt risk.`
         ];
 
         const aiMsg: AdvisorMessage = {
           id: `ai-${Date.now()}`,
           sender: 'ai',
-          text: `**🎯 LIVE CHART REAL-TIME CONFLUENCE FOR ${targetPair} [${targetTf}]:**\n• **Order Type:** ${orderType}\n• **Live Entry Price:** @ ${targetPrice}\n• **Stop Loss:** ${computed.stopLoss} (-${computed.slPips} pips / $${computed.actualRiskUsd} max risk)\n• **Take Profit 1:** ${computed.tp1} (50% scale-out & move SL to Breakeven)\n• **Take Profit 2:** ${computed.tp2} (+${computed.tpPips} pips final institutional target)\n• **Risk:Reward:** ${computed.riskReward}\n• **Volume:** Strictly 0.01 micro lot ($2.00 / 260 KES Gilgil protection)\n• **MT4 Ticket:** Symbol ${cleanSymbol} on ${broker.toUpperCase()} (~${computed.brokerSpread}p spread)\n• **CMA Guarantee:** Zero negative balance debt risk`,
-          verdict: computed.direction === 'BUY' ? 'GREEN_LIGHT' : 'GREEN_LIGHT',
-          lotCap: '0.01 Micro Lot ($2.00 Max Risk)',
+          text: `**LIVE CHART REAL-TIME CONFLUENCE FOR ${targetPair} [${targetTf}]:**\n• **Gate Status:** ${computed.executionReadiness} — ${computed.executionReadinessReason}\n• **Order Type:** ${orderType}\n• **Live Entry Price:** @ ${computed.entryPrice}\n• **Stop Loss:** ${computed.stopLoss} (-${computed.slPips} pips / $${computed.actualRiskUsd.toFixed(2)} max risk)\n• **Take Profit 1:** ${computed.tp1} (50% scale-out & move SL to Breakeven)\n• **Take Profit 2:** ${computed.tp2} (+${computed.tpPips} pips final target)\n• **Risk:Reward:** ${computed.riskReward}\n• **Volume:** ${computed.lotSize.toFixed(2)} lots ($${computed.actualRiskUsd.toFixed(2)} cap)\n• **MT4 Ticket:** Symbol ${cleanSymbol} on ${broker.toUpperCase()} (~${computed.brokerSpread}p spread)`,
+          verdict:
+            computed.executionReadiness === 'READY_ENTER'
+              ? 'GREEN_LIGHT'
+              : computed.executionReadiness === 'NO_TRADE_CLOSED'
+              ? 'DO_NOT_TRADE'
+              : 'CAUTION',
+          lotCap: `${computed.lotSize.toFixed(2)} Lots ($${computed.actualRiskUsd.toFixed(2)} Max Risk)`,
           timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
           tradeCard: {
             pair: targetPair,
             timeframe: targetTf,
             orderType,
             direction: computed.direction,
-            entryPrice: targetPrice,
+            entryPrice: computed.entryPrice,
             stopLoss: computed.stopLoss,
             tp1: computed.tp1,
             tp2: computed.tp2,
             slPips: computed.slPips,
             tpPips: computed.tpPips,
             riskReward: computed.riskReward,
-            lotSize: 0.01,
+            lotSize: computed.lotSize,
             actualRiskUsd: computed.actualRiskUsd,
             potentialGainUsd: computed.potentialGainUsd,
-            confidence: 94.5,
+            confidence: computed.confidence,
             pattern: matchedMarket?.ictPattern || (computed.direction === 'BUY' ? 'Bullish Trend Expansion' : 'Liquidity Sweep Exhaustion'),
             trend: matchedMarket?.trend || (computed.direction === 'BUY' ? 'Bullish Market Structure' : 'Bearish Distribution'),
             brokerSymbol: cleanSymbol,
@@ -1415,7 +1458,7 @@ InpMagicNumber=777129
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] hover:text-white border border-slate-700 text-xs font-mono font-bold transition whitespace-nowrap shrink-0"
           >
             <Globe className="w-4 h-4" />
-            <span>All 10 Market Cards (Top % → Least)</span>
+            <span>All {liveMarkets.length || 15} Market Cards (Top % → Least)</span>
           </button>
 
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -1478,7 +1521,7 @@ InpMagicNumber=777129
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-xs font-mono text-cyan-400">
                   <Globe className="w-5 h-5 text-[#D4AF37]" />
-                  <span>10 Markets Monitored · Real-Time Sync</span>
+                  <span>{liveMarkets.length || 15} Markets Monitored · Real-Time Sync</span>
                 </div>
 
                 <div className="space-y-1">
@@ -1486,7 +1529,7 @@ InpMagicNumber=777129
                     1. Live Multi-Market Radar &amp; Opportunities
                   </h4>
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    Scans 10 FX majors, JPY/CHF crosses, gold, and crypto simultaneously. Pinpoints liquidity sweeps, order blocks, and broker spreads across FXPesa, Exness, HFM, and FBS.
+                    Scans 15 FX majors, JPY/CHF crosses, gold, oil, indices (US30/NAS100/GER40), and crypto simultaneously. Pinpoints liquidity sweeps, order blocks, and broker spreads across FXPesa, Exness, HFM, and FBS.
                   </p>
                 </div>
 

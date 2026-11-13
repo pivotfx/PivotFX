@@ -439,7 +439,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] hover:text-white border border-[#D4AF37]/40 text-xs font-bold transition group"
                 >
                   <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-                  <span>← Return to All 10 Markets Safety Cards</span>
+                  <span>← Return to All {markets.length || 15} Markets Safety Cards</span>
                 </button>
 
                 <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
@@ -677,7 +677,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                     className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/40 text-xs font-bold flex items-center gap-1.5 transition"
                   >
                     <ArrowLeft className="w-3.5 h-3.5" />
-                    <span>← Back to All 10 Markets</span>
+                    <span>← Back to All {markets.length || 15} Markets</span>
                   </button>
 
                   {onNavigatePillar && (
@@ -708,12 +708,12 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                 <span>Independent Market Safety & Kenya Entry Window Cards (Click Any Card)</span>
               </h4>
               <p className="text-xs text-slate-400 font-mono">
-                Shows live %, candle price, Kenya EAT entry countdown timer, global entry verdict, and SL/TP across all 10 markets. Click any card to open its full chart & countdown view.
+                Shows live %, candle price, Kenya EAT entry countdown timer, global entry verdict, and SL/TP across all {markets.length || 15} markets. Click any card to open its full chart & countdown view.
               </p>
             </div>
 
             <div className="flex items-center gap-1.5 flex-wrap font-mono">
-              {(['ALL', 'GBP/USD', 'XAU/USD', 'EUR/USD', 'USD/CAD', 'USD/CHF', 'USD/JPY', 'GBP/JPY', 'EUR/JPY', 'AUD/USD', 'BTC/USD'] as const).map(
+              {(['ALL', 'GBP/USD', 'XAU/USD', 'EUR/USD', 'USD/CAD', 'USD/CHF', 'USD/JPY', 'GBP/JPY', 'EUR/JPY', 'AUD/USD', 'BTC/USD', 'ETH/USD', 'US30', 'NAS100', 'GER40', 'USOIL'] as const).map(
                 (p) => (
                   <button
                     key={p}
@@ -748,10 +748,8 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                 atrPips: rawMkt?.atrPips,
                 swingLow: cardSwings.swingLow,
                 swingHigh: cardSwings.swingHigh,
-                biasOverride: preferredSide,
-                previousDirection: preferredSide,
-                previousTrendDirection: rawMkt?.trendDirection,
-                h1TrendDirection: rawMkt?.h1TrendDirection
+                h1TrendDirection: rawMkt?.h1TrendDirection,
+                riskConfig
               });
               const pctPos = card.change24hPct >= 0;
               const loadedOrder = activeOrders[card.pair];

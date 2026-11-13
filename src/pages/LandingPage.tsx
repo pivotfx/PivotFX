@@ -8,7 +8,8 @@ import {
   globalLiveStream,
   computeRealChartTradeParams,
   computeCandleSwingLevels,
-  getCurrentMacroContext
+  getCurrentMacroContext,
+  positionRiskStore
 } from '../utils/liveMarketEngine';
 import { ActiveMarketOrderPanel } from '../components/tools/ActiveMarketOrderPanel';
 import heroDeskImg from '../assets/images/hero_desk_telemetry_1793873187661.jpg';
@@ -90,7 +91,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const topMover = allMarkets[0];
   const topMoverTrade = (() => {
     if (!topMover) return null;
-    const sideBias: 'BUY' | 'SELL' = topMover.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
     const cardSwings = computeCandleSwingLevels(topMover.candles);
     const computed = computeRealChartTradeParams({
       targetPair: topMover.pair,
@@ -105,10 +105,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       swingLow: cardSwings.swingLow,
       swingHigh: cardSwings.swingHigh,
       macro: macroContext,
-      biasOverride: sideBias,
-      previousDirection: sideBias,
-      previousTrendDirection: topMover.trendDirection,
-      h1TrendDirection: topMover.h1TrendDirection
+      h1TrendDirection: topMover.h1TrendDirection,
+      riskConfig: positionRiskStore.getConfig()
     });
     return {
       topMover,
@@ -299,7 +297,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               onClick={handleOpenMarketRadar}
               className="flex-1 lg:w-full px-4 py-2.5 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition active:scale-95"
             >
-              <span>View All 10 in Pillar 04</span>
+              <span>View All {allMarkets.length || 15} in Pillar 04</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
             <div className="flex gap-2">

@@ -78,8 +78,18 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
   const [rushGuardConfirmed, setRushGuardConfirmed] = useState(false);
   const [isAudioOn, setIsAudioOn] = useState<boolean>(() => audioAlertEngine.isEnabled());
   const [loggedToast, setLoggedToast] = useState<string | null>(null);
-  const [execMode, setExecMode] = useState<'MARKET' | 'LIMIT_20EMA'>('MARKET');
+  const [execMode, setExecMode] = useState<'MARKET' | 'LIMIT_20EMA'>(
+    computed.executionReadiness === 'WAIT_PULLBACK' ? 'LIMIT_20EMA' : 'MARKET'
+  );
   const [showStaleOrderLocal, setShowStaleOrderLocal] = useState(false);
+
+  useEffect(() => {
+    if (computed.executionReadiness === 'WAIT_PULLBACK') {
+      setExecMode('LIMIT_20EMA');
+    } else if (computed.executionReadiness === 'READY_ENTER') {
+      setExecMode('MARKET');
+    }
+  }, [pair, computed.executionReadiness]);
 
   // Live ticking countdown for entry timing window / candle retest
   const [secondsRemainingInCycle, setSecondsRemainingInCycle] = useState(180);
@@ -233,32 +243,36 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
               else setShowEntryAudit(!showEntryAudit);
             }}
             className={`p-1.5 rounded-lg border text-[10px] font-mono flex items-center justify-between gap-1 transition ${
-              entryMoment.status === 'PRIME_NOW'
+              computed.executionReadiness === 'NO_TRADE_CLOSED' || computed.executionReadiness === 'NO_TRADE_CHOP'
+                ? 'bg-red-950/40 border-red-500/50 text-red-300 hover:bg-red-900/50'
+                : entryMoment.status === 'PRIME_NOW' && computed.executionReadiness === 'READY_ENTER'
                 ? 'bg-emerald-950/40 border-[#00C261]/50 text-[#00C261] hover:bg-emerald-900/50'
-                : entryMoment.status === 'WAIT_PULLBACK'
-                ? 'bg-amber-950/40 border-amber-500/50 text-amber-300 hover:bg-amber-900/50'
-                : 'bg-red-950/40 border-red-500/50 text-red-300 hover:bg-red-900/50'
+                : 'bg-amber-950/40 border-amber-500/50 text-amber-300 hover:bg-amber-900/50'
             }`}
-            title={entryMoment.actionGuidance}
+            title={computed.executionReadinessReason || entryMoment.actionGuidance}
           >
             <span className="flex items-center gap-1 truncate font-bold">
-              {entryMoment.status === 'PRIME_NOW' ? (
-                <CheckCircle2 className="w-3 h-3 text-[#00C261] shrink-0" />
-              ) : entryMoment.status === 'WAIT_PULLBACK' ? (
-                <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
-              ) : (
+              {computed.executionReadiness === 'NO_TRADE_CLOSED' ? (
                 <Lock className="w-3 h-3 text-red-400 shrink-0" />
+              ) : computed.executionReadiness === 'NO_TRADE_CHOP' ? (
+                <ShieldAlert className="w-3 h-3 text-red-400 shrink-0" />
+              ) : entryMoment.status === 'PRIME_NOW' && computed.executionReadiness === 'READY_ENTER' ? (
+                <CheckCircle2 className="w-3 h-3 text-[#00C261] shrink-0" />
+              ) : (
+                <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
               )}
               <span className="truncate">
-                {entryMoment.status === 'PRIME_NOW'
-                  ? 'EP: Prime Now ✓'
-                  : entryMoment.status === 'WAIT_PULLBACK'
+                {computed.executionReadiness === 'NO_TRADE_CLOSED'
+                  ? 'Closed'
+                  : computed.executionReadiness === 'NO_TRADE_CHOP'
+                  ? 'Chop · Stand Aside'
+                  : computed.executionReadiness === 'WAIT_PULLBACK'
                   ? `Wait EP: ${entryMoment.advisoryPrice}`
-                  : 'Closed'}
+                  : 'EP: Ready ✓'}
               </span>
             </span>
             <span className="text-[9px] text-slate-400 font-normal shrink-0">
-              {entryMoment.status === 'WAIT_PULLBACK'
+              {computed.executionReadiness === 'WAIT_PULLBACK'
                 ? `${formatCycleCountdown(secondsRemainingInCycle)}`
                 : 'Audit'}
             </span>
@@ -395,6 +409,50 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
           </div>
         </div>
       )}
+
+      {/* High-Volatility Tight Stop Loss Alert Banner */}
+      {computed.slVolatilityWarning && (
+        <div className="p-3 rounded-2xl bg-rose-950/50 border border-rose-500/50 text-rose-200 text-xs flex items-start gap-2.5 font-sans">
+          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+          <span>{computed.slVolatilityWarning}</span>
+        </div>
+      )}
+
+      {/* New-Order Execution Readiness Gate Banner */}
+      <div
+        className={`p-3 rounded-2xl border text-xs flex flex-wrap items-center justify-between gap-2 ${
+          computed.executionReadiness === 'READY_ENTER'
+            ? 'bg-emerald-950/40 border-[#00C261]/50 text-emerald-200'
+            : computed.executionReadiness === 'WAIT_PULLBACK'
+            ? 'bg-amber-950/45 border-amber-500/50 text-amber-200'
+            : 'bg-rose-950/55 border-rose-500/60 text-rose-200'
+        }`}
+      >
+        <div className="flex items-start gap-2.5 min-w-0 font-sans">
+          {computed.executionReadiness === 'READY_ENTER' ? (
+            <CheckCircle2 className="w-4 h-4 text-[#00C261] shrink-0 mt-0.5" />
+          ) : computed.executionReadiness === 'WAIT_PULLBACK' ? (
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          ) : (
+            <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+          )}
+          <div className="min-w-0">
+            <strong className="font-mono uppercase tracking-wider block text-[11px]">
+              {computed.executionReadiness === 'READY_ENTER'
+                ? `NEW ORDER GATE: ALIGNED SETUP CONFIRMED (${shownDirection})`
+                : computed.executionReadiness === 'WAIT_PULLBACK'
+                ? 'NEW ORDER GATE: WAIT 20 EMA PULLBACK / CHECK ATR SL (DO NOT CHASE)'
+                : computed.executionReadiness === 'NO_TRADE_CLOSED'
+                ? 'NEW ORDER GATE: MARKET CLOSED — DO NOT PLACE ORDER'
+                : 'NEW ORDER GATE: STAND ASIDE ON NEW ORDERS — LOW EDGE / 1H CONFLICT'}
+            </strong>
+            <span className="text-[11px] opacity-90 block">{computed.executionReadinessReason}</span>
+          </div>
+        </div>
+        <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-mono font-black border border-current/30 shrink-0">
+          {computed.executionReadiness}
+        </span>
+      </div>
 
       {/* Candle Structure Proof Ribbon + Execution Mode Toggle (Market Now vs 20 EMA Limit EP) */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-900/90 border border-slate-800 text-[11px]">
@@ -868,10 +926,10 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
           <div className="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1.5 text-xs font-sans">
             <strong className="text-white block flex items-center gap-1.5 font-mono">
               <Activity className="w-3.5 h-3.5 text-[#00C261]" />
-              <span>Why Temporary Counter-Candles Will NOT Break This Direction:</span>
+              <span>1H Trend Context vs Intraday Pullbacks (Always Respect SL):</span>
             </strong>
             <p className="text-slate-300 leading-relaxed text-xs">
-              {sustainability.structuralReason} Even if you see 1–3 opposing candles on the 5-minute or 15-minute chart, the 1-Hour institutional EMA cloud and order block structure remain firmly intact. Do not panic or flip orders back and forth — let the math work toward TP1 ({shownTp1}) and TP2 ({shownTp2}).
+              {sustainability.structuralReason} Short M5/M15 pullbacks often retest the 20 EMA before continuing with the 1H structure, but no signal is guaranteed — keep your Stop Loss ({shownSl}) strictly placed in your broker and exit automatically if invalidated.
             </p>
           </div>
         </div>

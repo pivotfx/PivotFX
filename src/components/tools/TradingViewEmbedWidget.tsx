@@ -98,6 +98,8 @@ export const TradingViewEmbedWidget: React.FC<TradingViewEmbedWidgetProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [streamState, setStreamState] = useState<GlobalStreamState>(() => globalLiveStream.getState());
   const [riskConfig, setRiskConfig] = useState<RiskManagementConfig>(() => positionRiskStore.getConfig());
+  const [tvSyncInput, setTvSyncInput] = useState<string>('');
+  const [tvSyncFeedback, setTvSyncFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = globalLiveStream.subscribe((next) => setStreamState(next));
@@ -108,8 +110,15 @@ export const TradingViewEmbedWidget: React.FC<TradingViewEmbedWidgetProps> = ({
     };
   }, []);
 
+  useEffect(() => {
+    setTvSyncInput('');
+    setTvSyncFeedback(null);
+  }, [pair]);
+
   const marketItem = streamState.markets.find((m) => m.pair === pair) || streamState.markets[0];
   const currentPrice = marketItem?.price || 1.0;
+  const isCustomTvLocked = Boolean(streamState.lockedPairs[pair]);
+  const isLiveSpotConnected = marketItem?.dataSource === 'Live Interbank Feed';
   const pctMap: Partial<Record<CurrencyPair, number>> = {};
   streamState.markets.forEach((m) => {
     pctMap[m.pair] = m.change24hPct;
@@ -144,6 +153,16 @@ export const TradingViewEmbedWidget: React.FC<TradingViewEmbedWidgetProps> = ({
 
   const symbol = getTradingViewSymbol(pair);
   const interval = getTradingViewInterval(timeframe);
+
+  const handleApplyTvCandleSync = (e: React.FormEvent) => {
+    e.preventDefault();
+    const val = parseFloat(tvSyncInput);
+    if (isNaN(val) || val <= 0) return;
+    globalLiveStream.setCustomCandlePrice(pair, val, timeframe);
+    setTvSyncFeedback(
+      `Synced ${pair} EP, SL & TP1–TP3 to TradingView candle ${val.toFixed(computed.decimals)}`
+    );
+  };
 
   // Official TradingView embed iframe URL
   const iframeUrl = `https://s.tradingview.com/widgetembed/?frameElementId=tradingview_embed_${symbol}&symbol=${encodeURIComponent(
@@ -273,6 +292,66 @@ export const TradingViewEmbedWidget: React.FC<TradingViewEmbedWidgetProps> = ({
           )}
         </div>
       </div>
+
+      {/* Feed Parity & TradingView Candle Sync Guard Bar */}
+      <div className="px-3 sm:px-4 py-2 bg-[#080E1A] border-b border-slate-800/90 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span
+            className={`px-2 py-0.5 rounded text-[10px] font-black border ${
+              isCustomTvLocked
+                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50'
+                : isLiveSpotConnected
+                ? 'bg-[#00C261]/20 text-[#00C261] border-[#00C261]/40'
+                : 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+            }`}
+          >
+            {isCustomTvLocked
+              ? `TV CANDLE ANCHORED: ${currentPrice.toFixed(computed.decimals)}`
+              : isLiveSpotConnected
+              ? `LIVE SPOT QUOTE: ${currentPrice.toFixed(computed.decimals)}`
+              : `OFFLINE CALIBRATION QUOTE: ${currentPrice.toFixed(computed.decimals)} — SYNC TV PRICE`}
+          </span>
+          <span className="text-[10px] text-slate-400 font-sans">
+            Broker/TradingView candle slightly different? Match EP, SL &amp; TP to exact {symbol} price before ordering:
+          </span>
+        </div>
+
+        <form onSubmit={handleApplyTvCandleSync} className="flex items-center gap-1.5">
+          <input
+            type="number"
+            step="any"
+            value={tvSyncInput}
+            onChange={(e) => setTvSyncInput(e.target.value)}
+            placeholder={`TV Candle (${currentPrice.toFixed(computed.decimals)})`}
+            aria-label={`Sync ${pair} to TradingView candle price`}
+            className="w-36 bg-slate-950 border border-slate-700 focus:border-[#D4AF37] rounded-lg px-2.5 py-1 text-white text-[11px] font-bold outline-none"
+          />
+          <button
+            type="submit"
+            className="px-2.5 py-1 rounded-lg bg-[#D4AF37] hover:bg-amber-400 text-black font-black text-[10px] transition whitespace-nowrap"
+          >
+            Sync to TV Candle
+          </button>
+          {isCustomTvLocked && (
+            <button
+              type="button"
+              onClick={() => {
+                globalLiveStream.unlockPairToLiveStream(pair);
+                setTvSyncFeedback(null);
+              }}
+              className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/40 font-bold text-[10px] transition whitespace-nowrap"
+            >
+              Resume Live
+            </button>
+          )}
+        </form>
+      </div>
+
+      {tvSyncFeedback && (
+        <div className="px-4 py-1.5 bg-emerald-950/50 border-b border-[#00C261]/40 text-[11px] font-mono text-[#00C261] font-bold">
+          {tvSyncFeedback}
+        </div>
+      )}
 
       {/* Embedded Chart Container */}
       <div className={`w-full ${isFullscreen ? 'flex-1 h-full' : 'h-[480px] sm:h-[540px]'}`}>
