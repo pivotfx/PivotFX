@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CurrencyPair, Timeframe } from '../../types';
 import {
   BarChart3,
@@ -6,23 +6,17 @@ import {
   Minimize2,
   ExternalLink,
   X,
-  Layers,
-  Sparkles,
-  TrendingUp,
   Activity,
-  Copy,
-  Check,
-  CheckCircle2,
-  AlertTriangle,
-  ShieldCheck,
-  ShieldAlert,
-  ChevronDown,
-  ChevronUp
 } from 'lucide-react';
 import {
   globalLiveStream,
+  GlobalStreamState,
   computeRealChartTradeParams,
-  evaluatePairKenyaTiming
+  computeCandleSwingLevels,
+  getCurrentMacroContext,
+  evaluatePairKenyaTiming,
+  RiskManagementConfig,
+  positionRiskStore
 } from '../../utils/liveMarketEngine';
 import { EntryConfirmationController } from './EntryConfirmationController';
 
@@ -102,18 +96,51 @@ export const TradingViewEmbedWidget: React.FC<TradingViewEmbedWidgetProps> = ({
   isCollapsible = true,
 }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'standard' | 'advanced'>('advanced');
+  const [streamState, setStreamState] = useState<GlobalStreamState>(() => globalLiveStream.getState());
+  const [riskConfig, setRiskConfig] = useState<RiskManagementConfig>(() => positionRiskStore.getConfig());
 
-  const streamState = globalLiveStream.getState();
-  const marketItem = streamState.markets.find((m) => m.pair === pair);
+  useEffect(() => {
+    const unsub = globalLiveStream.subscribe((next) => setStreamState(next));
+    const unsubRisk = positionRiskStore.subscribe((nextCfg) => setRiskConfig(nextCfg));
+    return () => {
+      unsub();
+      unsubRisk();
+    };
+  }, []);
+
+  const marketItem = streamState.markets.find((m) => m.pair === pair) || streamState.markets[0];
   const currentPrice = marketItem?.price || 1.0;
+  const pctMap: Partial<Record<CurrencyPair, number>> = {};
+  streamState.markets.forEach((m) => {
+    pctMap[m.pair] = m.change24hPct;
+  });
+  const liveMacro = getCurrentMacroContext(pctMap);
+  const swings = computeCandleSwingLevels(marketItem?.candles);
+
   const computed = computeRealChartTradeParams({
     targetPair: pair,
     targetTf: timeframe,
-    targetBroker: 'fxpesa',
-    price: currentPrice
+    targetBroker: streamState.activeBroker || 'fxpesa',
+    price: currentPrice,
+    keyLevel: marketItem?.keyLevel,
+    ema20: marketItem?.ema20 ?? currentPrice,
+    ema50: marketItem?.ema50 ?? currentPrice,
+    rsi: marketItem?.rsi ?? 50,
+    atrPips: marketItem?.atrPips,
+    swingLow: swings.swingLow,
+    swingHigh: swings.swingHigh,
+    macro: liveMacro,
+    h1TrendDirection: marketItem?.h1TrendDirection,
+    biasOverride:
+      marketItem && marketItem.bias !== 'NEUTRAL_CHOP'
+        ? marketItem.bias === 'STRONG_SELL'
+          ? 'SELL'
+          : 'BUY'
+        : undefined,
+    riskConfig
   });
   const kenyaTiming = evaluatePairKenyaTiming(pair);
+  const lockedOrder = streamState.activeOrders[pair] || null;
 
   const symbol = getTradingViewSymbol(pair);
   const interval = getTradingViewInterval(timeframe);
@@ -175,20 +202,34 @@ export const TradingViewEmbedWidget: React.FC<TradingViewEmbedWidgetProps> = ({
 
         {/* Quick Pair Selector Bar */}
         {onPairChange && (
-          <div className="hidden md:flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
-            {PAIR_OPTIONS.slice(0, 5).map((p) => (
-              <button
-                key={p}
-                onClick={() => onPairChange(p)}
-                className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold transition ${
-                  pair === p
-                    ? 'bg-[#D4AF37] text-black shadow-sm'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                }`}
-              >
-                {p}
-              </button>
-            ))}
+          <div className="flex items-center gap-1.5">
+            <div className="hidden lg:flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+              {PAIR_OPTIONS.slice(0, 5).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => onPairChange(p)}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold transition ${
+                    pair === p
+                      ? 'bg-[#D4AF37] text-black shadow-sm'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+            <select
+              value={pair}
+              onChange={(e) => onPairChange(e.target.value as CurrencyPair)}
+              className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-[11px] font-mono font-bold text-[#D4AF37] focus:outline-none focus:border-[#D4AF37]"
+              aria-label="Select TradingView Market Pair"
+            >
+              {PAIR_OPTIONS.map((p) => (
+                <option key={p} value={p} className="bg-slate-950 text-white">
+                  {p}
+                </option>
+              ))}
+            </select>
           </div>
         )}
 
@@ -254,6 +295,10 @@ export const TradingViewEmbedWidget: React.FC<TradingViewEmbedWidgetProps> = ({
           kenyaTiming={kenyaTiming}
           livePrice={currentPrice}
           timeframe={timeframe}
+          lockedOrder={lockedOrder}
+          ema20={marketItem?.ema20}
+          ema50={marketItem?.ema50}
+          rsi={marketItem?.rsi}
           variant="focused"
         />
       </div>

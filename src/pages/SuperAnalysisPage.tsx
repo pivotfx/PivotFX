@@ -33,6 +33,7 @@ import {
 import confetti from 'canvas-confetti';
 import { PillarHeaderBar } from '../components/common/PillarHeaderBar';
 import { LiveInteractiveCandleChart } from '../components/tools/LiveInteractiveCandleChart';
+import { DynamicPositionSizeCalculator } from '../components/tools/DynamicPositionSizeCalculator';
 import {
   INITIAL_MARKETS_DATA,
   globalLiveStream,
@@ -45,6 +46,8 @@ import {
   getCurrentMacroContext,
   ComputedTradeParams,
   MarketScanData,
+  RiskManagementConfig,
+  positionRiskStore
 } from '../utils/liveMarketEngine';
 
 interface SuperAnalysisPageProps {
@@ -95,6 +98,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
   const [copiedTicket, setCopiedTicket] = useState(false);
   const [isCustomCandleLocked, setIsCustomCandleLocked] = useState(false);
   const [inspectedSide, setInspectedSide] = useState<'AUTO' | 'BUY' | 'SELL'>('AUTO');
+  const [riskConfig, setRiskConfig] = useState<RiskManagementConfig>(() => positionRiskStore.getConfig());
 
   const syncLiveRates = async (applyToSelectedPair = false) => {
     setSyncingFeed(true);
@@ -123,6 +127,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
   const tfRef = React.useRef<Timeframe>(timeframe);
   const brokerRef = React.useRef<BrokerId>(broker);
   const inspectedSideRef = React.useRef<'AUTO' | 'BUY' | 'SELL'>(inspectedSide);
+  const riskConfigRef = React.useRef<RiskManagementConfig>(riskConfig);
 
   useEffect(() => {
     lockedRef.current = isCustomCandleLocked;
@@ -139,8 +144,14 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
   useEffect(() => {
     inspectedSideRef.current = inspectedSide;
   }, [inspectedSide]);
+  useEffect(() => {
+    riskConfigRef.current = riskConfig;
+  }, [riskConfig]);
 
   useEffect(() => {
+    const unsubRisk = positionRiskStore.subscribe((nextCfg) => {
+      setRiskConfig(nextCfg);
+    });
     const unsubscribe = globalLiveStream.subscribe((streamState) => {
       setLiveMarkets(streamState.markets);
       setLastSyncedAt(streamState.syncedAt);
@@ -182,13 +193,17 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
               h1TrendDirection: match.h1TrendDirection,
               biasOverride: forcedSide,
               previousDirection: prevTicket.direction,
-              previousTrendDirection: match.trendDirection
+              previousTrendDirection: match.trendDirection,
+              riskConfig: riskConfigRef.current
             });
           });
         }
       }
     });
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      unsubRisk();
+    };
   }, []);
 
   const handlePairChange = (newPair: CurrencyPair) => {
@@ -377,6 +392,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
       biasOverride: manualSideOverride,
       previousDirection: computedTicket?.direction || (activeMarketMatch?.bias === 'STRONG_SELL' ? 'SELL' : 'BUY'),
       previousTrendDirection: activeMarketMatch?.trendDirection,
+      riskConfig,
     });
     setComputedTicket(ticket);
 
@@ -452,12 +468,12 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
           : `Bullish ${pair} execution plan anchored around ${numPrice.toFixed(decimals)} on ${timeframe}. Stop Loss (${ticket.stopLoss.toFixed(decimals)}) sits cleanly BELOW Entry so MT4/MT5 executes with zero rejection.`,
       keyRiskFactor:
         verdict === 'RISKY_EXTENDED'
-          ? 'Candle is stretched far from 20 EMA — wait for a minor pullback or keep strict 0.01 micro lot.'
-          : `Broker spread (~${ticket.brokerSpread} pips on ${ticket.brokerSymbol}) and strict $2.00 (260 KES) capital shield.`,
+          ? `Candle is stretched far from 20 EMA — wait for a minor pullback or size strictly at ${ticket.lotSize.toFixed(2)} lots.`
+          : `Broker spread (~${ticket.brokerSpread} pips on ${ticket.brokerSymbol}) and $${ticket.actualRiskUsd.toFixed(2)} (${Math.round(ticket.actualRiskUsd * 130)} KES) risk budget (${riskConfig.riskPct}% of $${riskConfig.accountBalanceUsd.toLocaleString()}).`,
       institutionalFootprint: ticket.trajectory,
       tradePlanSteps: [
         `1. Order Type: ${ticket.orderType} on ${ticket.brokerSymbol} (${timeframe})`,
-        `2. Entry & Volume: ${ticket.entryPrice.toFixed(decimals)} @ 0.01 micro lot ($${ticket.actualRiskUsd.toFixed(2)} risk)`,
+        `2. Entry & Volume: ${ticket.entryPrice.toFixed(decimals)} @ ${ticket.lotSize.toFixed(2)} lots ($${ticket.actualRiskUsd.toFixed(2)} risk)`,
         `3. Stop Loss (Invalidation): ${ticket.stopLoss.toFixed(decimals)} (${ticket.slPips} pips)`,
         `4. 1H–12H TP1 / TP2: ${ticket.tp1.toFixed(decimals)} / ${ticket.tp2.toFixed(decimals)} (+$${ticket.netProfitUsd.toFixed(2)})`,
         `5. 12H–48H Extended TP3: ${ticket.tp3.toFixed(decimals)} (+${ticket.tp3Pips}p / +$${ticket.netProfit48hUsd.toFixed(2)})`,
@@ -470,7 +486,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
       title,
       recommendation,
       suggestedStake: ticket.actualRiskUsd,
-      suggestedLotSize: 0.01,
+      suggestedLotSize: ticket.lotSize,
       stopLossPips: ticket.slPips,
       takeProfitPips: ticket.tpPips,
       riskReward: ticket.riskReward,
@@ -498,30 +514,30 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
   });
   const displayMacro = getCurrentMacroContext(pctMapForDisplay);
   const activePairMarket = liveMarkets.find((m) => m.pair === pair);
-  const displayedTicket =
-    computedTicket && inspectedSide !== 'AUTO'
-      ? computeRealChartTradeParams({
-          targetPair: pair,
-          targetTf: timeframe,
-          targetBroker: broker,
-          price: parseFloat(price) || computedTicket.entryPrice,
-          keyLevel: activePairMarket?.keyLevel,
-          ema20: parseFloat(ema20) || computedTicket.entryPrice,
-          ema50: parseFloat(ema50) || computedTicket.entryPrice,
-          rsi: parseFloat(rsi) || 50,
-          atrPips: activePairMarket?.atrPips,
-          macro: displayMacro,
-          h1TrendDirection: activePairMarket?.h1TrendDirection,
-          biasOverride: inspectedSide,
-          previousDirection: computedTicket.direction,
-          previousTrendDirection: activePairMarket?.trendDirection,
-        })
-      : computedTicket;
+  const displayedTicket = computedTicket
+    ? computeRealChartTradeParams({
+        targetPair: pair,
+        targetTf: timeframe,
+        targetBroker: broker,
+        price: parseFloat(price) || computedTicket.entryPrice,
+        keyLevel: activePairMarket?.keyLevel,
+        ema20: parseFloat(ema20) || computedTicket.entryPrice,
+        ema50: parseFloat(ema50) || computedTicket.entryPrice,
+        rsi: parseFloat(rsi) || 50,
+        atrPips: activePairMarket?.atrPips,
+        macro: displayMacro,
+        h1TrendDirection: activePairMarket?.h1TrendDirection,
+        biasOverride: inspectedSide === 'AUTO' ? undefined : inspectedSide,
+        previousDirection: computedTicket.direction,
+        previousTrendDirection: activePairMarket?.trendDirection,
+        riskConfig,
+      })
+    : null;
 
   const handleCopyTicket = () => {
     if (!displayedTicket) return;
     const dec = displayedTicket.decimals;
-    const summary = `${pair} (${timeframe}) • ${displayedTicket.orderType}\nEntry: ${displayedTicket.entryPrice.toFixed(dec)}\nStop Loss: ${displayedTicket.stopLoss.toFixed(dec)}\nTP1 (1H–4H): ${displayedTicket.tp1.toFixed(dec)}\nTP2 (4H–12H): ${displayedTicket.tp2.toFixed(dec)}\nTP3 (12H–48H): ${displayedTicket.tp3.toFixed(dec)}\nLot Size: 0.01 ($${displayedTicket.actualRiskUsd.toFixed(2)} Risk)`;
+    const summary = `${pair} (${timeframe}) • ${displayedTicket.orderType}\nEntry: ${displayedTicket.entryPrice.toFixed(dec)}\nStop Loss: ${displayedTicket.stopLoss.toFixed(dec)}\nTP1 (1H–4H): ${displayedTicket.tp1.toFixed(dec)}\nTP2 (4H–12H): ${displayedTicket.tp2.toFixed(dec)}\nTP3 (12H–48H): ${displayedTicket.tp3.toFixed(dec)}\nLot Size: ${displayedTicket.lotSize.toFixed(2)} ($${displayedTicket.actualRiskUsd.toFixed(2)} Risk)`;
     navigator.clipboard?.writeText(summary);
     setCopiedTicket(true);
     setTimeout(() => setCopiedTicket(false), 2000);
@@ -676,9 +692,10 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
           rsi: parsedRsi,
           atrPips: activeMarketItem.atrPips,
           h1TrendDirection: activeMarketItem.h1TrendDirection,
-          biasOverride: inspectedSide === 'AUTO' ? computedTicket?.direction : inspectedSide,
+          biasOverride: inspectedSide === 'AUTO' ? undefined : inspectedSide,
           previousDirection: activeMarketItem.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
-          previousTrendDirection: activeMarketItem.trendDirection
+          previousTrendDirection: activeMarketItem.trendDirection,
+          riskConfig,
         });
 
         return (
@@ -730,8 +747,11 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
               stopLoss={previewTicket.stopLoss}
               tp1={previewTicket.tp1}
               tp2={previewTicket.tp2}
+              advisoryEntryPrice={previewTicket.advisoryEntryPrice}
               direction={previewTicket.direction}
               change24hPct={activeMarketItem.change24hPct}
+              lotSize={previewTicket.lotSize}
+              riskUsd={previewTicket.actualRiskUsd}
               isLockedToCustom={isCustomCandleLocked}
               onCandlePriceChange={(newP) => {
                 const { decimals } = getPairSpecs(pair);
@@ -743,6 +763,11 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                 globalLiveStream.unlockPairToLiveStream(pair);
                 syncLiveRates(true);
               }}
+            />
+
+            <DynamicPositionSizeCalculator
+              pair={pair}
+              computed={displayedTicket || previewTicket}
             />
 
             {/* Real-Time Super AI Tactical Note Strip */}
@@ -938,7 +963,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                 : `Bullish ${pair} execution plan anchored around ${displayedTicket.entryPrice.toFixed(dec)} on ${timeframe}. Stop Loss (${displayedTicket.stopLoss.toFixed(dec)}) sits cleanly BELOW Entry so MT4/MT5 executes with zero rejection.`;
             const effectiveTradePlanSteps = [
               `1. Order Type: ${displayedTicket.orderType} on ${displayedTicket.brokerSymbol} (${timeframe})`,
-              `2. Entry & Volume: ${displayedTicket.entryPrice.toFixed(dec)} @ 0.01 micro lot ($${displayedTicket.actualRiskUsd.toFixed(2)} risk)`,
+              `2. Entry & Volume: ${displayedTicket.entryPrice.toFixed(dec)} @ ${displayedTicket.lotSize.toFixed(2)} lots ($${displayedTicket.actualRiskUsd.toFixed(2)} risk)`,
               `3. Stop Loss (Invalidation): ${displayedTicket.stopLoss.toFixed(dec)} (${displayedTicket.slPips} pips)`,
               `4. 1H–12H TP1 / TP2: ${displayedTicket.tp1.toFixed(dec)} / ${displayedTicket.tp2.toFixed(dec)} (+$${displayedTicket.netProfitUsd.toFixed(2)})`,
               `5. 12H–48H Extended TP3: ${displayedTicket.tp3.toFixed(dec)} (+${displayedTicket.tp3Pips}p / +$${displayedTicket.netProfit48hUsd.toFixed(2)})`,
@@ -1162,13 +1187,15 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                 </div>
               </div>
 
-              {/* $2 Rule Money Management Recommendation */}
+              {/* Dynamic Position Risk Management Summary */}
               <div className="p-4 rounded-2xl bg-gradient-to-r from-[#0e1726] to-[#0a121e] border border-slate-800 space-y-2">
                 <div className="flex items-center justify-between text-xs font-mono">
                   <span className="text-[#00C261] font-bold flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5" /> Gilgil $2 Rule Execution Sizing
+                    <Sparkles className="w-3.5 h-3.5" /> Dynamic Risk Execution Sizing ({riskConfig.riskPct}% of ${riskConfig.accountBalanceUsd.toLocaleString()})
                   </span>
-                  <span className="text-slate-400">Fixed 0.01 Micro Risk</span>
+                  <span className="text-slate-400">
+                    {riskConfig.syncSlTpWithRisk ? 'Auto-Synced SL/TP' : 'Fixed Structural SL'}
+                  </span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-center pt-1">
                   <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
@@ -1178,8 +1205,10 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                     </strong>
                   </div>
                   <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
-                    <span className="text-[10px] text-slate-400 block">Micro Lot Size</span>
-                    <strong className="text-base font-mono text-white font-bold">0.01</strong>
+                    <span className="text-[10px] text-slate-400 block">Calculated Lot Size</span>
+                    <strong className="text-base font-mono text-white font-bold">
+                      {displayedTicket.lotSize.toFixed(2)}
+                    </strong>
                   </div>
                   <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
                     <span className="text-[10px] text-slate-400 block">Session / 48H Gain</span>

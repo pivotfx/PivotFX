@@ -209,6 +209,50 @@ export interface ComputedTradeParams {
   advisoryEntryPrice?: number;
   advisoryEntryNote?: string;
   advisoryDiscountPips?: number;
+  riskConfig?: Partial<RiskManagementConfig>;
+  riskPlan?: PositionSizeRiskPlan;
+  limitPlan?: {
+    entryPrice: number;
+    stopLoss: number;
+    tp1: number;
+    tp2: number;
+    tp3: number;
+    slPips: number;
+    tp1Pips: number;
+    tpPips: number;
+    tp3Pips: number;
+    riskReward: string;
+    mt4SafetyProof: string;
+  };
+}
+
+export interface RiskManagementConfig {
+  enabled: boolean;
+  accountBalanceUsd: number;
+  riskPct: number;
+  syncSlTpWithRisk: boolean;
+}
+
+export interface PositionSizeRiskPlan {
+  enabled: boolean;
+  accountBalanceUsd: number;
+  riskPct: number;
+  targetRiskUsd: number;
+  targetRiskKes: number;
+  actualRiskUsd: number;
+  actualRiskKes: number;
+  actualRiskPct: number;
+  lotSize: number;
+  pipValPerStandardLot: number;
+  pipValPerMicroLot: number;
+  pipValPerPositionUsd: number;
+  structuralSlPips: number;
+  calibratedSlPips: number;
+  slAdjustedDeltaPips: number;
+  syncSlTpWithRisk: boolean;
+  isBelowMinBrokerRisk: boolean;
+  minSafeRiskUsd: number;
+  calibrationSummary: string;
 }
 
 export interface ActiveMarketOrder {
@@ -354,7 +398,7 @@ export function getPairSpecs(targetPair: CurrencyPair) {
     isJpy ? 100 :
     isGold ? 10 :
     isBtc ? 1 :
-    isEth ? 10 :
+    isEth ? 1 :
     isIndex ? 1 :
     isOil ? 100 : 10000;
 
@@ -370,11 +414,186 @@ export function getPairSpecs(targetPair: CurrencyPair) {
     isGold ? 10.0 :
     isJpy ? 6.5 :
     isBtc ? 1.0 :
-    isEth ? 1.0 :
-    isIndex ? 1.0 :
-    isOil ? 10.0 : 10.0;
+    isEth ? 5.0 :
+    isIndex ? 2.0 :
+    isOil ? 5.0 : 10.0;
 
-  return { isJpy, isGold, isBtc, isEth, isCrypto, isIndex, isOil, pipMultiplier, decimals, pipValPerStandardLot };
+  const pipValPerMicroLot = Number((pipValPerStandardLot * 0.01).toFixed(4));
+
+  return {
+    isJpy,
+    isGold,
+    isBtc,
+    isEth,
+    isCrypto,
+    isIndex,
+    isOil,
+    pipMultiplier,
+    decimals,
+    pipValPerStandardLot,
+    pipValPerMicroLot
+  };
+}
+
+const POSITION_RISK_STORAGE_KEY = 'pivotfx_position_risk_config_v1';
+
+export const DEFAULT_RISK_MANAGEMENT_CONFIG: RiskManagementConfig = {
+  enabled: true,
+  accountBalanceUsd: 200,
+  riskPct: 1.0,
+  syncSlTpWithRisk: true
+};
+
+class PositionRiskConfigStore {
+  private config: RiskManagementConfig = this.loadInitial();
+  private listeners = new Set<(cfg: RiskManagementConfig) => void>();
+
+  private loadInitial(): RiskManagementConfig {
+    try {
+      if (typeof window === 'undefined') return DEFAULT_RISK_MANAGEMENT_CONFIG;
+      const raw = window.localStorage.getItem(POSITION_RISK_STORAGE_KEY);
+      if (!raw) return DEFAULT_RISK_MANAGEMENT_CONFIG;
+      const parsed = JSON.parse(raw) as Partial<RiskManagementConfig>;
+      return {
+        enabled: parsed.enabled ?? true,
+        accountBalanceUsd:
+          typeof parsed.accountBalanceUsd === 'number' && parsed.accountBalanceUsd > 0
+            ? Math.min(10_000_000, Math.max(10, parsed.accountBalanceUsd))
+            : DEFAULT_RISK_MANAGEMENT_CONFIG.accountBalanceUsd,
+        riskPct:
+          typeof parsed.riskPct === 'number' && parsed.riskPct > 0
+            ? Math.min(15, Math.max(0.1, parsed.riskPct))
+            : DEFAULT_RISK_MANAGEMENT_CONFIG.riskPct,
+        syncSlTpWithRisk: parsed.syncSlTpWithRisk ?? true
+      };
+    } catch {
+      return DEFAULT_RISK_MANAGEMENT_CONFIG;
+    }
+  }
+
+  public getConfig(): RiskManagementConfig {
+    return { ...this.config };
+  }
+
+  public setConfig(patch: Partial<RiskManagementConfig>) {
+    const nextBalance =
+      patch.accountBalanceUsd !== undefined && !isNaN(patch.accountBalanceUsd)
+        ? Math.min(10_000_000, Math.max(10, Number(patch.accountBalanceUsd)))
+        : this.config.accountBalanceUsd;
+    const nextRiskPct =
+      patch.riskPct !== undefined && !isNaN(patch.riskPct)
+        ? Math.min(15, Math.max(0.1, Number(patch.riskPct)))
+        : this.config.riskPct;
+    this.config = {
+      enabled: patch.enabled ?? this.config.enabled,
+      accountBalanceUsd: nextBalance,
+      riskPct: nextRiskPct,
+      syncSlTpWithRisk: patch.syncSlTpWithRisk ?? this.config.syncSlTpWithRisk
+    };
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(POSITION_RISK_STORAGE_KEY, JSON.stringify(this.config));
+      }
+    } catch {}
+    const snapshot = this.getConfig();
+    this.listeners.forEach((fn) => fn(snapshot));
+  }
+
+  public resetToDefault() {
+    this.setConfig(DEFAULT_RISK_MANAGEMENT_CONFIG);
+  }
+
+  public subscribe(listener: (cfg: RiskManagementConfig) => void): () => void {
+    this.listeners.add(listener);
+    listener(this.getConfig());
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+}
+
+export const positionRiskStore = new PositionRiskConfigStore();
+
+export function computeDynamicPositionRiskPlan(params: {
+  pair: CurrencyPair;
+  structuralSlPips: number;
+  brokerSpread: number;
+  riskConfig: RiskManagementConfig;
+}): PositionSizeRiskPlan {
+  const { isGold, isBtc, isEth, isIndex, isOil, pipValPerStandardLot, pipValPerMicroLot } = getPairSpecs(params.pair);
+  const accountBalanceUsd = Math.max(10, Number(params.riskConfig.accountBalanceUsd) || 200);
+  const riskPct = Math.min(15, Math.max(0.1, Number(params.riskConfig.riskPct) || 1.0));
+  const targetRiskUsd = Number((accountBalanceUsd * (riskPct / 100)).toFixed(2));
+  const targetRiskKes = Math.round(targetRiskUsd * 130);
+
+  const structuralSlPips = Math.max(4, Number(params.structuralSlPips.toFixed(1)));
+  const minClearancePips = Number(
+    Math.max(
+      params.brokerSpread * 2.2,
+      isGold ? 10 : isBtc ? 90 : isEth ? 10 : isIndex ? 22 : isOil ? 14 : 6
+    ).toFixed(1)
+  );
+  const maxSafeStructuralSlPips = Number((structuralSlPips * 1.45).toFixed(1));
+  const minSafeRiskUsd = Number((minClearancePips * pipValPerMicroLot).toFixed(2));
+
+  const rawLotsAtStructural = targetRiskUsd / Math.max(0.0001, structuralSlPips * pipValPerStandardLot);
+  let lotSize = Math.max(0.01, Math.floor(rawLotsAtStructural * 100) / 100);
+  let calibratedSlPips = structuralSlPips;
+
+  if (params.riskConfig.syncSlTpWithRisk) {
+    if (rawLotsAtStructural < 0.01) {
+      lotSize = 0.01;
+      const exactMicroSl = targetRiskUsd / Math.max(0.0001, pipValPerMicroLot);
+      calibratedSlPips = Number(
+        Math.min(maxSafeStructuralSlPips, Math.max(minClearancePips, exactMicroSl)).toFixed(1)
+      );
+    } else {
+      const exactSlForLot = targetRiskUsd / Math.max(0.0001, lotSize * pipValPerStandardLot);
+      const minComfortSl = Math.max(minClearancePips, structuralSlPips * 0.72);
+      calibratedSlPips = Number(
+        Math.min(maxSafeStructuralSlPips, Math.max(minComfortSl, exactSlForLot)).toFixed(1)
+      );
+    }
+  }
+
+  const pipValPerPositionUsd = Number((lotSize * pipValPerStandardLot).toFixed(4));
+  const actualRiskUsd = Number((calibratedSlPips * pipValPerPositionUsd).toFixed(2));
+  const actualRiskKes = Math.round(actualRiskUsd * 130);
+  const actualRiskPct = Number(((actualRiskUsd / accountBalanceUsd) * 100).toFixed(2));
+  const slAdjustedDeltaPips = Number((calibratedSlPips - structuralSlPips).toFixed(1));
+  const isBelowMinBrokerRisk = targetRiskUsd < minSafeRiskUsd;
+
+  const calibrationSummary = !params.riskConfig.syncSlTpWithRisk
+    ? `Fixed Structural SL (${structuralSlPips}p) · Scaled Volume: ${lotSize.toFixed(2)} Lots (~$${actualRiskUsd.toFixed(2)} risk)`
+    : isBelowMinBrokerRisk
+    ? `Target $${targetRiskUsd.toFixed(2)} is below minimum 0.01-lot stop ($${minSafeRiskUsd.toFixed(2)}); SL protected at ${calibratedSlPips}p floor`
+    : slAdjustedDeltaPips === 0
+    ? `Exact structural risk match: ${lotSize.toFixed(2)} Lots @ ${calibratedSlPips}p SL ($${actualRiskUsd.toFixed(2)} / ${actualRiskPct}%)`
+    : slAdjustedDeltaPips < 0
+    ? `SL tightened ${Math.abs(slAdjustedDeltaPips).toFixed(1)}p (${structuralSlPips}p -> ${calibratedSlPips}p) & TP scaled proportionally to hold $${actualRiskUsd.toFixed(2)} risk @ ${lotSize.toFixed(2)} Lots`
+    : `SL widened +${slAdjustedDeltaPips.toFixed(1)}p (${structuralSlPips}p -> ${calibratedSlPips}p) & TP expanded proportionally for ${lotSize.toFixed(2)} Lots ($${actualRiskUsd.toFixed(2)} risk)`;
+
+  return {
+    enabled: params.riskConfig.enabled,
+    accountBalanceUsd,
+    riskPct,
+    targetRiskUsd,
+    targetRiskKes,
+    actualRiskUsd,
+    actualRiskKes,
+    actualRiskPct,
+    lotSize,
+    pipValPerStandardLot,
+    pipValPerMicroLot,
+    pipValPerPositionUsd,
+    structuralSlPips,
+    calibratedSlPips,
+    slAdjustedDeltaPips,
+    syncSlTpWithRisk: params.riskConfig.syncSlTpWithRisk,
+    isBelowMinBrokerRisk,
+    minSafeRiskUsd,
+    calibrationSummary
+  };
 }
 
 export function computeLiveOrderMetrics(
@@ -382,7 +601,7 @@ export function computeLiveOrderMetrics(
   livePrice: number,
   atrPips = 24
 ): LiveOrderMetrics {
-  const { isJpy, isGold, isBtc, pipMultiplier, decimals } = getPairSpecs(order.pair);
+  const { isJpy, isGold, isBtc, isEth, isIndex, isOil, pipMultiplier, decimals, pipValPerMicroLot } = getPairSpecs(order.pair);
   const isBuy = order.direction === 'BUY';
   const rawSignedPips = isBuy
     ? (livePrice - order.entryPrice) * pipMultiplier
@@ -390,8 +609,19 @@ export function computeLiveOrderMetrics(
   const floatingPips = Number(rawSignedPips.toFixed(1));
 
   const lotScale = Math.max(0.01, order.lotSize || 0.01) / 0.01;
-  const pipValPerMicroLot = isGold ? 0.1 : isJpy ? 0.065 : isBtc ? 0.01 : 0.1;
-  const brokerSpread = isGold ? 2.2 : isJpy ? 1.4 : isBtc ? 25.0 : 1.1;
+  const brokerSpread = isGold
+    ? 2.2
+    : isJpy
+    ? 1.4
+    : isBtc
+    ? 25.0
+    : isEth
+    ? 2.5
+    : isIndex
+    ? 2.0
+    : isOil
+    ? 3.5
+    : 1.1;
 
   const grossUsd = Number((floatingPips * pipValPerMicroLot * lotScale).toFixed(2));
   const spreadCostUsd = Number((brokerSpread * pipValPerMicroLot * lotScale).toFixed(2));
@@ -424,9 +654,9 @@ export function computeLiveOrderMetrics(
     (isBuy ? (livePrice - order.stopLoss) * pipMultiplier : (order.stopLoss - livePrice) * pipMultiplier).toFixed(1)
   );
 
-  // Breakeven SL: Entry +/- 1 pip in profit direction (capped safely behind livePrice by at least 2 pips)
-  const beBuffer = (isGold ? 5 : isBtc ? 45 : 1.2) / pipMultiplier;
-  const minLiveBuffer = (isGold ? 8 : isBtc ? 80 : 2.5) / pipMultiplier;
+  // Breakeven SL: Entry +/- buffer in profit direction (capped safely behind livePrice)
+  const beBuffer = (isGold ? 5 : isBtc ? 45 : isEth ? 4 : isIndex ? 6 : isOil ? 5 : 1.2) / pipMultiplier;
+  const minLiveBuffer = (isGold ? 8 : isBtc ? 80 : isEth ? 7 : isIndex ? 10 : isOil ? 8 : 2.5) / pipMultiplier;
   const suggestedBreakevenSl = isBuy
     ? Number(Math.min(livePrice - minLiveBuffer, Math.max(order.stopLoss, order.entryPrice + beBuffer)).toFixed(decimals))
     : Number(Math.max(livePrice + minLiveBuffer, Math.min(order.stopLoss, order.entryPrice - beBuffer)).toFixed(decimals));
@@ -703,21 +933,21 @@ export function evaluateAllTradeFactors(p: {
   entryTimingWarning?: string;
   goAheadAssurance: ComputedTradeParams['goAheadAssurance'];
 } {
-  const { isGold, isBtc, pipMultiplier, decimals } = getPairSpecs(p.pair);
+  const { isGold, isBtc, isEth, isCrypto, isIndex, isOil, pipMultiplier, decimals } = getPairSpecs(p.pair);
   const macro = p.macro || getCurrentMacroContext();
   const verdicts: FactorJudgmentItem[] = [];
 
   let bullWeight = 0;
   let bearWeight = 0;
 
-  // Higher-Timeframe (H1) Structural Anchor (prevents short-term tick flipping)
+  // Higher-Timeframe (H1) Structural Anchor derived strictly from EMA & price structure
   const effectiveH1 =
     p.h1TrendDirection ??
-    (p.previousDirection
-      ? p.previousDirection === 'BUY'
-        ? 'UPTREND'
-        : 'DOWNTREND'
-      : p.ema20 >= p.ema50
+    (p.ema20 > p.ema50
+      ? 'UPTREND'
+      : p.ema20 < p.ema50
+      ? 'DOWNTREND'
+      : p.livePrice >= p.ema50
       ? 'UPTREND'
       : 'DOWNTREND');
   if (effectiveH1 === 'UPTREND') {
@@ -729,18 +959,18 @@ export function evaluateAllTradeFactors(p: {
   // FACTOR 1: Candlestick Price Action, Multi-Candle Momentum & Liquidity Sweep (24 pts max)
   const prevRef = p.prev3Close ?? p.ema20;
   const microDeltaPips = Number(((p.livePrice - prevRef) * pipMultiplier).toFixed(1));
-  const noiseFloorPips = isGold ? 12.0 : isBtc ? 65.0 : 1.5;
-  const significantDisplacementPips = noiseFloorPips * 2.2;
+  const noiseFloorPips = isGold ? 12.0 : isBtc ? 65.0 : isEth ? 6.0 : isIndex ? 18.0 : isOil ? 8.0 : 1.5;
+  const significantDisplacementPips = noiseFloorPips * 2.0;
 
   if (p.isBearishPinOrSweep) {
-    if (p.previousDirection === 'BUY' && effectiveH1 === 'UPTREND') {
-      bullWeight += 14;
-      bearWeight += 8;
+    if (effectiveH1 === 'UPTREND' && p.ema20 > p.ema50 && p.livePrice > p.ema20) {
+      bullWeight += 12;
+      bearWeight += 10;
       verdicts.push({
         name: '1. Candle & Liquidity Sweep',
         signal: 'BUY',
-        weight: '14%',
-        detail: `Intraday upper wick pause within primary UPTREND — support holding above ${p.keyLevel ? p.keyLevel.toFixed(decimals) : p.ema50.toFixed(decimals)}`
+        weight: '12%',
+        detail: `Upper wick pause inside bullish EMA trend — support near ${p.keyLevel ? p.keyLevel.toFixed(decimals) : p.ema50.toFixed(decimals)}`
       });
     } else {
       bearWeight += 24;
@@ -753,14 +983,14 @@ export function evaluateAllTradeFactors(p: {
       });
     }
   } else if (p.isBullishPinOrAbsorption) {
-    if (p.previousDirection === 'SELL' && effectiveH1 === 'DOWNTREND') {
-      bearWeight += 14;
-      bullWeight += 8;
+    if (effectiveH1 === 'DOWNTREND' && p.ema20 < p.ema50 && p.livePrice < p.ema20) {
+      bearWeight += 12;
+      bullWeight += 10;
       verdicts.push({
         name: '1. Candle & Liquidity Sweep',
         signal: 'SELL',
-        weight: '14%',
-        detail: `Intraday lower wick bounce within primary DOWNTREND — resistance holding below ${p.keyLevel ? p.keyLevel.toFixed(decimals) : p.ema50.toFixed(decimals)}`
+        weight: '12%',
+        detail: `Lower wick pause inside bearish EMA trend — ceiling near ${p.keyLevel ? p.keyLevel.toFixed(decimals) : p.ema50.toFixed(decimals)}`
       });
     } else {
       bullWeight += 24;
@@ -773,16 +1003,14 @@ export function evaluateAllTradeFactors(p: {
       });
     }
   } else if (microDeltaPips >= significantDisplacementPips) {
-    if (effectiveH1 === 'DOWNTREND' && p.livePrice <= (p.ema50 ?? p.livePrice)) {
-      // Counter-trend bullish retracement inside a dominant DOWNTREND:
-      // Institutional rule: Sell the rally into the 20/50 EMA premium, do NOT buy into resistance!
+    if (effectiveH1 === 'DOWNTREND' && p.livePrice <= p.ema50) {
       bearWeight += 18;
       bullWeight += 6;
       verdicts.push({
         name: '1. Candle & Liquidity Sweep',
         signal: 'SELL',
         weight: '18%',
-        detail: `Bearish Retracement Pullback (+${microDeltaPips}p green bounce) into 20/50 EMA — Primary DOWNTREND intact (Sell the Rally)`
+        detail: `Bearish Retracement Pullback (+${microDeltaPips}p bounce) into 20/50 EMA — Primary DOWNTREND intact (Sell the Rally)`
       });
     } else {
       bullWeight += 20;
@@ -795,16 +1023,14 @@ export function evaluateAllTradeFactors(p: {
       });
     }
   } else if (microDeltaPips <= -significantDisplacementPips) {
-    if (effectiveH1 === 'UPTREND' && p.livePrice >= (p.ema50 ?? p.livePrice)) {
-      // Counter-trend bearish retracement inside a dominant UPTREND:
-      // Institutional rule: Buy the dip into the 20/50 EMA discount, do NOT short into support!
+    if (effectiveH1 === 'UPTREND' && p.livePrice >= p.ema50) {
       bullWeight += 18;
       bearWeight += 6;
       verdicts.push({
         name: '1. Candle & Liquidity Sweep',
         signal: 'BUY',
         weight: '18%',
-        detail: `Bullish Retracement Pullback (${microDeltaPips}p red dip) into 20/50 EMA — Primary UPTREND intact (Buy the Dip)`
+        detail: `Bullish Retracement Pullback (${microDeltaPips}p dip) into 20/50 EMA — Primary UPTREND intact (Buy the Dip)`
       });
     } else {
       bearWeight += 20;
@@ -817,10 +1043,11 @@ export function evaluateAllTradeFactors(p: {
       });
     }
   } else {
-    // Normal micro-fluctuation inside candle noise floor:
-    // Respect prevailing structure (previous direction or H1 trend) rather than whipsawing on 1-second ticks
+    // Evaluate objective EMA/price posture when candle delta is inside noise floor (no artificial previousDirection bias)
     const prevailingIsBull =
-      p.previousDirection ? p.previousDirection === 'BUY' : effectiveH1 === 'UPTREND';
+      p.ema20 !== p.ema50
+        ? p.ema20 > p.ema50 && p.livePrice >= p.ema50
+        : p.livePrice >= p.ema20 && effectiveH1 === 'UPTREND';
     if (prevailingIsBull) {
       bullWeight += 16;
       bearWeight += 6;
@@ -832,16 +1059,22 @@ export function evaluateAllTradeFactors(p: {
       name: '1. Candle & Liquidity Sweep',
       signal: prevailingIsBull ? 'BUY' : 'SELL',
       weight: '16%',
-      detail: `Intraday candle consolidation (${microDeltaPips >= 0 ? `+${microDeltaPips}` : microDeltaPips}p) — maintaining ${
-        prevailingIsBull ? 'bullish continuation' : 'bearish continuation'
-      } momentum`
+      detail: `Intraday candle structure (${microDeltaPips >= 0 ? `+${microDeltaPips}` : microDeltaPips}p) — aligned with ${
+        prevailingIsBull ? 'bullish EMA flow' : 'bearish EMA flow'
+      }`
     });
   }
 
   // FACTOR 2: 20 / 50 EMA Dynamic Trend Stack & Pullback Timing Guard (24 pts max)
   const distEma20Pips = (p.livePrice - p.ema20) * pipMultiplier;
-  const effectiveAtrPips = Math.max(5, p.atrPips ?? (isGold ? 28 : isBtc ? 180 : 16));
-  const overextLimit = Math.max(isGold ? 160 : isBtc ? 1100 : 24, effectiveAtrPips * 1.45);
+  const effectiveAtrPips = Math.max(
+    5,
+    p.atrPips ?? (isGold ? 28 : isBtc ? 180 : isEth ? 14 : isIndex ? 38 : isOil ? 22 : 16)
+  );
+  const overextLimit = Math.max(
+    isGold ? 160 : isBtc ? 1100 : isEth ? 32 : isIndex ? 95 : isOil ? 65 : 24,
+    effectiveAtrPips * 1.45
+  );
   const isExtendedZone = Math.abs(distEma20Pips) > overextLimit;
 
   if (distEma20Pips > overextLimit) {
@@ -1076,6 +1309,60 @@ export function evaluateAllTradeFactors(p: {
         detail: `Gold equilibrium (${macro.riskRegime}) — follow 15m liquidity sweep`
       });
     }
+  } else if (isIndex) {
+    if (macro.riskRegime === 'RISK-ON EXPANSION') {
+      bullWeight += 18;
+      verdicts.push({
+        name: '4. Equity Index Risk Flow',
+        signal: 'BUY',
+        weight: '18%',
+        detail: `Risk-On equity expansion supports institutional long momentum on ${p.pair}`
+      });
+    } else if (macro.riskRegime === 'RISK-OFF SAFE-HAVEN' || dxy >= 0.2) {
+      bearWeight += 18;
+      verdicts.push({
+        name: '4. Equity Index Risk Flow',
+        signal: 'SELL',
+        weight: '18%',
+        detail: `Risk-Off de-risking / strong USD (${dxy}%) pressures ${p.pair} equities lower`
+      });
+    } else {
+      bullWeight += 9;
+      bearWeight += 9;
+      verdicts.push({
+        name: '4. Equity Index Risk Flow',
+        signal: 'CAUTION',
+        weight: '9%',
+        detail: `Index macro balanced (${macro.riskRegime}) — follow 20/50 EMA structure on ${p.pair}`
+      });
+    }
+  } else if (isOil) {
+    if (dxy <= -0.05 && macro.riskRegime !== 'RISK-OFF SAFE-HAVEN') {
+      bullWeight += 18;
+      verdicts.push({
+        name: '4. Energy & USD Macro Flow',
+        signal: 'BUY',
+        weight: '18%',
+        detail: `Softer USD (${dxy}%) & steady demand support WTI Crude (${p.pair}) upside`
+      });
+    } else if (dxy >= 0.12 || macro.riskRegime === 'RISK-OFF SAFE-HAVEN') {
+      bearWeight += 16;
+      verdicts.push({
+        name: '4. Energy & USD Macro Flow',
+        signal: 'SELL',
+        weight: '16%',
+        detail: `Strong USD (${dxy}%) / Risk-Off demand caution weighs on Crude Oil`
+      });
+    } else {
+      bullWeight += 9;
+      bearWeight += 9;
+      verdicts.push({
+        name: '4. Energy & USD Macro Flow',
+        signal: 'CAUTION',
+        weight: '9%',
+        detail: `WTI macro neutral (${macro.riskRegime}) — execute strictly off 20 EMA retests`
+      });
+    }
   } else if (isJpyCross) {
     if (macro.riskRegime === 'RISK-OFF SAFE-HAVEN') {
       bearWeight += 18;
@@ -1094,11 +1381,39 @@ export function evaluateAllTradeFactors(p: {
         detail: `${macro.riskRegime}: constructive risk appetite supports ${p.pair}`
       });
     }
+  } else if (isCrypto) {
+    if (macro.riskRegime === 'RISK-ON EXPANSION' && dxy <= 0.1) {
+      bullWeight += 18;
+      verdicts.push({
+        name: '4. Crypto Liquidity & Risk Flow',
+        signal: 'BUY',
+        weight: '18%',
+        detail: `Risk-On liquidity flow supports ${p.pair} upside`
+      });
+    } else if (macro.riskRegime === 'RISK-OFF SAFE-HAVEN' || dxy >= 0.18) {
+      bearWeight += 16;
+      verdicts.push({
+        name: '4. Crypto Liquidity & Risk Flow',
+        signal: 'SELL',
+        weight: '16%',
+        detail: `Defensive liquidity / USD strength pressures ${p.pair}`
+      });
+    } else {
+      bullWeight += 9;
+      bearWeight += 9;
+      verdicts.push({
+        name: '4. Crypto Liquidity & Risk Flow',
+        signal: 'CAUTION',
+        weight: '9%',
+        detail: `Crypto flow neutral (${macro.riskRegime})`
+      });
+    }
   }
 
   // FACTOR 5: Nairobi (EAT) Session Liquidity & Broker Spread Filter (12 pts max)
-  const spreadPips = p.brokerSpread ?? (isGold ? 2.2 : isBtc ? 25 : 1.1);
-  const spreadHealthy = isBtc ? spreadPips <= 35 : spreadPips <= 2.5;
+  const spreadPips =
+    p.brokerSpread ?? (isGold ? 2.2 : isBtc ? 25 : isEth ? 2.5 : isIndex ? 2.0 : isOil ? 3.5 : 1.1);
+  const spreadHealthy = isBtc ? spreadPips <= 35 : isOil ? spreadPips <= 5.0 : isEth || isIndex ? spreadPips <= 4.0 : spreadPips <= 2.5;
   if (!macro.isRolloverWindow && !macro.isUsReleaseWindow && spreadHealthy) {
     if (bullWeight >= bearWeight) bullWeight += 12;
     else bearWeight += 12;
@@ -1215,43 +1530,31 @@ export function evaluateAllTradeFactors(p: {
   const total = Math.max(1, bullWeight + bearWeight);
   const bullScorePct = Math.round((bullWeight / total) * 100);
   const bearScorePct = 100 - bullScorePct;
-  const strongDeadbandPips = isGold ? 28.0 : isBtc ? 160.0 : 4.5;
-  const distEmaAbsPips = Math.abs(distEma20Pips);
-  const scoreMargin = Math.abs(bullScorePct - bearScorePct);
+  const bearishEmaStack = p.ema20 < p.ema50 && p.livePrice < p.ema20;
+  const bullishEmaStack = p.ema20 > p.ema50 && p.livePrice > p.ema20;
 
   let isBuy: boolean;
   if (p.biasOverride) {
     isBuy = p.biasOverride === 'BUY';
-  } else if (p.previousDirection === 'BUY') {
-    // Rock-Solid Structural Invalidation Requirement to flip an active BUY to SELL:
-    // Requires confirmed H1 trend inversion, decisive breakdown below Key Swing Low, AND crushing 75%+ bear majority.
-    // Retracement dips into the 20/50 EMA inside an active uptrend are BUY THE DIP opportunities!
-    const keySupportFloor = p.keyLevel ?? (p.ema50 ?? p.livePrice);
-    const confirmedBearReversal =
-      p.h1TrendDirection === 'DOWNTREND' &&
-      bearScorePct >= 75 &&
-      p.livePrice < keySupportFloor;
-    isBuy = !confirmedBearReversal;
-  } else if (p.previousDirection === 'SELL') {
-    // Rock-Solid Structural Invalidation Requirement to flip an active SELL to BUY:
-    // Requires confirmed H1 trend inversion, decisive breakout above Key Swing High, AND crushing 75%+ bull majority.
-    // Retracement rallies into the 20/50 EMA inside an active downtrend are SELL THE RALLY opportunities!
-    const keyResistanceCeiling = p.keyLevel ?? (p.ema50 ?? p.livePrice);
-    const confirmedBullReversal =
-      p.h1TrendDirection === 'UPTREND' &&
-      bullScorePct >= 75 &&
-      p.livePrice > keyResistanceCeiling;
-    isBuy = confirmedBullReversal;
+  } else if (bearishEmaStack && (effectiveH1 === 'DOWNTREND' || bearScorePct >= 52)) {
+    // Objective bearish price/EMA alignment: Price < 20 EMA < 50 EMA -> MUST project SELL
+    isBuy = false;
+  } else if (bullishEmaStack && (effectiveH1 === 'UPTREND' || bullScorePct >= 52)) {
+    // Objective bullish price/EMA alignment: Price > 20 EMA > 50 EMA -> MUST project BUY
+    isBuy = true;
+  } else if (bearScorePct - bullScorePct >= 8) {
+    isBuy = false;
+  } else if (bullScorePct - bearScorePct >= 8) {
+    isBuy = true;
+  } else if (p.previousDirection) {
+    // Narrow hysteresis band ONLY when bull/bear scores are closely balanced inside EMA consolidation
+    isBuy = p.previousDirection === 'BUY';
+  } else if (effectiveH1 === 'UPTREND') {
+    isBuy = bearScorePct < 54;
+  } else if (effectiveH1 === 'DOWNTREND') {
+    isBuy = bullScorePct >= 54;
   } else {
-    // Initial evaluation with structural H1 trend primacy:
-    // If H1 higher-timeframe trend is UPTREND, project BUY unless confirmed bear majority >= 60%
-    if (effectiveH1 === 'UPTREND') {
-      isBuy = bearScorePct < 60;
-    } else if (effectiveH1 === 'DOWNTREND') {
-      isBuy = bullScorePct >= 60;
-    } else {
-      isBuy = bullScorePct >= bearScorePct;
-    }
+    isBuy = bullScorePct >= bearScorePct;
   }
 
   const dominantPct = isBuy ? bullScorePct : bearScorePct;
@@ -1318,7 +1621,7 @@ export function evaluateCandleSeriesAndTick(p: {
   h1TrendDirection?: 'UPTREND' | 'DOWNTREND' | 'RANGING';
   previousDirection?: 'BUY' | 'SELL';
 }) {
-  const { isGold, isBtc, pipMultiplier, decimals } = getPairSpecs(p.pair);
+  const { isGold, isBtc, isEth, isIndex, isOil, pipMultiplier, decimals } = getPairSpecs(p.pair);
   const unit = 1 / pipMultiplier;
   const pct = p.change24hPct ?? 0;
   const nowSec = Math.floor(Date.now() / 1000);
@@ -1332,7 +1635,7 @@ export function evaluateCandleSeriesAndTick(p: {
 
   let candles: OhlcCandle[] = [];
   const maxSingleCandleJump = p.candlesAreRealOhlc
-    ? (isBtc ? 0.012 : isGold ? 0.006 : 0.0045)
+    ? (isBtc || isEth ? 0.015 : isGold ? 0.008 : isIndex || isOil ? 0.009 : 0.0045)
     : 0.0025;
 
   const baseLast = p.baseCandles && p.baseCandles.length >= 12 ? p.baseCandles[p.baseCandles.length - 1] : null;
@@ -1382,7 +1685,7 @@ export function evaluateCandleSeriesAndTick(p: {
       p.timeframe === 'H1' ? 1.65 :
       p.timeframe === 'H4' ? 2.6 : 4.2;
 
-    const baseStepPips = (isGold ? 28 : isBtc ? 210 : 5.5) * tfScale;
+    const baseStepPips = (isGold ? 28 : isBtc ? 210 : isEth ? 14 : isIndex ? 32 : isOil ? 18 : 5.5) * tfScale;
     const trendSlopePerBar = (pct / 60) * 0.01 * p.livePrice;
     const nowSec = Math.floor(Date.now() / 1000);
     const stepSec =
@@ -1647,8 +1950,10 @@ export function computeRealChartTradeParams(p: {
   previousDirection?: 'BUY' | 'SELL';
   previousTrendDirection?: 'UPTREND' | 'DOWNTREND' | 'RANGING';
   h1TrendDirection?: 'UPTREND' | 'DOWNTREND' | 'RANGING';
+  riskConfig?: Partial<RiskManagementConfig> | null;
 }): ComputedTradeParams {
-  const { isJpy, isGold, isBtc, pipMultiplier, decimals } = getPairSpecs(p.targetPair);
+  const { isJpy, isGold, isBtc, isEth, isIndex, isOil, pipMultiplier, decimals, pipValPerStandardLot, pipValPerMicroLot } =
+    getPairSpecs(p.targetPair);
 
   // Broker Symbol & Spread mappings first so spread feeds into all-factor evaluation & TP expansion
   const cleanPair = p.targetPair.replace('/', '');
@@ -1656,60 +1961,67 @@ export function computeRealChartTradeParams(p: {
   let brokerSpread = 1.1;
 
   if (p.targetBroker === 'fxpesa') {
-    brokerSymbol = isGold ? 'XAUUSD' : cleanPair;
-    brokerSpread = isGold ? 2.2 : isJpy ? 1.4 : isBtc ? 25.0 : 1.1;
+    brokerSymbol = isGold ? 'XAUUSD' : p.targetPair === 'NAS100' ? 'USTEC' : cleanPair;
+    brokerSpread = isGold ? 2.2 : isJpy ? 1.4 : isBtc ? 25.0 : isEth ? 2.5 : isIndex ? 2.0 : isOil ? 3.5 : 1.1;
   } else if (p.targetBroker === 'exness') {
-    brokerSymbol = isGold ? 'XAUUSD.m' : `${cleanPair}.m`;
-    brokerSpread = isGold ? 1.2 : isJpy ? 0.8 : isBtc ? 15.0 : 0.6;
+    brokerSymbol = isGold ? 'XAUUSD.m' : isIndex || isOil || isEth ? cleanPair : `${cleanPair}.m`;
+    brokerSpread = isGold ? 1.2 : isJpy ? 0.8 : isBtc ? 15.0 : isEth ? 1.8 : isIndex ? 1.4 : isOil ? 2.8 : 0.6;
   } else if (p.targetBroker === 'hfm') {
-    brokerSymbol = isGold ? 'GOLD' : `${cleanPair}.h`;
-    brokerSpread = isGold ? 2.4 : isJpy ? 1.6 : isBtc ? 30.0 : 1.3;
+    brokerSymbol = isGold ? 'GOLD' : isIndex ? `${cleanPair}.cash` : isOil ? 'USOIL.spot' : `${cleanPair}.h`;
+    brokerSpread = isGold ? 2.4 : isJpy ? 1.6 : isBtc ? 30.0 : isEth ? 3.0 : isIndex ? 2.5 : isOil ? 4.0 : 1.3;
   } else if (p.targetBroker === 'fbs') {
     brokerSymbol = isGold ? 'XAUUSD' : cleanPair;
-    brokerSpread = isGold ? 2.6 : isJpy ? 1.8 : isBtc ? 35.0 : 1.5;
+    brokerSpread = isGold ? 2.6 : isJpy ? 1.8 : isBtc ? 35.0 : isEth ? 3.2 : isIndex ? 2.8 : isOil ? 4.5 : 1.5;
   }
 
-  // Gilgil Shield Strict Risk Ceiling:
-  // For standard 0.01 micro lot, maximum risk must NEVER exceed $2.50 to $2.80 (max ~360 KES)
-  // Gold (XAU/USD): 1 pip = $0.10 move -> 18 to 26 pips = $1.80 to $2.60 max risk!
-  // Forex: 1 pip = $0.10 move -> 16 to 24 pips = $1.60 to $2.40 max risk!
-  // BTC: 1 pip = $0.01 move -> 200 to 280 pips = $2.00 to $2.80 max risk!
-  const pipValPerMicroLot = isGold ? 0.1 : isJpy ? 0.065 : isBtc ? 0.01 : 0.1;
-  const maxRiskDollarCap = isGold ? 2.80 : isBtc ? 2.80 : 2.50;
+  // Resolve active position sizing config (custom passed config > global store > baseline 0.01 micro lot)
+  const storedCfg = positionRiskStore.getConfig();
+  const activeRiskCfg: RiskManagementConfig =
+    p.riskConfig === null
+      ? { ...DEFAULT_RISK_MANAGEMENT_CONFIG, enabled: false }
+      : {
+          enabled: p.riskConfig?.enabled ?? storedCfg.enabled,
+          accountBalanceUsd: p.riskConfig?.accountBalanceUsd ?? storedCfg.accountBalanceUsd,
+          riskPct: p.riskConfig?.riskPct ?? storedCfg.riskPct,
+          syncSlTpWithRisk: p.riskConfig?.syncSlTpWithRisk ?? storedCfg.syncSlTpWithRisk
+        };
+
+  // Baseline Gilgil Shield Risk Ceiling for uncustomized 0.01 micro lot
+  const maxRiskDollarCap = isGold || isBtc || isEth || isIndex || isOil ? 2.8 : 2.5;
   const hardSlCapPips = Math.floor(maxRiskDollarCap / pipValPerMicroLot);
 
-  let baseSlPips = isGold ? 22 : isBtc ? 220 : 16;
-  let baseTp1Pips = isGold ? 38 : isBtc ? 380 : 28;
-  let baseTp2Pips = isGold ? 64 : isBtc ? 640 : 46;
+  let baseSlPips = isGold ? 22 : isBtc ? 220 : isEth ? 24 : isIndex ? 55 : isOil ? 36 : 16;
+  let baseTp1Pips = isGold ? 38 : isBtc ? 380 : isEth ? 42 : isIndex ? 95 : isOil ? 62 : 28;
+  let baseTp2Pips = isGold ? 64 : isBtc ? 640 : isEth ? 72 : isIndex ? 160 : isOil ? 105 : 46;
 
   if (p.targetTf === 'M1') {
-    baseSlPips = isGold ? 16 : isBtc ? 150 : 8;
-    baseTp1Pips = isGold ? 28 : isBtc ? 280 : 14;
-    baseTp2Pips = isGold ? 48 : isBtc ? 480 : 24;
+    baseSlPips = isGold ? 16 : isBtc ? 150 : isEth ? 14 : isIndex ? 32 : isOil ? 22 : 8;
+    baseTp1Pips = isGold ? 28 : isBtc ? 280 : isEth ? 24 : isIndex ? 56 : isOil ? 38 : 14;
+    baseTp2Pips = isGold ? 48 : isBtc ? 480 : isEth ? 42 : isIndex ? 96 : isOil ? 64 : 24;
   } else if (p.targetTf === 'M5') {
-    baseSlPips = isGold ? 18 : isBtc ? 180 : 12;
-    baseTp1Pips = isGold ? 32 : isBtc ? 340 : 20;
-    baseTp2Pips = isGold ? 54 : isBtc ? 560 : 34;
+    baseSlPips = isGold ? 18 : isBtc ? 180 : isEth ? 18 : isIndex ? 42 : isOil ? 28 : 12;
+    baseTp1Pips = isGold ? 32 : isBtc ? 340 : isEth ? 32 : isIndex ? 72 : isOil ? 48 : 20;
+    baseTp2Pips = isGold ? 54 : isBtc ? 560 : isEth ? 54 : isIndex ? 122 : isOil ? 82 : 34;
   } else if (p.targetTf === 'M10') {
-    baseSlPips = isGold ? 20 : isBtc ? 200 : 14;
-    baseTp1Pips = isGold ? 36 : isBtc ? 380 : 24;
-    baseTp2Pips = isGold ? 60 : isBtc ? 620 : 40;
+    baseSlPips = isGold ? 20 : isBtc ? 200 : isEth ? 20 : isIndex ? 48 : isOil ? 32 : 14;
+    baseTp1Pips = isGold ? 36 : isBtc ? 380 : isEth ? 36 : isIndex ? 84 : isOil ? 54 : 24;
+    baseTp2Pips = isGold ? 60 : isBtc ? 620 : isEth ? 60 : isIndex ? 140 : isOil ? 92 : 40;
   } else if (p.targetTf === 'M15') {
-    baseSlPips = isGold ? 22 : isBtc ? 220 : 16;
-    baseTp1Pips = isGold ? 40 : isBtc ? 420 : 28;
-    baseTp2Pips = isGold ? 68 : isBtc ? 700 : 48;
+    baseSlPips = isGold ? 22 : isBtc ? 220 : isEth ? 24 : isIndex ? 55 : isOil ? 36 : 16;
+    baseTp1Pips = isGold ? 40 : isBtc ? 420 : isEth ? 44 : isIndex ? 98 : isOil ? 64 : 28;
+    baseTp2Pips = isGold ? 68 : isBtc ? 700 : isEth ? 74 : isIndex ? 165 : isOil ? 108 : 48;
   } else if (p.targetTf === 'H1') {
-    baseSlPips = isGold ? 24 : isBtc ? 240 : 20;
-    baseTp1Pips = isGold ? 45 : isBtc ? 480 : 36;
-    baseTp2Pips = isGold ? 76 : isBtc ? 800 : 60;
+    baseSlPips = isGold ? 24 : isBtc ? 240 : isEth ? 32 : isIndex ? 72 : isOil ? 42 : 20;
+    baseTp1Pips = isGold ? 45 : isBtc ? 480 : isEth ? 58 : isIndex ? 126 : isOil ? 74 : 36;
+    baseTp2Pips = isGold ? 76 : isBtc ? 800 : isEth ? 96 : isIndex ? 215 : isOil ? 126 : 60;
   } else if (p.targetTf === 'H4') {
-    baseSlPips = isGold ? 26 : isBtc ? 260 : 22;
-    baseTp1Pips = isGold ? 50 : isBtc ? 540 : 40;
-    baseTp2Pips = isGold ? 84 : isBtc ? 880 : 68;
+    baseSlPips = isGold ? 26 : isBtc ? 260 : isEth ? 40 : isIndex ? 90 : isOil ? 48 : 22;
+    baseTp1Pips = isGold ? 50 : isBtc ? 540 : isEth ? 72 : isIndex ? 158 : isOil ? 86 : 40;
+    baseTp2Pips = isGold ? 84 : isBtc ? 880 : isEth ? 120 : isIndex ? 268 : isOil ? 144 : 68;
   } else if (p.targetTf === 'D1') {
-    baseSlPips = isGold ? 28 : isBtc ? 280 : 24;
-    baseTp1Pips = isGold ? 56 : isBtc ? 600 : 45;
-    baseTp2Pips = isGold ? 92 : isBtc ? 980 : 76;
+    baseSlPips = isGold ? 28 : isBtc ? 280 : isEth ? 48 : isIndex ? 110 : isOil ? 52 : 24;
+    baseTp1Pips = isGold ? 56 : isBtc ? 600 : isEth ? 88 : isIndex ? 195 : isOil ? 96 : 45;
+    baseTp2Pips = isGold ? 92 : isBtc ? 980 : isEth ? 148 : isIndex ? 325 : isOil ? 162 : 76;
   }
 
   // Unified All-Confluence BUY / SELL Evaluation
@@ -1733,16 +2045,19 @@ export function computeRealChartTradeParams(p: {
   const isUsdBase = p.targetPair.startsWith('USD/');
   const isJpyCross = p.targetPair === 'GBP/JPY' || p.targetPair === 'EUR/JPY';
   const dxySupportsActiveSide =
-    p.targetPair === 'BTC/USD'
+    isBtc || isEth
       ? (isBuy && macro.dxyPressurePct <= 0.1) || (!isBuy && macro.dxyPressurePct >= -0.05)
+      : isIndex
+      ? (isBuy && macro.riskRegime !== 'RISK-OFF SAFE-HAVEN') || (!isBuy && macro.riskRegime === 'RISK-OFF SAFE-HAVEN')
+      : isOil
+      ? (isBuy && macro.dxyPressurePct <= 0.05) || (!isBuy && macro.dxyPressurePct >= 0.05)
       : isJpyCross
       ? (isBuy && macro.riskRegime !== 'RISK-OFF SAFE-HAVEN') || (!isBuy && macro.riskRegime === 'RISK-OFF SAFE-HAVEN')
       : isUsdBase
       ? (isBuy && macro.dxyPressurePct >= 0.05) || (!isBuy && macro.dxyPressurePct <= -0.05)
       : (isBuy && macro.dxyPressurePct <= -0.05) || (!isBuy && macro.dxyPressurePct >= 0.05);
 
-  // Anchor Stop Loss strictly beyond real Swing High/Low + ATR volatility + broker spread,
-  // clamped permanently under the Gilgil Shield Hard Risk Ceiling ($2.80 max loss cap)
+  // Anchor Stop Loss beyond real Swing High/Low + ATR volatility + broker spread
   const relevantSwingPrice = isBuy
     ? p.swingLow ?? p.keyLevel
     : p.swingHigh ?? p.keyLevel;
@@ -1751,17 +2066,42 @@ export function computeRealChartTradeParams(p: {
       ? Math.abs(p.price - relevantSwingPrice) * pipMultiplier
       : 0;
   const effectiveAtr = Math.max(3, p.atrPips ?? baseSlPips * 0.85);
+  const minSlFloor = isGold ? 16 : isBtc ? 150 : isEth ? 14 : isIndex ? 30 : isOil ? 20 : 8;
+  const maxStructuralSlCap = activeRiskCfg.enabled
+    ? Math.max(hardSlCapPips, baseSlPips * 2.1, effectiveAtr * 2.2)
+    : hardSlCapPips;
+
   const rawTargetSlPips =
     rawSwingDistPips > 0
-      ? Math.min(rawSwingDistPips + brokerSpread, hardSlCapPips)
-      : Math.min(effectiveAtr * 1.35 + brokerSpread, hardSlCapPips);
+      ? Math.min(rawSwingDistPips + brokerSpread, maxStructuralSlCap)
+      : Math.min(effectiveAtr * 1.35 + brokerSpread, maxStructuralSlCap);
 
-  const minSlFloor = isGold ? 16 : isBtc ? 150 : 8;
-  baseSlPips = Number(
-    Math.min(hardSlCapPips, Math.max(minSlFloor, rawTargetSlPips, baseSlPips)).toFixed(1)
+  const structuralSlPips = Number(
+    Math.min(maxStructuralSlCap, Math.max(minSlFloor, rawTargetSlPips, baseSlPips)).toFixed(1)
   );
-  baseTp1Pips = Number(Math.max(baseSlPips * 1.65, baseTp1Pips).toFixed(1));
-  baseTp2Pips = Number(Math.max(baseSlPips * 2.85, baseTp2Pips).toFixed(1));
+
+  // Dynamic Position Sizing & Real-World SL/TP Calibration
+  const riskPlan = activeRiskCfg.enabled
+    ? computeDynamicPositionRiskPlan({
+        pair: p.targetPair,
+        structuralSlPips,
+        brokerSpread,
+        riskConfig: activeRiskCfg
+      })
+    : undefined;
+
+  const activeLotSize = riskPlan ? riskPlan.lotSize : 0.01;
+  const pipValueAtActiveLot = activeLotSize * pipValPerStandardLot;
+  baseSlPips = riskPlan ? riskPlan.calibratedSlPips : structuralSlPips;
+
+  // Dynamically scale TP1, TP2, TP3 proportionally with risk-calibrated SL (preserving >= 1:1.65 TP1 / >= 1:2.85 TP2 R:R)
+  if (riskPlan && riskPlan.syncSlTpWithRisk) {
+    baseTp1Pips = Number((baseSlPips * 1.65).toFixed(1));
+    baseTp2Pips = Number((baseSlPips * 2.85).toFixed(1));
+  } else {
+    baseTp1Pips = Number(Math.max(baseSlPips * 1.65, baseTp1Pips).toFixed(1));
+    baseTp2Pips = Number(Math.max(baseSlPips * 2.85, baseTp2Pips).toFixed(1));
+  }
 
   // Longer 12H–48H swing target (TP3) scales dynamically with DXY macro tailwind & RSI headroom
   const rsiVal = p.rsi ?? 52.0;
@@ -1771,56 +2111,86 @@ export function computeRealChartTradeParams(p: {
   const macroExpansionMultiplier = dxySupportsActiveSide ? 1.65 : 1.45;
   const baseTp3Pips = Number((baseTp2Pips * macroExpansionMultiplier * rsiHeadroomFactor).toFixed(1));
 
-  const slOffset = baseSlPips / pipMultiplier;
-  const tp1Offset = baseTp1Pips / pipMultiplier;
-  const tp2Offset = baseTp2Pips / pipMultiplier;
-  const tp3Offset = baseTp3Pips / pipMultiplier;
+  // Minimum safe pip separation so SL/TP NEVER collapse onto Entry / Live Candle price after rounding
+  const minLogicalGapPips = Math.max(
+    brokerSpread * 1.6,
+    isGold ? 8 : isBtc ? 80 : isEth ? 8 : isIndex ? 18 : isOil ? 12 : 5
+  );
+  const safeSlPips = Math.max(minLogicalGapPips, baseSlPips);
+  const safeTp1Pips = Math.max(minLogicalGapPips * 1.35, baseTp1Pips);
+  const safeTp2Pips = Math.max(safeTp1Pips + minLogicalGapPips, baseTp2Pips);
+  const safeTp3Pips = Math.max(safeTp2Pips + minLogicalGapPips * 1.2, baseTp3Pips);
 
+  const slOffset = safeSlPips / pipMultiplier;
+  const tp1Offset = safeTp1Pips / pipMultiplier;
+  const tp2Offset = safeTp2Pips / pipMultiplier;
+  const tp3Offset = safeTp3Pips / pipMultiplier;
+  const minGapPrice = minLogicalGapPips / pipMultiplier;
+
+  const anchoredEntry = Number(p.price.toFixed(decimals));
   let slPrice: number;
   let tp1Price: number;
   let tp2Price: number;
   let tp3Price: number;
 
   if (isBuy) {
-    slPrice = Number((p.price - slOffset).toFixed(decimals));
-    tp1Price = Number((p.price + tp1Offset).toFixed(decimals));
-    tp2Price = Number((p.price + tp2Offset).toFixed(decimals));
-    tp3Price = Number((p.price + tp3Offset).toFixed(decimals));
+    slPrice = Number((anchoredEntry - slOffset).toFixed(decimals));
+    tp1Price = Number((anchoredEntry + tp1Offset).toFixed(decimals));
+    tp2Price = Number((anchoredEntry + tp2Offset).toFixed(decimals));
+    tp3Price = Number((anchoredEntry + tp3Offset).toFixed(decimals));
   } else {
-    slPrice = Number((p.price + slOffset).toFixed(decimals));
-    tp1Price = Number((p.price - tp1Offset).toFixed(decimals));
-    tp2Price = Number((p.price - tp2Offset).toFixed(decimals));
-    tp3Price = Number((p.price - tp3Offset).toFixed(decimals));
+    slPrice = Number((anchoredEntry + slOffset).toFixed(decimals));
+    tp1Price = Number((anchoredEntry - tp1Offset).toFixed(decimals));
+    tp2Price = Number((anchoredEntry - tp2Offset).toFixed(decimals));
+    tp3Price = Number((anchoredEntry - tp3Offset).toFixed(decimals));
   }
 
-  // Strict MT4/MT5 S/L & T/P Side Enforcement (Prevents [Invalid S/L or T/P])
+  // Strict MT4/MT5 S/L & T/P Side Enforcement (Prevents [Invalid S/L or T/P] & TP == Candle collisions)
   if (isBuy) {
-    if (slPrice >= p.price) slPrice = Number((p.price - Math.max(12, baseSlPips) / pipMultiplier).toFixed(decimals));
-    if (tp1Price <= p.price) tp1Price = Number((p.price + Math.max(20, baseTp1Pips) / pipMultiplier).toFixed(decimals));
-    if (tp2Price <= tp1Price) tp2Price = Number((tp1Price + 15 / pipMultiplier).toFixed(decimals));
-    if (tp3Price <= tp2Price) tp3Price = Number((tp2Price + 22 / pipMultiplier).toFixed(decimals));
+    if (slPrice > anchoredEntry - minGapPrice) {
+      slPrice = Number((anchoredEntry - Math.max(minGapPrice, slOffset)).toFixed(decimals));
+    }
+    if (tp1Price < anchoredEntry + minGapPrice) {
+      tp1Price = Number((anchoredEntry + Math.max(minGapPrice * 1.35, tp1Offset)).toFixed(decimals));
+    }
+    if (tp2Price < tp1Price + minGapPrice * 0.75) {
+      tp2Price = Number((tp1Price + minGapPrice).toFixed(decimals));
+    }
+    if (tp3Price < tp2Price + minGapPrice * 0.9) {
+      tp3Price = Number((tp2Price + minGapPrice * 1.25).toFixed(decimals));
+    }
   } else {
-    if (slPrice <= p.price) slPrice = Number((p.price + Math.max(12, baseSlPips) / pipMultiplier).toFixed(decimals));
-    if (tp1Price >= p.price) tp1Price = Number((p.price - Math.max(20, baseTp1Pips) / pipMultiplier).toFixed(decimals));
-    if (tp2Price >= tp1Price) tp2Price = Number((tp1Price - 15 / pipMultiplier).toFixed(decimals));
-    if (tp3Price >= tp2Price) tp3Price = Number((tp2Price - 22 / pipMultiplier).toFixed(decimals));
+    if (slPrice < anchoredEntry + minGapPrice) {
+      slPrice = Number((anchoredEntry + Math.max(minGapPrice, slOffset)).toFixed(decimals));
+    }
+    if (tp1Price > anchoredEntry - minGapPrice) {
+      tp1Price = Number((anchoredEntry - Math.max(minGapPrice * 1.35, tp1Offset)).toFixed(decimals));
+    }
+    if (tp2Price > tp1Price - minGapPrice * 0.75) {
+      tp2Price = Number((tp1Price - minGapPrice).toFixed(decimals));
+    }
+    if (tp3Price > tp2Price - minGapPrice * 0.9) {
+      tp3Price = Number((tp2Price - minGapPrice * 1.25).toFixed(decimals));
+    }
   }
 
-  const actualSlPips = Math.max(1, Number((Math.abs(p.price - slPrice) * pipMultiplier).toFixed(1)));
-  const actualTp1Pips = Math.max(1, Number((Math.abs(tp1Price - p.price) * pipMultiplier).toFixed(1)));
-  const actualTpPips = Math.max(1, Number((Math.abs(tp2Price - p.price) * pipMultiplier).toFixed(1)));
-  const actualTp3Pips = Math.max(1, Number((Math.abs(tp3Price - p.price) * pipMultiplier).toFixed(1)));
+  const actualSlPips = Math.max(1, Number((Math.abs(anchoredEntry - slPrice) * pipMultiplier).toFixed(1)));
+  const actualTp1Pips = Math.max(1, Number((Math.abs(tp1Price - anchoredEntry) * pipMultiplier).toFixed(1)));
+  const actualTpPips = Math.max(1, Number((Math.abs(tp2Price - anchoredEntry) * pipMultiplier).toFixed(1)));
+  const actualTp3Pips = Math.max(1, Number((Math.abs(tp3Price - anchoredEntry) * pipMultiplier).toFixed(1)));
 
-  // Exact 0.01 micro lot risk & net profit after spread
-  const rawRiskUsd = Number((actualSlPips * pipValPerMicroLot).toFixed(2));
-  const actualRiskUsd = Number(Math.min(maxRiskDollarCap, Math.max(0.8, rawRiskUsd)).toFixed(2));
-  const potentialGainUsd = Number((actualTpPips * pipValPerMicroLot).toFixed(2));
-  const spreadCostUsd = Number((brokerSpread * pipValPerMicroLot).toFixed(2));
+  // Exact position-sized risk & net profit after broker spread
+  const rawRiskUsd = Number((actualSlPips * pipValueAtActiveLot).toFixed(2));
+  const actualRiskUsd = riskPlan
+    ? rawRiskUsd
+    : Number(Math.min(maxRiskDollarCap, Math.max(0.8, rawRiskUsd)).toFixed(2));
+  const potentialGainUsd = Number((actualTpPips * pipValueAtActiveLot).toFixed(2));
+  const spreadCostUsd = Number((brokerSpread * pipValueAtActiveLot).toFixed(2));
   const netProfitUsd = Math.max(0.4, Number((potentialGainUsd - spreadCostUsd).toFixed(2)));
   const netProfitKes = Math.round(netProfitUsd * 130);
-  const netProfit48hUsd = Math.max(0.8, Number((actualTp3Pips * pipValPerMicroLot - spreadCostUsd).toFixed(2)));
+  const netProfit48hUsd = Math.max(0.8, Number((actualTp3Pips * pipValueAtActiveLot - spreadCostUsd).toFixed(2)));
   const netProfit48hKes = Math.round(netProfit48hUsd * 130);
-  const tp1NetProfitUsd = Math.max(0.2, Number((actualTp1Pips * pipValPerMicroLot * 0.5 - spreadCostUsd).toFixed(2)));
+  const tp1NetProfitUsd = Math.max(0.2, Number((actualTp1Pips * pipValueAtActiveLot * 0.5 - spreadCostUsd).toFixed(2)));
   const tp1NetProfitKes = Math.round(tp1NetProfitUsd * 130);
   const orderType = allFactorEval.isExtendedZone
     ? isBuy
@@ -1843,7 +2213,6 @@ export function computeRealChartTradeParams(p: {
 
   const ema20Val = p.ema20 ?? p.price;
   const ema50Val = p.ema50 ?? p.price;
-  const deadbandPips = isGold ? 28.0 : isBtc ? 160.0 : 4.5;
   const priceMinusEma20Pips = (p.price - ema20Val) * pipMultiplier;
   const emaSpreadPips = (ema20Val - ema50Val) * pipMultiplier;
 
@@ -1858,16 +2227,10 @@ export function computeRealChartTradeParams(p: {
       : 'DOWNTREND');
 
   let trendDirection: 'UPTREND' | 'DOWNTREND' | 'RANGING' = h1TrendDirection;
-  if (p.previousTrendDirection === 'UPTREND') {
-    trendDirection =
-      h1TrendDirection === 'DOWNTREND' && priceMinusEma20Pips < -deadbandPips && allFactorEval.bearScorePct >= 62
-        ? 'DOWNTREND'
-        : 'UPTREND';
-  } else if (p.previousTrendDirection === 'DOWNTREND') {
-    trendDirection =
-      h1TrendDirection === 'UPTREND' && priceMinusEma20Pips > deadbandPips && allFactorEval.bullScorePct >= 62
-        ? 'UPTREND'
-        : 'DOWNTREND';
+  if (!isBuy && (h1TrendDirection === 'DOWNTREND' || (ema20Val < ema50Val && p.price <= ema20Val))) {
+    trendDirection = 'DOWNTREND';
+  } else if (isBuy && (h1TrendDirection === 'UPTREND' || (ema20Val > ema50Val && p.price >= ema20Val))) {
+    trendDirection = 'UPTREND';
   } else if (emaSpreadPips >= 0.4 || (isBuy && priceMinusEma20Pips >= 0)) {
     trendDirection = 'UPTREND';
   } else if (emaSpreadPips <= -0.4 || (!isBuy && priceMinusEma20Pips <= 0)) {
@@ -1932,7 +2295,7 @@ export function computeRealChartTradeParams(p: {
       targetPips: actualTpPips,
       netProfitUsd,
       netProfitKes,
-      driverSummary: `London/NY session liquidity expansion (${macro.eatHour}:00 EAT · ${brokerSymbol} ~${brokerSpread}p spread). ${macroFactorNote}.`
+      driverSummary: `London/NY session liquidity expansion (${macro.eatHour}:00 EAT · ${brokerSymbol} ~${brokerSpread}p spread · ${activeLotSize.toFixed(2)} Lots). ${macroFactorNote}.`
     },
     {
       horizon: '12H – 48H (Extended Swing)',
@@ -1947,22 +2310,22 @@ export function computeRealChartTradeParams(p: {
   ];
 
   const profitOutlookText = isFavourableOrder
-    ? `${orderVerdictLabel}: +$${netProfitUsd.toFixed(2)} (+${netProfitKes} KES) at 12H TP2 (${tp2Price.toFixed(decimals)}) · +$${netProfit48hUsd.toFixed(2)} (+${netProfit48hKes} KES) 48H Swing TP3 vs -$${actualRiskUsd.toFixed(2)} max risk (${riskReward} R:R)`
-    : `${orderVerdictLabel}: Pullback near 20 EMA (${ema20Val.toFixed(decimals)}) targets +$${netProfitUsd.toFixed(2)} (+${netProfitKes} KES) at TP2 & +$${netProfit48hUsd.toFixed(2)} (+${netProfit48hKes} KES) at 48H TP3 (${riskReward} R:R)`;
+    ? `${orderVerdictLabel}: +$${netProfitUsd.toFixed(2)} (+${netProfitKes} KES) at 12H TP2 (${tp2Price.toFixed(decimals)}) · +$${netProfit48hUsd.toFixed(2)} (+${netProfit48hKes} KES) 48H Swing TP3 vs -$${actualRiskUsd.toFixed(2)} max risk @ ${activeLotSize.toFixed(2)} Lots (${riskReward} R:R)`
+    : `${orderVerdictLabel}: Pullback near 20 EMA (${ema20Val.toFixed(decimals)}) targets +$${netProfitUsd.toFixed(2)} (+${netProfitKes} KES) at TP2 & +$${netProfit48hUsd.toFixed(2)} (+${netProfit48hKes} KES) at 48H TP3 (${activeLotSize.toFixed(2)} Lots · ${riskReward} R:R)`;
 
   const humanCheckNote = allFactorEval.entryTimingWarning
     ? allFactorEval.entryTimingWarning
     : isBuy
-    ? `BUY Confirmation Check (${p.targetTf}): Confirm a bullish candle close above 20 EMA (${ema20Val.toFixed(decimals)}) with swing-protected SL @ ${slPrice.toFixed(decimals)}.`
-    : `SELL Confirmation Check (${p.targetTf}): Confirm a bearish candle close below 20 EMA (${ema20Val.toFixed(decimals)}) with swing-protected SL @ ${slPrice.toFixed(decimals)}.`;
+    ? `BUY Confirmation Check (${p.targetTf}): Confirm a bullish candle close above 20 EMA (${ema20Val.toFixed(decimals)}) with swing-protected SL @ ${slPrice.toFixed(decimals)} (${activeLotSize.toFixed(2)} Lots).`
+    : `SELL Confirmation Check (${p.targetTf}): Confirm a bearish candle close below 20 EMA (${ema20Val.toFixed(decimals)}) with swing-protected SL @ ${slPrice.toFixed(decimals)} (${activeLotSize.toFixed(2)} Lots).`;
 
   const trajectory = isBuy
-    ? `1H–48H ${p.biasOverride ? 'Chosen BUY' : 'AI BUY'} Roadmap (${trendProjectionText}): Live ${p.targetTf} candle @ ${p.price.toFixed(decimals)} (${brokerSymbol}). Swing SL @ ${slPrice.toFixed(decimals)} (${actualSlPips}p). 1H–4H TP1: ${tp1Price.toFixed(decimals)} (+$${tp1NetProfitUsd.toFixed(2)}) -> 4H–12H TP2: ${tp2Price.toFixed(decimals)} (+${actualTpPips}p / +$${netProfitUsd.toFixed(2)}) -> 12H–48H Extended TP3: ${tp3Price.toFixed(decimals)} (+${actualTp3Pips}p / +$${netProfit48hUsd.toFixed(2)}). ${macroFactorNote}.`
-    : `1H–48H ${p.biasOverride ? 'Chosen SELL' : 'AI SELL'} Roadmap (${trendProjectionText}): Live ${p.targetTf} candle @ ${p.price.toFixed(decimals)} (${brokerSymbol}). Swing SL @ ${slPrice.toFixed(decimals)} (${actualSlPips}p). 1H–4H TP1: ${tp1Price.toFixed(decimals)} (+$${tp1NetProfitUsd.toFixed(2)}) -> 4H–12H TP2: ${tp2Price.toFixed(decimals)} (-${actualTpPips}p / +$${netProfitUsd.toFixed(2)}) -> 12H–48H Extended TP3: ${tp3Price.toFixed(decimals)} (-${actualTp3Pips}p / +$${netProfit48hUsd.toFixed(2)}). ${macroFactorNote}.`;
+    ? `1H–48H ${p.biasOverride ? 'Chosen BUY' : 'AI BUY'} Roadmap (${trendProjectionText}): Live ${p.targetTf} candle @ ${anchoredEntry.toFixed(decimals)} (${brokerSymbol} · ${activeLotSize.toFixed(2)} Lots). Swing SL @ ${slPrice.toFixed(decimals)} (${actualSlPips}p / -$${actualRiskUsd.toFixed(2)}). 1H–4H TP1: ${tp1Price.toFixed(decimals)} (+$${tp1NetProfitUsd.toFixed(2)}) -> 4H–12H TP2: ${tp2Price.toFixed(decimals)} (+${actualTpPips}p / +$${netProfitUsd.toFixed(2)}) -> 12H–48H Extended TP3: ${tp3Price.toFixed(decimals)} (+${actualTp3Pips}p / +$${netProfit48hUsd.toFixed(2)}). ${macroFactorNote}.`
+    : `1H–48H ${p.biasOverride ? 'Chosen SELL' : 'AI SELL'} Roadmap (${trendProjectionText}): Live ${p.targetTf} candle @ ${anchoredEntry.toFixed(decimals)} (${brokerSymbol} · ${activeLotSize.toFixed(2)} Lots). Swing SL @ ${slPrice.toFixed(decimals)} (${actualSlPips}p / -$${actualRiskUsd.toFixed(2)}). 1H–4H TP1: ${tp1Price.toFixed(decimals)} (+$${tp1NetProfitUsd.toFixed(2)}) -> 4H–12H TP2: ${tp2Price.toFixed(decimals)} (-${actualTpPips}p / +$${netProfitUsd.toFixed(2)}) -> 12H–48H Extended TP3: ${tp3Price.toFixed(decimals)} (-${actualTp3Pips}p / +$${netProfit48hUsd.toFixed(2)}). ${macroFactorNote}.`;
 
   const mt4SafetyProof = isBuy
-    ? `MT4 BUY Validated: SL (${slPrice.toFixed(decimals)}) < Entry (${p.price.toFixed(decimals)}) < TP1 (${tp1Price.toFixed(decimals)}) < TP2 (${tp2Price.toFixed(decimals)})`
-    : `MT4 SELL Validated: TP2 (${tp2Price.toFixed(decimals)}) < TP1 (${tp1Price.toFixed(decimals)}) < Entry (${p.price.toFixed(decimals)}) < SL (${slPrice.toFixed(decimals)})`;
+    ? `MT4 BUY Validated: SL (${slPrice.toFixed(decimals)}) < Entry (${anchoredEntry.toFixed(decimals)}) < TP1 (${tp1Price.toFixed(decimals)}) < TP2 (${tp2Price.toFixed(decimals)})`
+    : `MT4 SELL Validated: TP2 (${tp2Price.toFixed(decimals)}) < TP1 (${tp1Price.toFixed(decimals)}) < Entry (${anchoredEntry.toFixed(decimals)}) < SL (${slPrice.toFixed(decimals)})`;
 
   const mtfAlignment = evaluateMultiTimeframeAlignment({
     pair: p.targetPair,
@@ -1981,9 +2344,9 @@ export function computeRealChartTradeParams(p: {
       (ev) => ev.currency === p.targetPair || ev.currency.includes(baseCurrency) || ev.currency.includes('USD')
     ) || allEconomicEvents[0];
 
-  let advisoryEntryPrice = Number(p.price.toFixed(decimals));
+  let advisoryEntryPrice = anchoredEntry;
   let advisoryDiscountPips = 0;
-  let advisoryEntryNote = `Direct market execution @ ${p.price.toFixed(decimals)}`;
+  let advisoryEntryNote = `Direct market execution @ ${anchoredEntry.toFixed(decimals)}`;
 
   if (isBuy) {
     if (p.price > ema20Val) {
@@ -1999,10 +2362,53 @@ export function computeRealChartTradeParams(p: {
     }
   }
 
+  // Coherent Limit Plan anchored strictly around advisoryEntryPrice (20 EMA Limit EP)
+  // so EP, SL, TP1, TP2, TP3 always remain 100% mathematically aligned in Pullback Mode.
+  let limitSl = isBuy
+    ? Number((advisoryEntryPrice - slOffset).toFixed(decimals))
+    : Number((advisoryEntryPrice + slOffset).toFixed(decimals));
+  let limitTp1 = isBuy
+    ? Number((advisoryEntryPrice + tp1Offset).toFixed(decimals))
+    : Number((advisoryEntryPrice - tp1Offset).toFixed(decimals));
+  let limitTp2 = isBuy
+    ? Number((advisoryEntryPrice + tp2Offset).toFixed(decimals))
+    : Number((advisoryEntryPrice - tp2Offset).toFixed(decimals));
+  let limitTp3 = isBuy
+    ? Number((advisoryEntryPrice + tp3Offset).toFixed(decimals))
+    : Number((advisoryEntryPrice - tp3Offset).toFixed(decimals));
+
+  if (isBuy) {
+    if (limitSl > advisoryEntryPrice - minGapPrice) limitSl = Number((advisoryEntryPrice - slOffset).toFixed(decimals));
+    if (limitTp1 < advisoryEntryPrice + minGapPrice) limitTp1 = Number((advisoryEntryPrice + tp1Offset).toFixed(decimals));
+    if (limitTp2 < limitTp1 + minGapPrice * 0.75) limitTp2 = Number((limitTp1 + minGapPrice).toFixed(decimals));
+    if (limitTp3 < limitTp2 + minGapPrice * 0.9) limitTp3 = Number((limitTp2 + minGapPrice * 1.25).toFixed(decimals));
+  } else {
+    if (limitSl < advisoryEntryPrice + minGapPrice) limitSl = Number((advisoryEntryPrice + slOffset).toFixed(decimals));
+    if (limitTp1 > advisoryEntryPrice - minGapPrice) limitTp1 = Number((advisoryEntryPrice - tp1Offset).toFixed(decimals));
+    if (limitTp2 > limitTp1 - minGapPrice * 0.75) limitTp2 = Number((limitTp1 - minGapPrice).toFixed(decimals));
+    if (limitTp3 > limitTp2 - minGapPrice * 0.9) limitTp3 = Number((limitTp2 - minGapPrice * 1.25).toFixed(decimals));
+  }
+
+  const limitPlan = {
+    entryPrice: advisoryEntryPrice,
+    stopLoss: limitSl,
+    tp1: limitTp1,
+    tp2: limitTp2,
+    tp3: limitTp3,
+    slPips: actualSlPips,
+    tp1Pips: actualTp1Pips,
+    tpPips: actualTpPips,
+    tp3Pips: actualTp3Pips,
+    riskReward,
+    mt4SafetyProof: isBuy
+      ? `MT4 BUY LIMIT Validated: SL (${limitSl.toFixed(decimals)}) < EP (${advisoryEntryPrice.toFixed(decimals)}) < TP1 (${limitTp1.toFixed(decimals)}) < TP2 (${limitTp2.toFixed(decimals)})`
+      : `MT4 SELL LIMIT Validated: TP2 (${limitTp2.toFixed(decimals)}) < TP1 (${limitTp1.toFixed(decimals)}) < EP (${advisoryEntryPrice.toFixed(decimals)}) < SL (${limitSl.toFixed(decimals)})`
+  };
+
   return {
     direction: isBuy ? 'BUY' : 'SELL',
     orderType,
-    entryPrice: Number(p.price.toFixed(decimals)),
+    entryPrice: anchoredEntry,
     stopLoss: slPrice,
     tp1: tp1Price,
     tp2: tp2Price,
@@ -2012,7 +2418,7 @@ export function computeRealChartTradeParams(p: {
     tpPips: actualTpPips,
     tp3Pips: actualTp3Pips,
     riskReward,
-    lotSize: 0.01,
+    lotSize: activeLotSize,
     actualRiskUsd,
     potentialGainUsd,
     spreadCostUsd,
@@ -2049,7 +2455,10 @@ export function computeRealChartTradeParams(p: {
     economicEventNotice,
     advisoryEntryPrice,
     advisoryEntryNote,
-    advisoryDiscountPips
+    advisoryDiscountPips,
+    riskConfig: activeRiskCfg,
+    riskPlan,
+    limitPlan
   };
 }
 
@@ -2186,7 +2595,17 @@ export function buildCalibratedMarketItem(params: {
     const h1Closes = params.h1Candles.map((c) => c.close);
     const h1Ema20 = computeRealEma(h1Closes, 20);
     const h1Ema50 = computeRealEma(h1Closes, 50);
-    h1TrendDirection = h1Ema20 >= h1Ema50 ? 'UPTREND' : 'DOWNTREND';
+    const h1Last = h1Closes[h1Closes.length - 1] ?? params.price;
+    const h1Prev4 = h1Closes[Math.max(0, h1Closes.length - 5)] ?? h1Last;
+    if (h1Ema20 < h1Ema50) {
+      h1TrendDirection = 'DOWNTREND';
+    } else if (h1Ema20 > h1Ema50) {
+      // Catch steep sell-offs where live price & H1 close dropped decisively below both H1 20 & 50 EMA
+      h1TrendDirection =
+        params.price < h1Ema20 && params.price < h1Ema50 && h1Last < h1Prev4 ? 'DOWNTREND' : 'UPTREND';
+    } else {
+      h1TrendDirection = params.price >= h1Ema50 ? 'UPTREND' : 'DOWNTREND';
+    }
   }
 
   const evalData = evaluateCandleSeriesAndTick({
@@ -2333,8 +2752,8 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
   buildCalibratedMarketItem({
     pair: 'BTC/USD',
     symbol: 'Bitcoin Spot',
-    price: 80491.43,
-    change24hPct: 3.43,
+    price: 69300.0,
+    change24hPct: -0.85,
     recommendedTf: 'H1',
     recommendedSession: '24/7 Global Liquidity Flow',
     volatility: 'HIGH',
@@ -2349,8 +2768,8 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
   buildCalibratedMarketItem({
     pair: 'XAU/USD',
     symbol: 'GOLD (Spot)',
-    price: 3962.50,
-    change24hPct: 0.85,
+    price: 3897.50,
+    change24hPct: -0.45,
     recommendedTf: 'M15',
     recommendedSession: 'London / NY Overlap (15:30 - 18:30 EAT)',
     volatility: 'HIGH',
@@ -2484,8 +2903,8 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
   buildCalibratedMarketItem({
     pair: 'ETH/USD',
     symbol: 'Ethereum 24/7',
-    price: 2845.50,
-    change24hPct: 2.15,
+    price: 1960.0,
+    change24hPct: -1.15,
     recommendedTf: 'H1',
     recommendedSession: '24/7 Global Crypto Liquidity',
     volatility: 'HIGH',
@@ -2500,8 +2919,8 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
   buildCalibratedMarketItem({
     pair: 'US30',
     symbol: 'Wall Street 30 / Dow',
-    price: 43850.0,
-    change24hPct: 0.65,
+    price: 52300.0,
+    change24hPct: -0.35,
     recommendedTf: 'H1',
     recommendedSession: 'New York Session (16:30 - 23:00 EAT)',
     volatility: 'HIGH',
@@ -2515,8 +2934,8 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
   buildCalibratedMarketItem({
     pair: 'NAS100',
     symbol: 'US Tech 100 / Nasdaq',
-    price: 20950.0,
-    change24hPct: 0.88,
+    price: 25360.0,
+    change24hPct: -0.42,
     recommendedTf: 'H1',
     recommendedSession: 'New York Session (16:30 - 23:00 EAT)',
     volatility: 'HIGH',
@@ -2530,8 +2949,8 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
   buildCalibratedMarketItem({
     pair: 'GER40',
     symbol: 'Germany 40 / DAX',
-    price: 19420.0,
-    change24hPct: 0.42,
+    price: 26760.0,
+    change24hPct: 0.28,
     recommendedTf: 'H1',
     recommendedSession: 'Frankfurt / London (10:00 - 18:30 EAT)',
     volatility: 'MEDIUM',
@@ -2545,8 +2964,8 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
   buildCalibratedMarketItem({
     pair: 'USOIL',
     symbol: 'Crude Oil (WTI)',
-    price: 71.45,
-    change24hPct: -0.55,
+    price: 88.6,
+    change24hPct: -0.35,
     recommendedTf: 'H1',
     recommendedSession: 'NYMEX Session (16:00 - 21:30 EAT)',
     volatility: 'HIGH',
@@ -2575,7 +2994,7 @@ function getKrakenPairAndInterval(pair: CurrencyPair, tf: Timeframe): { krakenPa
     'USD/CHF': 'USDCHF',
     'USD/CAD': 'USDCAD',
     'AUD/USD': 'AUDUSD',
-    'XAU/USD': 'PAXGUSD',
+    'ETH/USD': 'ETHUSD',
     'BTC/USD': 'XBTUSD'
   };
 
@@ -2714,7 +3133,7 @@ export async function fetchPairLiveCandleSnapshot(
       const { krakenPair, interval } = getKrakenPairAndInterval(pair, timeframe);
       const binanceSym =
         pair === 'BTC/USD' ? 'BTCUSDT' :
-        pair === 'XAU/USD' ? 'PAXGUSDT' :
+        pair === 'ETH/USD' ? 'ETHUSDT' :
         pair === 'EUR/USD' ? 'EURUSDT' :
         pair === 'GBP/USD' ? 'GBPUSDT' :
         pair === 'AUD/USD' ? 'AUDUSDT' : null;
@@ -2765,8 +3184,8 @@ export async function fetchPairLiveCandleSnapshot(
           }
         }
 
-        const isCryptoOrGold = pair === 'BTC/USD' || pair === 'XAU/USD';
-        if (binanceKlinesRes.status === 'fulfilled' && binanceKlinesRes.value && binanceKlinesRes.value.ok && (pair === 'BTC/USD' || fetchedCandles.length < 12)) {
+        const isCryptoPair = pair === 'BTC/USD' || pair === 'ETH/USD';
+        if (binanceKlinesRes.status === 'fulfilled' && binanceKlinesRes.value && binanceKlinesRes.value.ok && (isCryptoPair || fetchedCandles.length < 12)) {
           const kRows = await binanceKlinesRes.value.json();
           if (Array.isArray(kRows) && kRows.length >= 10) {
             const parsed = kRows.map((r: any[]) => ({
@@ -2784,11 +3203,11 @@ export async function fetchPairLiveCandleSnapshot(
           const tJson = await binanceTickerRes.value.json();
           const last = parseFloat(tJson?.lastPrice);
           const pct = parseFloat(tJson?.priceChangePercent);
-          if (last > 0 && (pair === 'BTC/USD' || (isCryptoOrGold && !liveConnected) || !liveConnected)) {
+          if (last > 0 && (isCryptoPair || !liveConnected)) {
             livePrice = last;
             liveConnected = true;
           }
-          if (!isNaN(pct) && (pair === 'BTC/USD' || !liveConnected)) {
+          if (!isNaN(pct) && (isCryptoPair || !liveConnected)) {
             change24hPct = pct;
           }
         }
@@ -2897,7 +3316,7 @@ async function refreshBackgroundRealOhlcCandles(force = false) {
       { pair: 'USD/CHF', kSym: 'USDCHF' },
       { pair: 'USD/CAD', kSym: 'USDCAD' },
       { pair: 'AUD/USD', kSym: 'AUDUSD' },
-      { pair: 'XAU/USD', kSym: 'PAXGUSD' },
+      { pair: 'ETH/USD', kSym: 'ETHUSD' },
       { pair: 'BTC/USD', kSym: 'XBTUSD' }
     ];
 
@@ -3015,10 +3434,19 @@ export async function fetchLiveMarketSnapshot(
 
       // 2. Fallback direct exchange tickers if /api/live-markets did not report a live upstream feed
       if (!liveFeedConnected) {
-        const [coinbaseRes, binanceTickerRes] = await Promise.allSettled([
+        const [coinbaseRes, binanceTickerRes, goldSpotRes] = await Promise.allSettled([
           fetchWithFastTimeout(`https://api.coinbase.com/v2/exchange-rates?currency=USD&_t=${Date.now()}`, {}, 1400),
-          fetchWithFastTimeout('https://api.binance.com/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22PAXGUSDT%22%5D', {}, 1400)
+          fetchWithFastTimeout('https://api.binance.com/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22%5D', {}, 1400),
+          fetchWithFastTimeout('https://api.gold-api.com/price/XAU', {}, 1400)
         ]);
+
+        if (goldSpotRes.status === 'fulfilled' && goldSpotRes.value && goldSpotRes.value.ok) {
+          const g = await goldSpotRes.value.json();
+          if (g?.price > 1500) {
+            liveMap['XAU/USD'] = { price: Number(Number(g.price).toFixed(2)), pct: liveMap['XAU/USD']?.pct ?? 0 };
+            liveFeedConnected = true;
+          }
+        }
 
         if (coinbaseRes.status === 'fulfilled' && coinbaseRes.value && coinbaseRes.value.ok) {
           const cb = await coinbaseRes.value.json();
@@ -3053,11 +3481,11 @@ export async function fetchLiveMarketSnapshot(
                   liveMap['BTC/USD'] = { price: Number(p.toFixed(2)), pct: !isNaN(pct) ? pct : liveMap['BTC/USD']?.pct ?? 0 };
                   liveFeedConnected = true;
                 }
-              } else if (t.symbol === 'PAXGUSDT') {
+              } else if (t.symbol === 'ETHUSDT') {
                 const p = parseFloat(t.lastPrice);
                 const pct = parseFloat(t.priceChangePercent);
-                if (p > 1500) {
-                  liveMap['XAU/USD'] = { price: Number(p.toFixed(2)), pct: !isNaN(pct) ? pct : liveMap['XAU/USD']?.pct ?? 0 };
+                if (p > 100) {
+                  liveMap['ETH/USD'] = { price: Number(p.toFixed(2)), pct: !isNaN(pct) ? pct : liveMap['ETH/USD']?.pct ?? 0 };
                   liveFeedConnected = true;
                 }
               }
@@ -3105,6 +3533,7 @@ export async function fetchLiveMarketSnapshot(
       const tickDir: 'UP' | 'DOWN' | 'FLAT' = rawDiffPips > 0 ? 'UP' : rawDiffPips < 0 ? 'DOWN' : 'FLAT';
       const old = prevMeta.get(existing.pair);
 
+      const hasLiveHistory = existing.dataSource === 'Live Interbank Feed';
       const item = buildCalibratedMarketItem({
         pair: existing.pair,
         symbol: existing.symbol,
@@ -3118,8 +3547,8 @@ export async function fetchLiveMarketSnapshot(
         h1Candles: h1CandleMap[existing.pair] || existing.h1Candles,
         candlesAreRealOhlc: Boolean(candleMap[existing.pair]) || existing.candlesAreRealOhlc,
         macro: liveMacro,
-        previousDirection: old?.dir,
-        previousTrendDirection: old?.trendDir,
+        previousDirection: hasLiveHistory ? old?.dir : undefined,
+        previousTrendDirection: hasLiveHistory ? old?.trendDir : undefined,
         spreadByBroker: existing.spreadByBroker,
         dataSource: liveFeedConnected ? 'Live Interbank Feed' : 'Live Feed + Institutional Calibration'
       });
@@ -3829,6 +4258,7 @@ class GlobalLiveMarketStreamEngine {
   private pendingWsUpdates: Partial<Record<CurrencyPair, { price: number; pct?: number }>> = {};
   private wsFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private isFetchingRest = false;
+  private hasReceivedLiveFeed = false;
   private trendHoldUntil: Partial<Record<CurrencyPair, number>> = {};
   private sessionDirection: Partial<Record<CurrencyPair, 'BUY' | 'SELL'>> = {};
   private sessionTrendDirection: Partial<Record<CurrencyPair, 'UPTREND' | 'DOWNTREND' | 'RANGING'>> = {};
@@ -4260,7 +4690,7 @@ class GlobalLiveMarketStreamEngine {
       id: `ord_${Date.now()}_${market.pair.replace('/', '')}`,
       pair: market.pair,
       direction: params.direction,
-      lotSize: Number((params.lotSize || 0.01).toFixed(2)),
+      lotSize: Number((params.lotSize || computed.lotSize || 0.01).toFixed(2)),
       broker,
       timeframe,
       entryPrice: finalEntry,
@@ -4825,12 +5255,12 @@ class GlobalLiveMarketStreamEngine {
       const old = prevMeta.get(existing.pair);
 
       // Sustainable Session Direction Stability:
-      // Session direction is anchored by H1/multi-timeframe structure and active loaded orders.
-      // A minor pullback in an uptrend remains UPTREND · BUY (Pullback testing discount zone),
-      // providing the firm assurance and certainty needed for broker order execution!
-      const activeOrd = this.activeOrders[existing.pair];
-      const sessionDir = activeOrd ? activeOrd.direction : (this.sessionDirection[existing.pair] ?? old?.dir);
-      const sessionTrendDir = this.sessionTrendDirection[existing.pair] ?? old?.trendDir;
+      // On initial live hydration or explicit manual rescan, never inherit stale baseline BUY/SELL bias.
+      // Furthermore, never let a previously loaded active order force the market AI direction away from live price action.
+      const isInitialLiveHydration = feedOk && !this.hasReceivedLiveFeed;
+      const useSessionAnchor = !isInitialLiveHydration && !isExplicitFreshScan;
+      const sessionDir = useSessionAnchor ? (this.sessionDirection[existing.pair] ?? old?.dir) : undefined;
+      const sessionTrendDir = useSessionAnchor ? (this.sessionTrendDirection[existing.pair] ?? old?.trendDir) : undefined;
 
       const calibrated = buildCalibratedMarketItem({
         pair: existing.pair,
@@ -4852,7 +5282,7 @@ class GlobalLiveMarketStreamEngine {
         dataSource: feedOk ? 'Live Interbank Feed' : 'Live Feed + Institutional Calibration'
       });
 
-      const newDir: 'BUY' | 'SELL' = activeOrd ? activeOrd.direction : (calibrated.bias === 'STRONG_SELL' ? 'SELL' : 'BUY');
+      const newDir: 'BUY' | 'SELL' = calibrated.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
       const newTrendDir: 'UPTREND' | 'DOWNTREND' | 'RANGING' = calibrated.trendDirection;
 
       // Update persistent session anchors
@@ -4920,6 +5350,9 @@ class GlobalLiveMarketStreamEngine {
       }
     }
 
+    if (feedOk) {
+      this.hasReceivedLiveFeed = true;
+    }
     this.syncedAt = tickStr;
     this.liveFeedConnected = feedOk;
     this.lastScanMode = scanMode;
@@ -4934,7 +5367,7 @@ class GlobalLiveMarketStreamEngine {
 
     try {
       const socket = new WebSocket(
-        'wss://stream.binance.com:9443/stream?streams=btcusdt@bookTicker/paxgusdt@bookTicker/btcusdt@miniTicker/paxgusdt@miniTicker'
+        'wss://stream.binance.com:9443/stream?streams=btcusdt@bookTicker/ethusdt@bookTicker/btcusdt@miniTicker/ethusdt@miniTicker'
       );
       this.ws = socket;
 
@@ -4956,8 +5389,8 @@ class GlobalLiveMarketStreamEngine {
 
           if (d.s === 'BTCUSDT') {
             this.queueWsTick('BTC/USD', lastPrice, pct);
-          } else if (d.s === 'PAXGUSDT' && lastPrice > 1500) {
-            this.queueWsTick('XAU/USD', lastPrice, pct);
+          } else if (d.s === 'ETHUSDT' && lastPrice > 100) {
+            this.queueWsTick('ETH/USD', lastPrice, pct);
           }
         } catch {
           // Ignore malformed frame

@@ -9,7 +9,9 @@ import {
   computeRealChartTradeParams,
   computeCandleSwingLevels,
   getCurrentMacroContext,
-  getPairSpecs
+  getPairSpecs,
+  RiskManagementConfig,
+  positionRiskStore
 } from '../../utils/liveMarketEngine';
 import {
   TrendingUp,
@@ -53,7 +55,8 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
   const [orderHistory, setOrderHistory] = useState<ClosedOrderHistoryEntry[]>(
     () => globalLiveStream.getState().orderHistory
   );
-  const [selectedLotSize, setSelectedLotSize] = useState<number>(0.01);
+  const [selectedLotSize, setSelectedLotSize] = useState<number | 'AUTO'>('AUTO');
+  const [riskConfig, setRiskConfig] = useState<RiskManagementConfig>(() => positionRiskStore.getConfig());
   const [autoTrailOnLoad, setAutoTrailOnLoad] = useState<boolean>(true);
   const [customEntryDraft, setCustomEntryDraft] = useState<string>('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -85,7 +88,11 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
       setActiveOrders(state.activeOrders);
       setOrderHistory(state.orderHistory);
     });
-    return () => unsubscribe();
+    const unsubRisk = positionRiskStore.subscribe((nextCfg) => setRiskConfig(nextCfg));
+    return () => {
+      unsubscribe();
+      unsubRisk();
+    };
   }, []);
 
   const flashNotice = (msg: string) => {
@@ -114,7 +121,7 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
     const loaded = globalLiveStream.loadMarketOrder({
       pair: targetPair,
       direction: targetDir,
-      lotSize: selectedLotSize,
+      lotSize: selectedLotSize === 'AUTO' ? undefined : selectedLotSize,
       timeframe: targetTf || timeframe,
       broker,
       autoTrailEnabled: autoTrailOnLoad,
@@ -841,7 +848,8 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
     macro: liveMacro,
     biasOverride: direction,
     previousDirection: direction,
-    h1TrendDirection: activeMarket.h1TrendDirection
+    h1TrendDirection: activeMarket.h1TrendDirection,
+    riskConfig
   });
 
   const existingOrder = activeOrders[pair] || null;
@@ -881,7 +889,8 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
           <button
             type="button"
             onClick={() => {
-              const fullPacket = `${computed.brokerSymbol} ${existingOrder ? existingOrder.direction : computed.direction} | Entry: ${existingOrder ? existingOrder.entryPrice : computed.entryPrice} | SL: ${existingOrder ? existingOrder.stopLoss : computed.stopLoss} | TP1: ${existingOrder ? existingOrder.tp1 : computed.tp1} | TP2: ${existingOrder ? existingOrder.tp2 : computed.tp2} | Lot: 0.01 (Max Risk: $${computed.actualRiskUsd})`;
+              const activeLot = existingOrder ? existingOrder.lotSize : computed.lotSize;
+              const fullPacket = `${computed.brokerSymbol} ${existingOrder ? existingOrder.direction : computed.direction} | Entry: ${existingOrder ? existingOrder.entryPrice : computed.entryPrice} | SL: ${existingOrder ? existingOrder.stopLoss : computed.stopLoss} | TP1: ${existingOrder ? existingOrder.tp1 : computed.tp1} | TP2: ${existingOrder ? existingOrder.tp2 : computed.tp2} | Lot: ${activeLot.toFixed(2)} (Max Risk: $${computed.actualRiskUsd.toFixed(2)})`;
               copyValue(fullPacket, `top-full-${pair}`);
               flashNotice(`COPIED FULL MT4/MT5 TICKET · ${computed.brokerSymbol} ${existingOrder ? existingOrder.direction : computed.direction}`);
             }}
@@ -986,14 +995,22 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
               </div>
 
               <select
-                value={selectedLotSize}
-                onChange={(e) => setSelectedLotSize(parseFloat(e.target.value))}
+                value={String(selectedLotSize)}
+                onChange={(e) =>
+                  setSelectedLotSize(
+                    e.target.value === 'AUTO' ? 'AUTO' : parseFloat(e.target.value)
+                  )
+                }
                 aria-label="Order Micro Lot Size"
                 className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold text-xs outline-none focus:border-[#D4AF37]"
               >
-                <option value={0.01}>0.01 Lot ($2 Cap)</option>
-                <option value={0.02}>0.02 Lot ($4 Cap)</option>
-                <option value={0.05}>0.05 Lot ($10 Cap)</option>
+                <option value="AUTO">
+                  Auto Risk ({computed.lotSize.toFixed(2)} Lot · ${computed.actualRiskUsd.toFixed(2)})
+                </option>
+                <option value="0.01">0.01 Lot (Micro)</option>
+                <option value="0.02">0.02 Lot</option>
+                <option value="0.05">0.05 Lot</option>
+                <option value="0.10">0.10 Lot (Mini)</option>
               </select>
 
               <button

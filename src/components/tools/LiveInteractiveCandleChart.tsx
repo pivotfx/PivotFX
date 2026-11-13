@@ -25,6 +25,8 @@ interface LiveInteractiveCandleChartProps {
   advisoryEntryPrice?: number;
   direction: 'BUY' | 'SELL';
   change24hPct: number;
+  lotSize?: number;
+  riskUsd?: number;
   isLockedToCustom?: boolean;
   onCandlePriceChange: (newPrice: number) => void;
   onResetToLiveStream: () => void;
@@ -44,6 +46,8 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   advisoryEntryPrice,
   direction,
   change24hPct,
+  lotSize,
+  riskUsd,
   isLockedToCustom = false,
   onCandlePriceChange,
   onResetToLiveStream,
@@ -55,8 +59,43 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   const [showValueZone, setShowValueZone] = useState<boolean>(true);
   const [showAdvisoryLine, setShowAdvisoryLine] = useState<boolean>(true);
 
-  const visibleCandles = candles.slice(-44);
-  const closes = candles.map((c) => c.close);
+  const rawVisible = candles.slice(-44);
+  const rawLast = rawVisible[rawVisible.length - 1];
+  const needsTailAnchor =
+    rawVisible.length > 0 &&
+    livePrice > 0 &&
+    rawLast &&
+    rawLast.close > 0 &&
+    Math.abs(rawLast.close - livePrice) / livePrice > 0.0018;
+
+  const visibleCandles: OhlcCandle[] = rawVisible.map((c, idx) => {
+    if (needsTailAnchor) {
+      const ratio = livePrice / rawLast.close;
+      return {
+        time: c.time,
+        open: Number((c.open * ratio).toFixed(decimals)),
+        high: Number((c.high * ratio).toFixed(decimals)),
+        low: Number((c.low * ratio).toFixed(decimals)),
+        close: Number((c.close * ratio).toFixed(decimals))
+      };
+    }
+    if (idx === rawVisible.length - 1 && livePrice > 0) {
+      return {
+        ...c,
+        close: livePrice,
+        high: Math.max(c.high, livePrice),
+        low: Math.min(c.low, livePrice)
+      };
+    }
+    return c;
+  });
+
+  const fullCloses = candles.map((c) =>
+    needsTailAnchor && rawLast && rawLast.close > 0 ? c.close * (livePrice / rawLast.close) : c.close
+  );
+  if (fullCloses.length > 0 && livePrice > 0) {
+    fullCloses[fullCloses.length - 1] = livePrice;
+  }
 
   // Compute EMA series for smooth curve rendering
   const computeEmaArray = (vals: number[], period: number): number[] => {
@@ -71,12 +110,12 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
     return out;
   };
 
-  const fullEma20 = computeEmaArray(closes, 20);
-  const fullEma50 = computeEmaArray(closes, 50);
+  const fullEma20 = computeEmaArray(fullCloses, 20);
+  const fullEma50 = computeEmaArray(fullCloses, 50);
   const visEma20 = fullEma20.slice(-visibleCandles.length);
   const visEma50 = fullEma50.slice(-visibleCandles.length);
 
-  // Determine vertical price bounds including candles, EMAs, SL, and TP2
+  // Determine vertical price bounds including candles, EMAs, EP, SL, TP1, and TP2
   const allPrices: number[] = [
     ...visibleCandles.flatMap((c) => [c.high, c.low]),
     ...visEma20,
@@ -92,14 +131,14 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   const rawMin = allPrices.length ? Math.min(...allPrices) : livePrice * 0.995;
   const rawMax = allPrices.length ? Math.max(...allPrices) : livePrice * 1.005;
   const span = Math.max(rawMax - rawMin, 10 / pipMultiplier);
-  const minP = rawMin - span * 0.08;
-  const maxP = rawMax + span * 0.08;
+  const minP = rawMin - span * 0.09;
+  const maxP = rawMax + span * 0.09;
   const totalRange = maxP - minP || 1;
 
   const svgWidth = 760;
-  const svgHeight = 310;
+  const svgHeight = 320;
   const padLeft = 14;
-  const padRight = 92;
+  const padRight = 104;
   const padTop = 18;
   const padBottom = 26;
   const plotW = svgWidth - padLeft - padRight;
@@ -162,6 +201,123 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   const isBuy = direction === 'BUY';
   const lastCandleBull = inspectedCandle ? inspectedCandle.close >= inspectedCandle.open : isBuy;
 
+  // Detect if TP or SL is currently equal/already hit by candle (should never happen on live auto signals)
+  const tpTargetAlreadyHit = isBuy ? livePrice >= tp2 : livePrice <= tp2;
+  const slStopAlreadyHit = isBuy ? livePrice <= stopLoss : livePrice >= stopLoss;
+
+  // De-collide right-axis pill badges vertically so TP1, TP2, EP, LIVE, and SL never overlap visually
+  const rawAxisTags: Array<{
+    key: string;
+    label: string;
+    val: number;
+    exactY: number;
+    badgeY: number;
+    color: string;
+    bg: string;
+    textColor: string;
+    isLive?: boolean;
+  }> = [
+    {
+      key: 'TP2',
+      label: `TP2 ${tp2.toFixed(decimals)}`,
+      val: tp2,
+      exactY: priceToY(tp2),
+      badgeY: priceToY(tp2),
+      color: '#00C261',
+      bg: '#052E16',
+      textColor: '#00C261'
+    },
+    {
+      key: 'TP1',
+      label: `TP1 ${tp1.toFixed(decimals)}`,
+      val: tp1,
+      exactY: priceToY(tp1),
+      badgeY: priceToY(tp1),
+      color: '#22D3EE',
+      bg: '#083344',
+      textColor: '#22D3EE'
+    },
+    ...(Math.abs(entryPrice - livePrice) > 0.5 / pipMultiplier
+      ? [
+          {
+            key: 'EP',
+            label: `EP ${entryPrice.toFixed(decimals)}`,
+            val: entryPrice,
+            exactY: priceToY(entryPrice),
+            badgeY: priceToY(entryPrice),
+            color: '#F8FAFC',
+            bg: '#1E293B',
+            textColor: '#F8FAFC'
+          }
+        ]
+      : []),
+    ...(showAdvisoryLine &&
+    advisoryEntryPrice &&
+    advisoryEntryPrice > 0 &&
+    Math.abs(advisoryEntryPrice - livePrice) > 0.5 / pipMultiplier &&
+    Math.abs(advisoryEntryPrice - entryPrice) > 0.5 / pipMultiplier
+      ? [
+          {
+            key: 'ADV',
+            label: `ADV ${advisoryEntryPrice.toFixed(decimals)}`,
+            val: advisoryEntryPrice,
+            exactY: priceToY(advisoryEntryPrice),
+            badgeY: priceToY(advisoryEntryPrice),
+            color: '#D4AF37',
+            bg: '#271E05',
+            textColor: '#D4AF37'
+          }
+        ]
+      : []),
+    {
+      key: 'LIVE',
+      label: `${Math.abs(entryPrice - livePrice) <= 0.5 / pipMultiplier ? 'EP ' : ''}${livePrice.toFixed(decimals)}`,
+      val: livePrice,
+      exactY: priceToY(livePrice),
+      badgeY: priceToY(livePrice),
+      color: '#D4AF37',
+      bg: '#D4AF37',
+      textColor: '#000000',
+      isLive: true
+    },
+    {
+      key: 'SL',
+      label: `SL ${stopLoss.toFixed(decimals)}`,
+      val: stopLoss,
+      exactY: priceToY(stopLoss),
+      badgeY: priceToY(stopLoss),
+      color: '#EF4444',
+      bg: '#450A0A',
+      textColor: '#EF4444'
+    }
+  ];
+
+  // Sort top-to-bottom and enforce minimum 17px separation between right-axis pills
+  const sortedTags = [...rawAxisTags].sort((a, b) => a.exactY - b.exactY);
+  for (let i = 1; i < sortedTags.length; i++) {
+    if (sortedTags[i].badgeY - sortedTags[i - 1].badgeY < 17) {
+      sortedTags[i].badgeY = sortedTags[i - 1].badgeY + 17;
+    }
+  }
+  const maxBadgeY = svgHeight - padBottom - 8;
+  for (let i = sortedTags.length - 1; i >= 0; i--) {
+    if (i === sortedTags.length - 1 && sortedTags[i].badgeY > maxBadgeY) {
+      sortedTags[i].badgeY = maxBadgeY;
+    } else if (i < sortedTags.length - 1 && sortedTags[i + 1].badgeY - sortedTags[i].badgeY < 17) {
+      sortedTags[i].badgeY = Math.max(padTop + 8, sortedTags[i + 1].badgeY - 17);
+    }
+  }
+
+  // Shaded Buy/Sell Profit & Risk Zone coordinates anchored around entryPrice
+  const yEntry = priceToY(entryPrice);
+  const yTp2 = priceToY(tp2);
+  const ySl = priceToY(stopLoss);
+  const profitBandTop = Math.min(yEntry, yTp2);
+  const profitBandHeight = Math.max(2, Math.abs(yTp2 - yEntry));
+  const riskBandTop = Math.min(yEntry, ySl);
+  const riskBandHeight = Math.max(2, Math.abs(ySl - yEntry));
+  const lastCandleX = indexToX(Math.max(0, visibleCandles.length - 1));
+
   return (
     <div className="rounded-2xl bg-[#060B16] border border-[#D4AF37]/40 p-4 space-y-3.5 font-mono tabular-nums shadow-inner">
       {/* Top Chart Telemetry Strip */}
@@ -189,6 +345,11 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
             {change24hPct >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
             {change24hPct >= 0 ? `+${change24hPct.toFixed(2)}%` : `${change24hPct.toFixed(2)}%`}
           </span>
+          {lotSize !== undefined && (
+            <span className="px-2 py-0.5 rounded bg-[#D4AF37]/15 border border-[#D4AF37]/40 text-[#D4AF37] text-[10px] font-black">
+              {lotSize.toFixed(2)} Lots{riskUsd !== undefined ? ` · $${riskUsd.toFixed(2)} Risk` : ''}
+            </span>
+          )}
         </div>
 
         {/* Interactive Indicator Toggles & Legend */}
@@ -255,8 +416,24 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
       <div className="relative w-full overflow-hidden rounded-xl bg-[#040811] border border-slate-800/90">
         <svg
           viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          className="w-full h-[240px] sm:h-[290px] select-none block"
+          className="w-full h-[250px] sm:h-[305px] select-none block"
         >
+          {/* Profit & Risk Zone Bands showing exact BUY/SELL direction relative to EP & Candle */}
+          <rect
+            x={padLeft}
+            y={profitBandTop}
+            width={plotW}
+            height={profitBandHeight}
+            fill="rgba(0,194,97,0.06)"
+          />
+          <rect
+            x={padLeft}
+            y={riskBandTop}
+            width={plotW}
+            height={riskBandHeight}
+            fill="rgba(239,68,68,0.06)"
+          />
+
           {/* Horizontal Grid Lines */}
           {[0.15, 0.38, 0.62, 0.85].map((frac, idx) => {
             const y = padTop + frac * plotH;
@@ -274,8 +451,8 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
                 <text
                   x={svgWidth - padRight + 6}
                   y={y + 3}
-                  fill="#64748B"
-                  fontSize="10"
+                  fill="#475569"
+                  fontSize="9"
                   fontFamily="monospace"
                 >
                   {pVal.toFixed(decimals)}
@@ -313,84 +490,6 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
               points={ema20Points}
             />
           )}
-
-          {/* 1H Advisory Pullback Limit Entry Ray */}
-          {showAdvisoryLine && advisoryEntryPrice && advisoryEntryPrice > 0 && (
-            <g key="advisory-entry-line">
-              <line
-                x1={padLeft}
-                y1={priceToY(advisoryEntryPrice)}
-                x2={svgWidth - padRight}
-                y2={priceToY(advisoryEntryPrice)}
-                stroke="#D4AF37"
-                strokeWidth="1.5"
-                strokeDasharray="4 3"
-              />
-              <rect
-                x={svgWidth - padRight + 3}
-                y={priceToY(advisoryEntryPrice) - 8}
-                width={padRight - 6}
-                height={16}
-                rx={4}
-                fill="#271E05"
-                stroke="#D4AF37"
-                strokeWidth="0.8"
-              />
-              <text
-                x={svgWidth - padRight + 7}
-                y={priceToY(advisoryEntryPrice) + 3}
-                fill="#D4AF37"
-                fontSize="9"
-                fontWeight="bold"
-                fontFamily="monospace"
-              >
-                ADV {advisoryEntryPrice.toFixed(decimals)}
-              </text>
-            </g>
-          )}
-
-          {/* Target & Stop Loss Horizontal Price Lines */}
-          {[
-            { label: 'TP2', val: tp2, color: '#00C261', bg: '#052E16' },
-            { label: 'TP1', val: tp1, color: '#22D3EE', bg: '#083344' },
-            { label: 'SL', val: stopLoss, color: '#EF4444', bg: '#450A0A' },
-          ].map((lvl) => {
-            const y = priceToY(lvl.val);
-            return (
-              <g key={lvl.label}>
-                <line
-                  x1={padLeft}
-                  y1={y}
-                  x2={svgWidth - padRight}
-                  y2={y}
-                  stroke={lvl.color}
-                  strokeWidth="1.2"
-                  strokeDasharray="5 4"
-                  strokeOpacity="0.85"
-                />
-                <rect
-                  x={svgWidth - padRight + 3}
-                  y={y - 8}
-                  width={padRight - 6}
-                  height={16}
-                  rx={4}
-                  fill={lvl.bg}
-                  stroke={lvl.color}
-                  strokeWidth="0.8"
-                />
-                <text
-                  x={svgWidth - padRight + 7}
-                  y={y + 3}
-                  fill={lvl.color}
-                  fontSize="9.5"
-                  fontWeight="bold"
-                  fontFamily="monospace"
-                >
-                  {lvl.label} {lvl.val.toFixed(decimals)}
-                </text>
-              </g>
-            );
-          })}
 
           {/* Candlesticks */}
           {visibleCandles.map((c, idx) => {
@@ -437,44 +536,77 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
             );
           })}
 
-          {/* Live Current Price Line & Highlighted Axis Tag */}
-          {(() => {
-            const yLive = priceToY(livePrice);
-            return (
-              <g>
+          {/* Projected Trajectory Arrow from Last Candle toward TP2 */}
+          {!tpTargetAlreadyHit && (
+            <g opacity="0.85">
+              <line
+                x1={lastCandleX + 6}
+                y1={priceToY(livePrice)}
+                x2={Math.min(svgWidth - padRight - 10, lastCandleX + 26)}
+                y2={yTp2}
+                stroke={isBuy ? '#00C261' : '#EF4444'}
+                strokeWidth="1.8"
+                strokeDasharray="3 3"
+              />
+              <circle
+                cx={Math.min(svgWidth - padRight - 10, lastCandleX + 26)}
+                cy={yTp2}
+                r="3.2"
+                fill={isBuy ? '#00C261' : '#EF4444'}
+              />
+            </g>
+          )}
+
+          {/* Horizontal Price Lines (Exact Price Y) + De-Collided Axis Pills */}
+          {sortedTags.map((tag) => (
+            <g key={tag.key}>
+              <line
+                x1={padLeft}
+                y1={tag.exactY}
+                x2={svgWidth - padRight}
+                y2={tag.exactY}
+                stroke={tag.color}
+                strokeWidth={tag.isLive ? '1.6' : '1.2'}
+                strokeDasharray={tag.isLive ? undefined : tag.key === 'ADV' ? '4 3' : '5 4'}
+                strokeOpacity={tag.isLive ? '1' : '0.85'}
+              />
+              {Math.abs(tag.badgeY - tag.exactY) > 2 && (
                 <line
-                  x1={padLeft}
-                  y1={yLive}
-                  x2={svgWidth - padRight}
-                  y2={yLive}
-                  stroke="#D4AF37"
-                  strokeWidth="1.6"
+                  x1={svgWidth - padRight}
+                  y1={tag.exactY}
+                  x2={svgWidth - padRight + 3}
+                  y2={tag.badgeY}
+                  stroke={tag.color}
+                  strokeWidth="0.9"
+                  strokeOpacity="0.8"
                 />
-                <rect
-                  x={svgWidth - padRight + 2}
-                  y={yLive - 9}
-                  width={padRight - 4}
-                  height={18}
-                  rx={4}
-                  fill="#D4AF37"
-                />
-                <text
-                  x={svgWidth - padRight + 6}
-                  y={yLive + 3.5}
-                  fill="#000000"
-                  fontSize="10"
-                  fontWeight="900"
-                  fontFamily="monospace"
-                >
-                  {livePrice.toFixed(decimals)}
-                </text>
-              </g>
-            );
-          })()}
+              )}
+              <rect
+                x={svgWidth - padRight + 2}
+                y={tag.badgeY - 8}
+                width={padRight - 5}
+                height={16}
+                rx={4}
+                fill={tag.bg}
+                stroke={tag.color}
+                strokeWidth={tag.isLive ? '1' : '0.8'}
+              />
+              <text
+                x={svgWidth - padRight + 6}
+                y={tag.badgeY + 3}
+                fill={tag.textColor}
+                fontSize="9"
+                fontWeight={tag.isLive ? '900' : 'bold'}
+                fontFamily="monospace"
+              >
+                {tag.label}
+              </text>
+            </g>
+          ))}
         </svg>
 
         {/* Floating Top-Left Live Signal Stamp */}
-        <div className="absolute top-2.5 left-3 flex items-center gap-2 pointer-events-none">
+        <div className="absolute top-2.5 left-3 flex flex-wrap items-center gap-2 pointer-events-none">
           <span
             className={`px-2 py-0.5 rounded text-[10px] font-black shadow ${
               isBuy ? 'bg-[#00C261] text-black' : 'bg-red-600 text-white'
@@ -486,6 +618,16 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
             <Activity className="w-3 h-3 text-[#00C261]" />
             <span>{isLockedToCustom ? 'Custom Candle Simulation' : '24/7 Live Feed Active'}</span>
           </span>
+          {tpTargetAlreadyHit && (
+            <span className="px-2 py-0.5 rounded bg-amber-500 text-black text-[10px] font-black">
+              TP2 ALREADY REACHED BY CANDLE
+            </span>
+          )}
+          {slStopAlreadyHit && (
+            <span className="px-2 py-0.5 rounded bg-red-500 text-white text-[10px] font-black">
+              SL LEVEL CROSSED BY CANDLE
+            </span>
+          )}
         </div>
       </div>
 

@@ -6,8 +6,10 @@ import {
   ActiveMarketOrder,
   evaluateOrderEntryMoment,
   evaluateOrderTrendSustainability,
+  computeLiveOrderMetrics,
   EntryMomentVerdict,
-  TrendSustainabilityVerdict
+  TrendSustainabilityVerdict,
+  globalLiveStream
 } from '../../utils/liveMarketEngine';
 import {
   Check,
@@ -44,7 +46,12 @@ interface EntryConfirmationControllerProps {
   livePrice: number;
   timeframe?: Timeframe;
   lockedOrder?: ActiveMarketOrder | null;
+  ema20?: number;
+  ema50?: number;
+  rsi?: number;
   variant?: 'focused' | 'compact' | 'tradingview';
+  showSavedOrder?: boolean;
+  onToggleSavedOrder?: () => void;
   onInspectDetails?: () => void;
   className?: string;
 }
@@ -56,7 +63,12 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
   livePrice,
   timeframe = 'M15',
   lockedOrder = null,
+  ema20,
+  ema50,
+  rsi,
   variant = 'focused',
+  showSavedOrder,
+  onToggleSavedOrder,
   onInspectDetails,
   className = ''
 }) => {
@@ -66,6 +78,8 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
   const [rushGuardConfirmed, setRushGuardConfirmed] = useState(false);
   const [isAudioOn, setIsAudioOn] = useState<boolean>(() => audioAlertEngine.isEnabled());
   const [loggedToast, setLoggedToast] = useState<string | null>(null);
+  const [execMode, setExecMode] = useState<'MARKET' | 'LIMIT_20EMA'>('MARKET');
+  const [showStaleOrderLocal, setShowStaleOrderLocal] = useState(false);
 
   // Live ticking countdown for entry timing window / candle retest
   const [secondsRemainingInCycle, setSecondsRemainingInCycle] = useState(180);
@@ -136,28 +150,71 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
   };
 
   const handleLogTrade = (entryVal: number, slVal: number, tp1Val: number, tp2Val?: number) => {
+    const activeLot = Number((computed.lotSize || 0.01).toFixed(2));
+    const activeRisk = Number((computed.actualRiskUsd || 2.0).toFixed(2));
     saveJournalTrade({
       pair,
-      direction: computed.direction,
+      direction: shownDirection,
       entryPrice: Number(entryVal),
       stopLoss: Number(slVal),
       tp1: Number(tp1Val),
       tp2: tp2Val ? Number(tp2Val) : undefined,
-      lotSize: 0.01,
-      riskUsd: 2.0,
+      lotSize: activeLot,
+      riskUsd: activeRisk,
       status: 'OPEN',
-      notes: `Executed via Entry Confirmation Controller. Strategy: 20/50 EMA Pullback Value System.`,
+      notes: `Executed via Entry Confirmation Controller (${useLimitPlan ? '20 EMA Limit' : 'Market'}). Strategy: 20/50 EMA Pullback Value System.`,
       confluenceStars: sustainability.integrityPct >= 80 ? 4 : 3,
       brokerTarget: 'FXPesa',
     });
     audioAlertEngine.playSuccessChime();
-    setLoggedToast(`Trade Logged: ${pair} ${computed.direction} @ ${entryVal}`);
+    setLoggedToast(`Trade Logged: ${pair} ${shownDirection} @ ${entryVal}`);
   };
 
-  const shownEntry = lockedOrder ? lockedOrder.entryPrice : computed.entryPrice;
-  const shownSl = lockedOrder ? lockedOrder.stopLoss : computed.stopLoss;
-  const shownTp1 = lockedOrder ? lockedOrder.tp1 : computed.tp1;
-  const shownTp2 = lockedOrder ? lockedOrder.tp2 : computed.tp2;
+  const hasLimitDiscount = Boolean(
+    computed.limitPlan &&
+      computed.advisoryDiscountPips &&
+      computed.advisoryDiscountPips > 0 &&
+      computed.limitPlan.entryPrice !== computed.entryPrice
+  );
+  const lockedOrderMetrics =
+    lockedOrder && livePrice > 0 ? computeLiveOrderMetrics(lockedOrder, livePrice) : null;
+  const isOrderCompleted = Boolean(lockedOrderMetrics && (lockedOrderMetrics.hitTp2 || lockedOrderMetrics.hitSl));
+  const isStaleOrOpposingOrder = Boolean(
+    lockedOrder &&
+      livePrice > 0 &&
+      (isOrderCompleted ||
+        Math.abs(lockedOrder.entryPrice - livePrice) / livePrice > 0.015 ||
+        lockedOrder.direction !== computed.direction)
+  );
+  const useLockedOrder = Boolean(
+    lockedOrder &&
+      (showSavedOrder !== undefined
+        ? showSavedOrder
+        : !isStaleOrOpposingOrder || showStaleOrderLocal)
+  );
+  const useLimitPlan = Boolean(!useLockedOrder && execMode === 'LIMIT_20EMA' && hasLimitDiscount && computed.limitPlan);
+
+  const shownEntry = useLockedOrder
+    ? lockedOrder!.entryPrice
+    : useLimitPlan
+    ? computed.limitPlan!.entryPrice
+    : computed.entryPrice;
+  const shownSl = useLockedOrder
+    ? lockedOrder!.stopLoss
+    : useLimitPlan
+    ? computed.limitPlan!.stopLoss
+    : computed.stopLoss;
+  const shownTp1 = useLockedOrder
+    ? lockedOrder!.tp1
+    : useLimitPlan
+    ? computed.limitPlan!.tp1
+    : computed.tp1;
+  const shownTp2 = useLockedOrder
+    ? lockedOrder!.tp2
+    : useLimitPlan
+    ? computed.limitPlan!.tp2
+    : computed.tp2;
+  const shownDirection = useLockedOrder ? lockedOrder!.direction : computed.direction;
 
   // =========================================================================
   // VARIANT 1: COMPACT (Used inside the 15 Market Summary Cards)
@@ -263,7 +320,7 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
             <span className="font-bold">{loggedToast}</span>
           </div>
-          <span className="text-[10px] text-emerald-400 font-mono">0.01 Micro Lot Saved</span>
+          <span className="text-[10px] text-emerald-400 font-mono">{computed.lotSize.toFixed(2)} Lot Saved</span>
         </div>
       )}
 
@@ -296,6 +353,97 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
           </span>
         </div>
       )}
+
+      {/* Stale or Opposing Loaded Order Alert Banner */}
+      {isStaleOrOpposingOrder && lockedOrder && (
+        <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center space-x-2 min-w-0">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <div className="min-w-0">
+              <span className="font-bold block text-amber-300">
+                SAVED SESSION ORDER NOTICE: {lockedOrder.direction} @ {lockedOrder.entryPrice} (Market now @ {livePrice})
+              </span>
+              <span className="text-[10px] text-amber-200/80 block">
+                {lockedOrderMetrics?.hitTp2
+                  ? `Saved ${lockedOrder.direction} order already reached TP2 (${lockedOrder.tp2}). Chart defaulted to Live ${computed.direction} signal.`
+                  : lockedOrderMetrics?.hitSl
+                  ? `Saved ${lockedOrder.direction} order already hit Stop Loss (${lockedOrder.stopLoss}). Chart defaulted to Live ${computed.direction} signal.`
+                  : lockedOrder.direction !== computed.direction
+                  ? `Live structure projects ${computed.direction}, opposing your saved ${lockedOrder.direction} order.`
+                  : 'Saved order entry differs >1.5% from live market price.'}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (onToggleSavedOrder) onToggleSavedOrder();
+                else setShowStaleOrderLocal(!showStaleOrderLocal);
+              }}
+              className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 text-[10px] font-bold transition"
+            >
+              {useLockedOrder ? `View Live ${computed.direction}` : 'Show Saved Order'}
+            </button>
+            <button
+              type="button"
+              onClick={() => globalLiveStream.closeMarketOrder(pair)}
+              className="px-2.5 py-1 rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-500/40 text-[10px] font-bold transition"
+            >
+              Clear Saved Order
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Candle Structure Proof Ribbon + Execution Mode Toggle (Market Now vs 20 EMA Limit EP) */}
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-900/90 border border-slate-800 text-[11px]">
+        <div className="flex items-center gap-2 min-w-0">
+          <span
+            className={`px-2 py-0.5 rounded font-black text-[10px] shrink-0 ${
+              shownDirection === 'BUY'
+                ? 'bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40'
+                : 'bg-red-500/20 text-red-300 border border-red-500/40'
+            }`}
+          >
+            VERIFIED {shownDirection}
+          </span>
+          <span className="text-slate-300 truncate text-[10px]">
+            {ema20 !== undefined && ema50 !== undefined
+              ? `${livePrice >= ema20 ? 'Price > 20EMA' : 'Price < 20EMA'} (${ema20}) · ${
+                  ema20 >= ema50 ? '20EMA ≥ 50EMA' : '20EMA < 50EMA'
+                } (${ema50})${rsi !== undefined ? ` · RSI ${rsi}` : ''} · 1H ${computed.h1TrendDirection}`
+              : computed.trendProjectionText}
+          </span>
+        </div>
+
+        {hasLimitDiscount && !useLockedOrder && (
+          <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800 shrink-0">
+            <button
+              type="button"
+              onClick={() => setExecMode('MARKET')}
+              className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${
+                execMode === 'MARKET'
+                  ? 'bg-[#D4AF37] text-black'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Market EP ({computed.entryPrice})
+            </button>
+            <button
+              type="button"
+              onClick={() => setExecMode('LIMIT_20EMA')}
+              className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${
+                execMode === 'LIMIT_20EMA'
+                  ? 'bg-cyan-400 text-black'
+                  : 'text-cyan-300 hover:text-white'
+              }`}
+            >
+              20 EMA Limit ({computed.limitPlan!.entryPrice})
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Top Institutional Utility Strip: Sound Chime Toggle & Quick Log */}
       <div className="flex items-center justify-between text-xs px-1">
@@ -339,12 +487,14 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
         <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col justify-between gap-1.5">
           <div>
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-slate-400">Entry Point (EP)</span>
+              <span className="text-[10px] text-slate-400">
+                {useLimitPlan ? 'Limit EP (20 EMA)' : 'Entry Point (EP)'}
+              </span>
               <span className="text-[9px] text-[#00C261] font-bold">Auto-Sync</span>
             </div>
             <strong className="text-base text-white block mt-0.5">{shownEntry}</strong>
             <span className="text-[10px] text-slate-400 block truncate">
-              {computed.direction === 'BUY' ? 'Bullish Discount' : 'Bearish Distribution'}
+              {shownDirection === 'BUY' ? 'Bullish Discount' : 'Bearish Distribution'}
             </span>
           </div>
           <button
@@ -366,11 +516,11 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
           <div>
             <div className="flex items-center justify-between">
               <span className="text-[10px] text-red-300">Stop Loss (-{computed.slPips}p)</span>
-              <span className="text-[9px] text-red-400 font-bold">$2.00 Cap</span>
+              <span className="text-[9px] text-red-400 font-bold">${computed.actualRiskUsd.toFixed(2)} Cap</span>
             </div>
             <strong className="text-base text-red-400 block mt-0.5">{shownSl}</strong>
             <span className="text-[10px] text-red-300/80 block truncate">
-              {lockedOrder ? 'Protected SL' : 'Swing Low Protected'}
+              {useLockedOrder ? 'Protected SL' : `${computed.lotSize.toFixed(2)} Lots Protected`}
             </span>
           </div>
           <button
@@ -547,7 +697,7 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
             </p>
             <div className="flex items-center gap-2 text-[10px] text-slate-300">
               <span className="text-[#00C261] font-bold">
-                1H {computed.direction === 'BUY' ? 'UPTREND' : 'DOWNTREND'} LOCKED
+                1H {computed.h1TrendDirection || 'LOCKED'}
               </span>
               <span>•</span>
               <span className="text-cyan-300">Low Whipsaw</span>
@@ -608,7 +758,7 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
               <strong className="text-sm text-[#00C261] block">
                 {computed.advisoryDiscountPips ? `+${computed.advisoryDiscountPips} Pips Saved` : '0.0p (At Prime Zone)'}
               </strong>
-              <span className="text-[9px] text-slate-400">Protects $2.00 Micro Loss Cap</span>
+              <span className="text-[9px] text-slate-400">Protects ${computed.actualRiskUsd.toFixed(2)} Risk Cap</span>
             </div>
           </div>
 
@@ -632,7 +782,7 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
                   className="rounded border-slate-700 text-[#00C261] focus:ring-0 w-3.5 h-3.5 bg-slate-900"
                 />
                 <span className={rushGuardConfirmed ? 'text-[#00C261] font-bold' : ''}>
-                  I confirm that market spread is verified and I am entering with strictly 0.01 micro lot.
+                  I confirm that market spread is verified and I am entering with {computed.lotSize.toFixed(2)} lot (${computed.actualRiskUsd.toFixed(2)} max risk).
                 </span>
               </label>
             </div>
@@ -647,7 +797,7 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
               <button
                 type="button"
                 onClick={() => {
-                  const mtFormat = `FXPesa/MT5 -> ${pair} | ${computed.direction} LIMIT @ ${shownEntry} | SL: ${shownSl} | TP: ${shownTp1} | Vol: 0.01`;
+                  const mtFormat = `FXPesa/MT5 -> ${pair} | ${shownDirection} ${useLimitPlan ? 'LIMIT' : 'MARKET'} @ ${shownEntry} | SL: ${shownSl} | TP: ${shownTp1} | Vol: ${computed.lotSize.toFixed(2)}`;
                   handleCopy(mtFormat, `mt-${pair}`);
                 }}
                 className="py-1.5 px-2.5 rounded-xl bg-slate-900 hover:bg-cyan-500/20 text-cyan-300 border border-slate-700 text-xs font-mono font-bold flex items-center gap-1 transition active:scale-95 whitespace-nowrap"
@@ -660,7 +810,7 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
               <button
                 type="button"
                 onClick={() => {
-                  const fullTicket = `PIVOTFX INSTITUTIONAL ORDER TICKET\nPair: ${pair}\nDirection: ${computed.direction}\nEntry Price (EP): ${shownEntry}\nStop Loss (SL): ${shownSl} (-${computed.slPips}p)\nTake Profit 1: ${shownTp1}\nTake Profit 2: ${shownTp2} (+${computed.tpPips}p)\nVolume: 0.01 Micro Lot ($2 Max Risk)\nStatus: ${entryMoment.status}`;
+                  const fullTicket = `PIVOTFX INSTITUTIONAL ORDER TICKET\nPair: ${pair}\nDirection: ${shownDirection} (${useLimitPlan ? '20 EMA LIMIT' : 'MARKET'})\nEntry Price (EP): ${shownEntry}\nStop Loss (SL): ${shownSl} (-${computed.slPips}p)\nTake Profit 1: ${shownTp1}\nTake Profit 2: ${shownTp2} (+${computed.tpPips}p)\nVolume: ${computed.lotSize.toFixed(2)} Lots ($${computed.actualRiskUsd.toFixed(2)} Max Risk)\nStatus: ${entryMoment.status}`;
                   handleCopy(fullTicket, `full-${pair}`);
                 }}
                 className="py-1.5 px-3 rounded-xl bg-[#D4AF37]/20 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black border border-[#D4AF37]/40 text-xs font-bold flex items-center gap-1.5 transition active:scale-95 whitespace-nowrap"

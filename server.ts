@@ -151,13 +151,13 @@ const YAHOO_PAIR_SPECS: Array<{
   { pair: 'EUR/JPY', yahooSymbol: 'EURJPY=X', decimals: 3, defaultPrice: 183.79, defaultPct: 0.21 },
   { pair: 'USD/CAD', yahooSymbol: 'USDCAD=X', decimals: 5, defaultPrice: 1.39485, defaultPct: -0.22 },
   { pair: 'AUD/USD', yahooSymbol: 'AUDUSD=X', decimals: 5, defaultPrice: 0.6975, defaultPct: 0.31 },
-  { pair: 'XAU/USD', yahooSymbol: 'GC=F', decimals: 2, defaultPrice: 3962.5, defaultPct: 0.85 },
-  { pair: 'BTC/USD', yahooSymbol: 'BTC-USD', decimals: 2, defaultPrice: 80491.43, defaultPct: 3.43 },
-  { pair: 'ETH/USD', yahooSymbol: 'ETH-USD', decimals: 2, defaultPrice: 3412.5, defaultPct: 2.18 },
-  { pair: 'US30', yahooSymbol: '^DJI', decimals: 1, defaultPrice: 43810.0, defaultPct: 0.65 },
-  { pair: 'NAS100', yahooSymbol: '^IXIC', decimals: 1, defaultPrice: 20950.0, defaultPct: 0.88 },
-  { pair: 'GER40', yahooSymbol: '^GDAXI', decimals: 1, defaultPrice: 19420.0, defaultPct: 0.45 },
-  { pair: 'USOIL', yahooSymbol: 'CL=F', decimals: 2, defaultPrice: 71.45, defaultPct: -0.35 },
+  { pair: 'XAU/USD', yahooSymbol: 'GC=F', decimals: 2, defaultPrice: 3897.5, defaultPct: -0.45 },
+  { pair: 'BTC/USD', yahooSymbol: 'BTC-USD', decimals: 2, defaultPrice: 69300.0, defaultPct: -0.85 },
+  { pair: 'ETH/USD', yahooSymbol: 'ETH-USD', decimals: 2, defaultPrice: 1960.0, defaultPct: -1.15 },
+  { pair: 'US30', yahooSymbol: '^DJI', decimals: 1, defaultPrice: 52300.0, defaultPct: -0.35 },
+  { pair: 'NAS100', yahooSymbol: '^IXIC', decimals: 1, defaultPrice: 25360.0, defaultPct: -0.42 },
+  { pair: 'GER40', yahooSymbol: '^GDAXI', decimals: 1, defaultPrice: 26760.0, defaultPct: 0.28 },
+  { pair: 'USOIL', yahooSymbol: 'CL=F', decimals: 2, defaultPrice: 88.6, defaultPct: -0.35 },
 ];
 
 let liveMarketsCache: CachedLiveMarketsPayload | null = null;
@@ -246,14 +246,34 @@ async function fetchYahooChartCandles(
       ? candles[candles.length - 1].close
       : undefined;
 
-  const prevCloseRaw =
-    typeof meta.chartPreviousClose === 'number' && meta.chartPreviousClose > 0
-      ? meta.chartPreviousClose
-      : typeof meta.previousClose === 'number' && meta.previousClose > 0
+  // Prefer true prior session close (meta.previousClose / meta.regularMarketPreviousClose)
+  // before falling back to range-start chartPreviousClose (which is 5 days old on range=5d!).
+  let prevCloseRaw: number | undefined =
+    typeof meta.previousClose === 'number' && meta.previousClose > 0
       ? meta.previousClose
-      : candles.length > 0
-      ? candles[0].open
+      : typeof meta.regularMarketPreviousClose === 'number' && meta.regularMarketPreviousClose > 0
+      ? meta.regularMarketPreviousClose
       : undefined;
+
+  if (!prevCloseRaw && candles.length > 1) {
+    const latestTime = candles[candles.length - 1].time;
+    const target24hAgo = latestTime - 86400;
+    const ref24hBar = candles.reduce((best, bar) =>
+      Math.abs(bar.time - target24hAgo) < Math.abs(best.time - target24hAgo) ? bar : best
+    );
+    if (ref24hBar && ref24hBar.close > 0 && latestTime - ref24hBar.time >= 3600 * 6) {
+      prevCloseRaw = ref24hBar.close;
+    }
+  }
+
+  if (!prevCloseRaw) {
+    prevCloseRaw =
+      typeof meta.chartPreviousClose === 'number' && meta.chartPreviousClose > 0
+        ? meta.chartPreviousClose
+        : candles.length > 0
+        ? candles[0].open
+        : undefined;
+  }
 
   const previousClose =
     typeof prevCloseRaw === 'number' && prevCloseRaw > 0
@@ -306,18 +326,25 @@ async function aggregateAllLiveMarkets(): Promise<CachedLiveMarketsPayload> {
     )
   );
 
-  // Also query Kraken & Coinbase as parallel redundancy if any Yahoo symbol is throttled
-  const [krakenSettled, coinbaseSettled] = await Promise.allSettled([
+  // Also query Kraken, Coinbase & true Spot Gold (gold-api.com) as parallel redundancy
+  const [krakenSettled, coinbaseSettled, goldApiSettled] = await Promise.allSettled([
     fetch(
-      'https://api.kraken.com/0/public/Ticker?pair=EURUSD,GBPUSD,USDJPY,USDCHF,USDCAD,AUDUSD,PAXGUSD,XBTUSD',
+      'https://api.kraken.com/0/public/Ticker?pair=EURUSD,GBPUSD,USDJPY,USDCHF,USDCAD,AUDUSD,ETHUSD,XBTUSD',
       { signal: AbortSignal.timeout(1800) }
     ).then((r) => (r.ok ? r.json() : null)),
     fetch('https://api.coinbase.com/v2/exchange-rates?currency=USD', {
       signal: AbortSignal.timeout(1600),
     }).then((r) => (r.ok ? r.json() : null)),
+    fetch('https://api.gold-api.com/price/XAU', {
+      signal: AbortSignal.timeout(1800),
+    }).then((r) => (r.ok ? r.json() : null)),
   ]);
 
   const fallbackRates: Record<string, { price: number; open?: number }> = {};
+
+  if (goldApiSettled.status === 'fulfilled' && goldApiSettled.value?.price > 1500) {
+    fallbackRates['XAU/USD'] = { price: Number(Number(goldApiSettled.value.price).toFixed(2)) };
+  }
 
   if (coinbaseSettled.status === 'fulfilled' && coinbaseSettled.value?.data?.rates) {
     const r = coinbaseSettled.value.data.rates;
@@ -328,6 +355,7 @@ async function aggregateAllLiveMarkets(): Promise<CachedLiveMarketsPayload> {
     if (r.CAD) fallbackRates['USD/CAD'] = { price: Number(parseFloat(r.CAD).toFixed(5)) };
     if (r.AUD) fallbackRates['AUD/USD'] = { price: Number((1 / parseFloat(r.AUD)).toFixed(5)) };
     if (r.BTC) fallbackRates['BTC/USD'] = { price: Number((1 / parseFloat(r.BTC)).toFixed(2)) };
+    if (r.ETH) fallbackRates['ETH/USD'] = { price: Number((1 / parseFloat(r.ETH)).toFixed(2)) };
   }
 
   if (krakenSettled.status === 'fulfilled' && krakenSettled.value?.result) {
@@ -343,7 +371,7 @@ async function aggregateAllLiveMarkets(): Promise<CachedLiveMarketsPayload> {
       else if (k.includes('CHF')) fallbackRates['USD/CHF'] = { price: Number(lastP.toFixed(5)), open: openP };
       else if (k.includes('CAD')) fallbackRates['USD/CAD'] = { price: Number(lastP.toFixed(5)), open: openP };
       else if (k.includes('AUD')) fallbackRates['AUD/USD'] = { price: Number(lastP.toFixed(5)), open: openP };
-      else if (k.includes('PAXG') && lastP > 1500) fallbackRates['XAU/USD'] = { price: Number(lastP.toFixed(2)), open: openP };
+      else if (k.includes('ETH') && lastP > 500) fallbackRates['ETH/USD'] = { price: Number(lastP.toFixed(2)), open: openP };
       else if (k.includes('XBT') && lastP > 5000) fallbackRates['BTC/USD'] = { price: Number(lastP.toFixed(2)), open: openP };
     }
   }
@@ -383,12 +411,39 @@ async function aggregateAllLiveMarkets(): Promise<CachedLiveMarketsPayload> {
         source = 'yahoo-finance';
         anyLive = true;
       }
-      if ((!dailyOpen || dailyOpen === spec.defaultPrice) && m15Res.value.previousClose) {
+      // Prefer m15 (2d range) previousClose over h1 (5d range) chartPreviousClose
+      if (m15Res.value.previousClose && m15Res.value.previousClose > 0) {
         dailyOpen = m15Res.value.previousClose;
       }
     }
 
-    if (source !== 'yahoo-finance' && fb && fb.price > 0) {
+    // For XAU/USD, align live spot to gold-api Spot Gold (matches OANDA:XAUUSD) if available
+    if (spec.pair === 'XAU/USD' && fb && fb.price > 1500) {
+      const spotPrice = fb.price;
+      if (m15Candles.length > 0 && Math.abs(spotPrice - price) / price < 0.015) {
+        const spotBasisRatio = spotPrice / m15Candles[m15Candles.length - 1].close;
+        m15Candles = m15Candles.map((c) => ({
+          time: c.time,
+          open: Number((c.open * spotBasisRatio).toFixed(2)),
+          high: Number((c.high * spotBasisRatio).toFixed(2)),
+          low: Number((c.low * spotBasisRatio).toFixed(2)),
+          close: Number((c.close * spotBasisRatio).toFixed(2)),
+        }));
+        if (h1Candles.length > 0) {
+          h1Candles = h1Candles.map((c) => ({
+            time: c.time,
+            open: Number((c.open * spotBasisRatio).toFixed(2)),
+            high: Number((c.high * spotBasisRatio).toFixed(2)),
+            low: Number((c.low * spotBasisRatio).toFixed(2)),
+            close: Number((c.close * spotBasisRatio).toFixed(2)),
+          }));
+        }
+        dailyOpen = Number((dailyOpen * spotBasisRatio).toFixed(2));
+      }
+      price = spotPrice;
+      source = source === 'yahoo-finance' ? 'gold-api-spot+yahoo-ohlc' : 'gold-api-spot';
+      anyLive = true;
+    } else if (source !== 'yahoo-finance' && fb && fb.price > 0) {
       price = fb.price;
       if (fb.open && fb.open > 0) {
         dailyOpen = Number(fb.open.toFixed(spec.decimals));

@@ -10,10 +10,13 @@ import {
   computeDailyMacroSafetyReport,
   computeCandleSwingLevels,
   MacroFactorFlags,
-  SideSafetyVerdict
+  SideSafetyVerdict,
+  RiskManagementConfig,
+  positionRiskStore
 } from '../../utils/liveMarketEngine';
 import { LiveInteractiveCandleChart } from './LiveInteractiveCandleChart';
 import { ActiveMarketOrderPanel } from './ActiveMarketOrderPanel';
+import { DynamicPositionSizeCalculator } from './DynamicPositionSizeCalculator';
 import sessionWorldMapImg from '../../assets/images/session_world_map_1793873187765.jpg';
 import {
   Globe,
@@ -69,6 +72,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
   const [showManualOverrides, setShowManualOverrides] = useState<boolean>(false);
   const [manualFlags, setManualFlags] = useState<Partial<MacroFactorFlags>>({});
   const [mapImgFailed, setMapImgFailed] = useState<boolean>(false);
+  const [riskConfig, setRiskConfig] = useState<RiskManagementConfig>(() => positionRiskStore.getConfig());
 
   const copyLevel = (val: string | number, key: string) => {
     try {
@@ -90,7 +94,11 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
       setSelectedBroker(streamState.activeBroker);
       setActiveOrders(streamState.activeOrders);
     });
-    return () => unsubscribe();
+    const unsubRisk = positionRiskStore.subscribe((nextCfg) => setRiskConfig(nextCfg));
+    return () => {
+      unsubscribe();
+      unsubRisk();
+    };
   }, []);
 
   const refreshLiveMacroFeed = async () => {
@@ -414,10 +422,11 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
             atrPips: focusedMarket.atrPips,
             swingLow: focusedSwings.swingLow,
             swingHigh: focusedSwings.swingHigh,
-            biasOverride: effectiveSide,
+            biasOverride: inspectedSide === 'AUTO' ? undefined : inspectedSide,
             previousDirection: aiBestSide,
             previousTrendDirection: focusedMarket.trendDirection,
-            h1TrendDirection: focusedMarket.h1TrendDirection
+            h1TrendDirection: focusedMarket.h1TrendDirection,
+            riskConfig
           });
 
           return (
@@ -591,11 +600,20 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                   stopLoss={computed.stopLoss}
                   tp1={computed.tp1}
                   tp2={computed.tp2}
+                  advisoryEntryPrice={computed.advisoryEntryPrice}
                   direction={computed.direction}
                   change24hPct={focusedMarket.change24hPct}
+                  lotSize={computed.lotSize}
+                  riskUsd={computed.actualRiskUsd}
                   isLockedToCustom={Boolean(lockedPairs[focusedMarket.pair])}
                   onCandlePriceChange={(newP) => globalLiveStream.setCustomCandlePrice(focusedMarket.pair, newP)}
                   onResetToLiveStream={() => globalLiveStream.unlockPairToLiveStream(focusedMarket.pair)}
+                />
+
+                <DynamicPositionSizeCalculator
+                  pair={focusedMarket.pair}
+                  computed={computed}
+                  compact
                 />
 
                 {/* Protected MT4 Order Parameters & Longer 1H–48H Multi-Horizon Projection */}
@@ -607,7 +625,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                         : `Chosen ${inspectedSide} Side Plan (${computed.orderType} · ${computed.brokerSymbol})`}
                     </span>
                     <span className="text-emerald-400 font-bold">
-                      0.01 Micro Lot (${computed.actualRiskUsd.toFixed(2)} / 260 KES Cap · H1 {computed.h1TrendDirection})
+                      {computed.lotSize.toFixed(2)} Lots (${computed.actualRiskUsd.toFixed(2)} / {Math.round(computed.actualRiskUsd * 130)} KES Cap · H1 {computed.h1TrendDirection})
                     </span>
                   </div>
 

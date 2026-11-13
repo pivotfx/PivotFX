@@ -6,6 +6,7 @@ import { LiveInteractiveCandleChart } from './LiveInteractiveCandleChart';
 import { ActiveMarketOrderPanel } from './ActiveMarketOrderPanel';
 import { EntryConfirmationController } from './EntryConfirmationController';
 import { TradeLogAndNotificationsView } from './TradeLogAndNotificationsView';
+import { DynamicPositionSizeCalculator } from './DynamicPositionSizeCalculator';
 import {
   MarketScanData,
   ScannerWorkspaceTab,
@@ -20,7 +21,9 @@ import {
   getCurrentMacroContext,
   TrajectoryHorizonStep,
   evaluateOrderEntryMoment,
-  evaluateOrderTrendSustainability
+  evaluateOrderTrendSustainability,
+  RiskManagementConfig,
+  positionRiskStore
 } from '../../utils/liveMarketEngine';
 import {
   SlidersHorizontal,
@@ -149,6 +152,7 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
   const [superAiNotes, setSuperAiNotes] = useState(initialStreamState.superAiNotes);
   const [syncingQuotes, setSyncingQuotes] = useState<boolean>(false);
   const [userLockedCandlePrice, setUserLockedCandlePrice] = useState<boolean>(false);
+  const [riskConfig, setRiskConfig] = useState<RiskManagementConfig>(() => positionRiskStore.getConfig());
 
   // Shared Required Data Ingestion State
   const [broker, setBroker] = useState<BrokerId>(initialStreamState.activeBroker || 'fxpesa');
@@ -286,9 +290,11 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
       } catch {}
     };
 
+    const unsubRisk = positionRiskStore.subscribe((nextCfg) => setRiskConfig(nextCfg));
     window.addEventListener('pivotfx:open-scanner-view', handleOpenScannerViewEvt);
     return () => {
       unsubscribe();
+      unsubRisk();
       window.removeEventListener('pivotfx:open-scanner-view', handleOpenScannerViewEvt);
     };
   }, []);
@@ -1649,7 +1655,8 @@ InpMagicNumber=777129
           biasOverride: biasOverride === 'AUTO' ? undefined : biasOverride,
           previousDirection: activeMarketObj.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
           previousTrendDirection: activeMarketObj.trendDirection,
-          h1TrendDirection: activeMarketObj.h1TrendDirection
+          h1TrendDirection: activeMarketObj.h1TrendDirection,
+          riskConfig
         });
 
         return (
@@ -1674,6 +1681,11 @@ InpMagicNumber=777129
                     <option value="EUR/JPY">EUR/JPY (Euppy Cross)</option>
                     <option value="USD/CHF">USD/CHF (Swissy)</option>
                     <option value="BTC/USD">BTC/USD (Bitcoin Spot)</option>
+                    <option value="ETH/USD">ETH/USD (Ethereum Spot)</option>
+                    <option value="US30">US30 (Dow Jones)</option>
+                    <option value="NAS100">NAS100 (Nasdaq 100)</option>
+                    <option value="GER40">GER40 (DAX 40)</option>
+                    <option value="USOIL">USOIL (WTI Crude)</option>
                     <option value="USD/CAD">USD/CAD (Loonie)</option>
                     <option value="AUD/USD">AUD/USD (Aussie)</option>
                   </select>
@@ -1806,8 +1818,11 @@ InpMagicNumber=777129
                 stopLoss={favorableComputed.stopLoss}
                 tp1={favorableComputed.tp1}
                 tp2={favorableComputed.tp2}
+                advisoryEntryPrice={favorableComputed.advisoryEntryPrice}
                 direction={favorableComputed.direction}
                 change24hPct={activeMarketObj.change24hPct}
+                lotSize={favorableComputed.lotSize}
+                riskUsd={favorableComputed.actualRiskUsd}
                 isLockedToCustom={userLockedCandlePrice}
                 onCandlePriceChange={(newPrice) => {
                   handleLiveCandlePriceEdit(String(newPrice));
@@ -1819,6 +1834,8 @@ InpMagicNumber=777129
                   handleSyncLiveQuotes();
                 }}
               />
+
+              <DynamicPositionSizeCalculator pair={pair} computed={favorableComputed} />
 
               <div className="rounded-2xl border border-slate-800 overflow-hidden bg-slate-950 shadow-2xl">
                 <div className="p-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-xs font-mono">
@@ -1973,7 +1990,7 @@ InpMagicNumber=777129
 
                 <div className="flex items-center gap-2.5 font-mono text-xs">
                   <span className="px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold">
-                    {favorableComputed.confidence}% Confidence · Max Risk: ${favorableComputed.actualRiskUsd.toFixed(2)} (260 KES)
+                    {favorableComputed.confidence}% Confidence · Max Risk: ${favorableComputed.actualRiskUsd.toFixed(2)} ({Math.round(favorableComputed.actualRiskUsd * 130)} KES)
                   </span>
                 </div>
               </div>
@@ -2070,7 +2087,9 @@ InpMagicNumber=777129
                 <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-1">
                   <span className="text-[10px] font-mono text-amber-300 uppercase block font-bold">Risk : Reward</span>
                   <strong className="text-base font-mono text-[#D4AF37] block">{favorableComputed.riskReward}</strong>
-                  <span className="text-[10px] font-mono text-slate-400">0.01 Micro Lot</span>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    {favorableComputed.lotSize.toFixed(2)} Lots ({riskConfig.riskPct}% Risk)
+                  </span>
                 </div>
               </div>
 
@@ -2135,7 +2154,7 @@ InpMagicNumber=777129
                   </div>
                   <div className="flex items-start gap-2">
                     <span className="text-[#D4AF37] font-bold">3.</span>
-                    <span>Volume: STRICTLY <strong>0.01 micro lot</strong> (Gilgil $2.00 / 260 KES maximum loss cap).</span>
+                    <span>Volume: <strong>{favorableComputed.lotSize.toFixed(2)} lots</strong> (${favorableComputed.actualRiskUsd.toFixed(2)} / {Math.round(favorableComputed.actualRiskUsd * 130)} KES risk cap · {riskConfig.riskPct}% of ${riskConfig.accountBalanceUsd.toLocaleString()}).</span>
                   </div>
                   <div className="flex items-start gap-2">
                     <span className="text-[#D4AF37] font-bold">4.</span>
@@ -2176,7 +2195,7 @@ InpMagicNumber=777129
 
                 <button
                   onClick={() => {
-                    const allText = `PIVOTFX INSTITUTIONAL ORDER TICKET\nPair: ${pair} (${favorableComputed.brokerSymbol})\nOrder: ${favorableComputed.orderType}\nEntry: ${favorableComputed.entryPrice}\nStop Loss: ${favorableComputed.stopLoss}\nTake Profit 1: ${favorableComputed.tp1}\nTake Profit 2: ${favorableComputed.tp2}\nLot Size: 0.01 Micro Lot ($2 Max Risk)\nBroker: ${broker.toUpperCase()}\nProtection: CMA Kenya Zero Negative Balance Shield`;
+                    const allText = `PIVOTFX INSTITUTIONAL ORDER TICKET\nPair: ${pair} (${favorableComputed.brokerSymbol})\nOrder: ${favorableComputed.orderType}\nEntry: ${favorableComputed.entryPrice}\nStop Loss: ${favorableComputed.stopLoss}\nTake Profit 1: ${favorableComputed.tp1}\nTake Profit 2: ${favorableComputed.tp2}\nLot Size: ${favorableComputed.lotSize.toFixed(2)} Lots ($${favorableComputed.actualRiskUsd.toFixed(2)} Max Risk)\nBroker: ${broker.toUpperCase()}\nProtection: CMA Kenya Zero Negative Balance Shield`;
                     navigator.clipboard.writeText(allText);
                     setCopiedField('all');
                     setTimeout(() => setCopiedField(null), 2000);
@@ -2205,14 +2224,14 @@ InpMagicNumber=777129
                       slDistancePips: favorableComputed.slPips,
                       tpDistancePips: favorableComputed.tpPips,
                       riskReward: favorableComputed.riskReward,
-                      suggestedLot: 0.01,
+                      suggestedLot: favorableComputed.lotSize,
                       actualRiskUsd: favorableComputed.actualRiskUsd,
                       potentialGainUsd: favorableComputed.potentialGainUsd,
                       brokerSpreadPips: favorableComputed.brokerSpread,
-                      brokerSpreadCostUsd: 0.12,
+                      brokerSpreadCostUsd: favorableComputed.spreadCostUsd,
                       reasons: [
                         `Ingested candlestick @ ${favorableComputed.entryPrice} on ${timeframe}`,
-                        `Gilgil risk shield: 0.01 lot capped at $2.00`
+                        `Dynamic risk shield: ${favorableComputed.lotSize.toFixed(2)} lots capped at $${favorableComputed.actualRiskUsd.toFixed(2)}`
                       ],
                       projection: favorableComputed.trajectory
                     });
@@ -2232,6 +2251,9 @@ InpMagicNumber=777129
                   kenyaTiming={evaluatePairKenyaTiming(pair)}
                   livePrice={favorableComputed.entryPrice}
                   timeframe={timeframe}
+                  ema20={Number(ema20)}
+                  ema50={Number(ema50)}
+                  rsi={Number(rsi)}
                   variant="focused"
                 />
               </div>
@@ -2246,7 +2268,7 @@ InpMagicNumber=777129
                   <button
                     type="button"
                     onClick={() => {
-                      const eaBlock = `// PIVOTFX LIVE EA AUTO-SYNC (${pair} ${timeframe})\ninput double LotSize = 0.01; // Gilgil $2.00 / 260 KES Cap\ninput double EntryPrice = ${favorableComputed.entryPrice};\ninput double StopLoss = ${favorableComputed.stopLoss};\ninput double TakeProfit_1 = ${favorableComputed.tp1};\ninput double TakeProfit_2 = ${favorableComputed.tp2};\n// Direction: ${favorableComputed.orderType} | 20EMA: ${ema20} | 50EMA: ${ema50} | RSI: ${rsi}`;
+                      const eaBlock = `// PIVOTFX LIVE EA AUTO-SYNC (${pair} ${timeframe})\ninput double LotSize = ${favorableComputed.lotSize.toFixed(2)}; // $${favorableComputed.actualRiskUsd.toFixed(2)} / ${Math.round(favorableComputed.actualRiskUsd * 130)} KES Cap\ninput double EntryPrice = ${favorableComputed.entryPrice};\ninput double StopLoss = ${favorableComputed.stopLoss};\ninput double TakeProfit_1 = ${favorableComputed.tp1};\ninput double TakeProfit_2 = ${favorableComputed.tp2};\n// Direction: ${favorableComputed.orderType} | 20EMA: ${ema20} | 50EMA: ${ema50} | RSI: ${rsi}`;
                       navigator.clipboard.writeText(eaBlock);
                       setCopiedManualEa(true);
                       setTimeout(() => setCopiedManualEa(false), 2000);
@@ -2259,7 +2281,7 @@ InpMagicNumber=777129
                 </div>
                 <pre className="p-3 rounded-xl bg-black/70 border border-slate-800/80 text-[11px] text-emerald-300 overflow-x-auto leading-relaxed tabular-nums">
 {`// Auto-Synced to Latest Candle: ${pair} [${timeframe}] | ${favorableComputed.orderType} | Confidence: ${favorableComputed.confidence}%
-input double LotSize = 0.01;        // Gilgil $2.00 / 260 KES Max Risk Shield
+input double LotSize = ${favorableComputed.lotSize.toFixed(2)};        // $${favorableComputed.actualRiskUsd.toFixed(2)} / ${Math.round(favorableComputed.actualRiskUsd * 130)} KES Max Risk Shield
 input double EntryPrice = ${favorableComputed.entryPrice};
 input double StopLoss = ${favorableComputed.stopLoss};   // -${favorableComputed.slPips} pips ($${favorableComputed.actualRiskUsd.toFixed(2)} risk)
 input double TakeProfit_1 = ${favorableComputed.tp1}; // Close 50% & Move SL to Entry

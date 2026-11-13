@@ -16,11 +16,14 @@ import {
   evaluateOrderEntryMoment,
   evaluateOrderTrendSustainability,
   EntryMomentVerdict,
-  TrendSustainabilityVerdict
+  TrendSustainabilityVerdict,
+  RiskManagementConfig,
+  positionRiskStore
 } from '../../utils/liveMarketEngine';
 import { EntryConfirmationController } from './EntryConfirmationController';
 import { LiveInteractiveCandleChart } from './LiveInteractiveCandleChart';
 import { ActiveMarketOrderPanel } from './ActiveMarketOrderPanel';
+import { DynamicPositionSizeCalculator } from './DynamicPositionSizeCalculator';
 import { ConfluenceMatrixModal } from '../prop/ConfluenceMatrixModal';
 import { PropDrawdownGuardModal } from '../prop/PropDrawdownGuardModal';
 import { NewsGuardModal } from '../prop/NewsGuardModal';
@@ -115,6 +118,8 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
     () => globalLiveStream.getState().activeOrders
   );
   const [inspectedSideByPair, setInspectedSideByPair] = useState<Partial<Record<CurrencyPair, 'AUTO' | 'BUY' | 'SELL'>>>({});
+  const [viewSavedOrderByPair, setViewSavedOrderByPair] = useState<Partial<Record<CurrencyPair, boolean>>>({});
+  const [riskConfig, setRiskConfig] = useState<RiskManagementConfig>(() => positionRiskStore.getConfig());
   const [scanBanner, setScanBanner] = useState<string | null>(null);
   const [copiedCardPair, setCopiedCardPair] = useState<string | null>(null);
   const [copiedEa, setCopiedEa] = useState(false);
@@ -143,7 +148,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
     }, 1500);
   };
 
-  // Subscribe to global real-time stream & Super AI Auto notes
+  // Subscribe to global real-time stream & Super AI Auto notes + Position Risk store
   useEffect(() => {
     const unsubscribe = globalLiveStream.subscribe((streamState) => {
       setMarkets(streamState.markets);
@@ -157,7 +162,11 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
       setSelectedPair(streamState.selectedPair);
       setActiveOrders(streamState.activeOrders);
     });
-    return () => unsubscribe();
+    const unsubRisk = positionRiskStore.subscribe((nextCfg) => setRiskConfig(nextCfg));
+    return () => {
+      unsubscribe();
+      unsubRisk();
+    };
   }, []);
 
   const handleOpenPairCard = (pairToOpen: CurrencyPair) => {
@@ -247,7 +256,6 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
     const loaded = globalLiveStream.loadMarketOrder({
       pair: targetPair,
       direction: dir,
-      lotSize: 0.01,
       timeframe: tf,
       broker: selectedBroker,
       autoTrailEnabled: true
@@ -353,7 +361,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
             <span>Dennis.K.M Prop Desk Suite</span>
           </span>
           <span className="text-[10px] text-slate-400 font-mono hidden md:inline">
-            Risk Model: 0.01 Micro Lot ($2 Max Risk)
+            Risk Engine: ${(riskConfig.accountBalanceUsd * (riskConfig.riskPct / 100)).toFixed(2)} ({riskConfig.riskPct}% of ${riskConfig.accountBalanceUsd.toLocaleString()})
           </span>
         </div>
 
@@ -587,8 +595,6 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
           const activeTf = customTfs[focusedMarket.pair] || focusedMarket.recommendedTf;
           const aiRecommendedSide: 'BUY' | 'SELL' = focusedMarket.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
           const selectedSideMode = inspectedSideByPair[focusedMarket.pair] || 'AUTO';
-          const effectiveBias: 'BUY' | 'SELL' =
-            selectedSideMode === 'AUTO' ? aiRecommendedSide : selectedSideMode;
           const focusedSwings = computeCandleSwingLevels(focusedMarket.candles);
 
           const computed = computeRealChartTradeParams({
@@ -604,10 +610,11 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
             swingLow: focusedSwings.swingLow,
             swingHigh: focusedSwings.swingHigh,
             macro: macroContext,
-            biasOverride: effectiveBias,
-            previousDirection: aiRecommendedSide,
+            biasOverride: selectedSideMode === 'AUTO' ? undefined : selectedSideMode,
+            previousDirection: focusedMarket.bias === 'NEUTRAL_CHOP' ? undefined : aiRecommendedSide,
             previousTrendDirection: focusedMarket.trendDirection,
-            h1TrendDirection: focusedMarket.h1TrendDirection
+            h1TrendDirection: focusedMarket.h1TrendDirection,
+            riskConfig
           });
           const oppositeSide: 'BUY' | 'SELL' = computed.direction === 'BUY' ? 'SELL' : 'BUY';
           const oppositeComputed = computeRealChartTradeParams({
@@ -624,27 +631,45 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
             swingHigh: focusedSwings.swingHigh,
             macro: macroContext,
             biasOverride: oppositeSide,
-            h1TrendDirection: focusedMarket.h1TrendDirection
+            h1TrendDirection: focusedMarket.h1TrendDirection,
+            riskConfig
           });
           const kenyaTiming = evaluatePairKenyaTiming(focusedMarket.pair);
           const isBuy = computed.direction === 'BUY';
           const pctPositive = focusedMarket.change24hPct >= 0;
           const rankNum = markets.findIndex((x) => x.pair === focusedMarket.pair) + 1;
 
+          const loadedOrder = activeOrders[focusedMarket.pair] || null;
+          const loadedOrderMetrics = loadedOrder
+            ? computeLiveOrderMetrics(loadedOrder, focusedMarket.price, focusedMarket.atrPips)
+            : null;
+          const isOrderCompletedOrStale = Boolean(
+            loadedOrder &&
+              focusedMarket.price > 0 &&
+              (loadedOrderMetrics?.hitTp2 ||
+                loadedOrderMetrics?.hitSl ||
+                Math.abs(loadedOrder.entryPrice - focusedMarket.price) / focusedMarket.price > 0.015 ||
+                loadedOrder.direction !== computed.direction)
+          );
+          const showSavedOrder = Boolean(
+            loadedOrder && (!isOrderCompletedOrStale || viewSavedOrderByPair[focusedMarket.pair])
+          );
+          const displayOrder = showSavedOrder ? loadedOrder : null;
+
           const eaMqlCode = `// --- PIVOTFX LIVE AUTO-SYNC EA CONFIG ---
 // Broker: ${selectedBroker.toUpperCase()} | Synced: ${lastScannedTime} | Rank #${rankNum}
 // Symbol: ${computed.brokerSymbol} (${focusedMarket.pair} · ${activeTf})
 // Direction: ${computed.orderType} | Trend: ${computed.trendProjectionText} | 24h Move: ${pctPositive ? '+' : ''}${focusedMarket.change24hPct}%
 // Live Indicators: 20 EMA = ${focusedMarket.ema20} | 50 EMA = ${focusedMarket.ema50} | RSI = ${focusedMarket.rsi}
-// Gilgil Shield: 0.01 Micro Lot ($2.00 / 260 KES Max Risk Cap)
+// Risk Management: ${computed.lotSize.toFixed(2)} Lots ($${computed.actualRiskUsd.toFixed(2)} / ${Math.round(computed.actualRiskUsd * 130)} KES Max Risk · ${riskConfig.riskPct}% of $${riskConfig.accountBalanceUsd})
 
-input double   LotSize             = 0.01;
+input double   LotSize             = ${computed.lotSize.toFixed(2)};
 input double   EntryPrice          = ${computed.entryPrice};
 input double   StopLoss            = ${computed.stopLoss}; // -${computed.slPips} pips ($${computed.actualRiskUsd.toFixed(2)} max risk)
 input double   TakeProfit_1        = ${computed.tp1}; // 1H-4H: Close 50% & Move SL to BE
 input double   TakeProfit_2        = ${computed.tp2}; // 4H-12H Session Target (+${computed.tpPips} pips)
 input double   TakeProfit_3_48H    = ${computed.tp3}; // 12H-48H Extended Swing (+${computed.tp3Pips} pips / +$${computed.netProfit48hUsd.toFixed(2)})
-input double   MaxRiskUsdPerTrade  = 2.00;`;
+input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
 
           return (
             <div className="space-y-5 font-mono tabular-nums">
@@ -881,9 +906,11 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                       </strong>
                     </div>
                     <div className="px-3 py-2 rounded-xl bg-slate-950/90 border border-[#D4AF37]/35">
-                      <span className="text-[10px] text-[#D4AF37] block">0.05 Lot 48H Target</span>
+                      <span className="text-[10px] text-[#D4AF37] block">
+                        {computed.lotSize.toFixed(2)} Lot Risk ({riskConfig.riskPct}%)
+                      </span>
                       <strong className="text-sm text-[#D4AF37]">
-                        +${(computed.netProfit48hUsd * 5).toFixed(2)}
+                        ${computed.actualRiskUsd.toFixed(2)}
                       </strong>
                     </div>
                   </div>
@@ -897,33 +924,15 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                   livePrice={focusedMarket.price}
                   ema20={focusedMarket.ema20}
                   ema50={focusedMarket.ema50}
-                  entryPrice={
-                    activeOrders[focusedMarket.pair]
-                      ? activeOrders[focusedMarket.pair]!.entryPrice
-                      : computed.entryPrice
-                  }
-                  stopLoss={
-                    activeOrders[focusedMarket.pair]
-                      ? activeOrders[focusedMarket.pair]!.stopLoss
-                      : computed.stopLoss
-                  }
-                  tp1={
-                    activeOrders[focusedMarket.pair]
-                      ? activeOrders[focusedMarket.pair]!.tp1
-                      : computed.tp1
-                  }
-                  tp2={
-                    activeOrders[focusedMarket.pair]
-                      ? activeOrders[focusedMarket.pair]!.tp2
-                      : computed.tp2
-                  }
+                  entryPrice={displayOrder ? displayOrder.entryPrice : computed.entryPrice}
+                  stopLoss={displayOrder ? displayOrder.stopLoss : computed.stopLoss}
+                  tp1={displayOrder ? displayOrder.tp1 : computed.tp1}
+                  tp2={displayOrder ? displayOrder.tp2 : computed.tp2}
                   advisoryEntryPrice={computed.advisoryEntryPrice}
-                  direction={
-                    activeOrders[focusedMarket.pair]
-                      ? activeOrders[focusedMarket.pair]!.direction
-                      : computed.direction
-                  }
+                  direction={displayOrder ? displayOrder.direction : computed.direction}
                   change24hPct={focusedMarket.change24hPct}
+                  lotSize={displayOrder ? displayOrder.lotSize : computed.lotSize}
+                  riskUsd={computed.actualRiskUsd}
                   isLockedToCustom={Boolean(lockedPairs[focusedMarket.pair])}
                   onCandlePriceChange={(newPrice) =>
                     globalLiveStream.setCustomCandlePrice(focusedMarket.pair, newPrice, activeTf)
@@ -931,9 +940,16 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                   onResetToLiveStream={() => globalLiveStream.unlockPairToLiveStream(focusedMarket.pair)}
                 />
 
+                {/* DYNAMIC POSITION SIZE & SL/TP RISK CALCULATOR */}
+                <DynamicPositionSizeCalculator
+                  pair={focusedMarket.pair}
+                  computed={computed}
+                  lockedOrder={displayOrder}
+                />
+
                 {/* 5-CARD AUTO-SYNCED EXECUTION NUMBERS ROW WITH DIRECT 1-CLICK SL / TP COPY */}
                 {(() => {
-                  const lockedOrder = activeOrders[focusedMarket.pair];
+                  const lockedOrder = displayOrder;
                   const shownEntry = lockedOrder ? lockedOrder.entryPrice : computed.entryPrice;
                   const shownSl = lockedOrder ? lockedOrder.stopLoss : computed.stopLoss;
                   const shownTp1 = lockedOrder ? lockedOrder.tp1 : computed.tp1;
@@ -972,7 +988,7 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                         <button
                           type="button"
                           onClick={() => {
-                            const fullTicket = `${computed.brokerSymbol} ${computed.orderType} | Price: ${shownEntry} | SL: ${shownSl} | TP1: ${shownTp1} | TP2: ${shownTp2} | Max Risk: $${computed.actualRiskUsd.toFixed(2)} | Broker: ${selectedBroker.toUpperCase()}`;
+                            const fullTicket = `${computed.brokerSymbol} ${computed.orderType} | Price: ${shownEntry} | SL: ${shownSl} | TP1: ${shownTp1} | TP2: ${shownTp2} | Vol: ${computed.lotSize.toFixed(2)} Lots ($${computed.actualRiskUsd.toFixed(2)} Risk) | Broker: ${selectedBroker.toUpperCase()}`;
                             handleQuickCopyValue(fullTicket, `full-ticket-${focusedMarket.pair}`);
                           }}
                           className="px-4 py-2 rounded-xl bg-[#D4AF37] hover:bg-amber-400 text-black font-black text-xs flex items-center gap-1.5 transition whitespace-nowrap shadow-md self-start md:self-auto"
@@ -998,7 +1014,7 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                           </span>
                           <strong className="text-base text-white">{shownEntry}</strong>
                           <span className="text-[10px] text-[#00C261] block">
-                            {lockedOrder ? `Locked (${lockedOrder.direction})` : 'Auto-Synced Candle'}
+                            {lockedOrder ? `Locked (${lockedOrder.direction})` : `${computed.lotSize.toFixed(2)} Lots Auto-Synced`}
                           </span>
                         </div>
                         <button
@@ -1026,7 +1042,7 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                           <span className="text-[10px] text-red-300 block">
                             {lockedOrder
                               ? `SL Updates: ${lockedOrder.slUpdatesCount}`
-                              : `$${computed.actualRiskUsd.toFixed(2)} Max Risk`}
+                              : `$${computed.actualRiskUsd.toFixed(2)} Max Risk (${computed.lotSize.toFixed(2)} Lot)`}
                           </span>
                         </div>
                         <button
@@ -1128,7 +1144,17 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                         kenyaTiming={kenyaTiming}
                         livePrice={focusedMarket.price}
                         timeframe={activeTf}
-                        lockedOrder={lockedOrder}
+                        lockedOrder={loadedOrder}
+                        showSavedOrder={showSavedOrder}
+                        onToggleSavedOrder={() =>
+                          setViewSavedOrderByPair((prev) => ({
+                            ...prev,
+                            [focusedMarket.pair]: !showSavedOrder
+                          }))
+                        }
+                        ema20={focusedMarket.ema20}
+                        ema50={focusedMarket.ema50}
+                        rsi={focusedMarket.rsi}
                         variant="focused"
                       />
                     </div>
@@ -1451,13 +1477,35 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
               swingLow: topSwings.swingLow,
               swingHigh: topSwings.swingHigh,
               macro: macroContext,
-              biasOverride: topLeader.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
-              previousDirection: topLeader.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+              biasOverride:
+                topLeader.bias === 'NEUTRAL_CHOP'
+                  ? undefined
+                  : topLeader.bias === 'STRONG_SELL'
+                  ? 'SELL'
+                  : 'BUY',
+              previousDirection:
+                topLeader.bias === 'NEUTRAL_CHOP'
+                  ? undefined
+                  : topLeader.bias === 'STRONG_SELL'
+                  ? 'SELL'
+                  : 'BUY',
               previousTrendDirection: topLeader.trendDirection,
-              h1TrendDirection: topLeader.h1TrendDirection
+              h1TrendDirection: topLeader.h1TrendDirection,
+              riskConfig
             });
             const topPctPos = topLeader.change24hPct >= 0;
-            const topLoadedOrder = activeOrders[topLeader.pair];
+            const rawTopLoadedOrder = activeOrders[topLeader.pair];
+            const topOrderMetrics = rawTopLoadedOrder
+              ? computeLiveOrderMetrics(rawTopLoadedOrder, topLeader.price, topLeader.atrPips)
+              : null;
+            const topLoadedOrder =
+              rawTopLoadedOrder &&
+              !topOrderMetrics?.hitTp2 &&
+              !topOrderMetrics?.hitSl &&
+              Math.abs(rawTopLoadedOrder.entryPrice - topLeader.price) / Math.max(0.0001, topLeader.price) <= 0.015 &&
+              rawTopLoadedOrder.direction === topComputed.direction
+                ? rawTopLoadedOrder
+                : null;
 
             return (
               <div
@@ -1658,10 +1706,13 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
                 swingLow: cardSwings.swingLow,
                 swingHigh: cardSwings.swingHigh,
                 macro: macroContext,
-                biasOverride: m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
-                previousDirection: m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+                biasOverride:
+                  m.bias === 'NEUTRAL_CHOP' ? undefined : m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+                previousDirection:
+                  m.bias === 'NEUTRAL_CHOP' ? undefined : m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
                 previousTrendDirection: m.trendDirection,
-                h1TrendDirection: m.h1TrendDirection
+                h1TrendDirection: m.h1TrendDirection,
+                riskConfig
               });
               const isBuy = computed.direction === 'BUY';
               const pctPositive = m.change24hPct >= 0;
@@ -1672,8 +1723,15 @@ input double   MaxRiskUsdPerTrade  = 2.00;`;
               const cardAiNote = superAiNotes[m.pair]?.note;
               const loadedOrder = activeOrders[m.pair];
               const orderMetrics = loadedOrder ? computeLiveOrderMetrics(loadedOrder, m.price, m.atrPips) : null;
-              const cardSl = loadedOrder ? loadedOrder.stopLoss : computed.stopLoss;
-              const cardTp = loadedOrder ? loadedOrder.tp2 : computed.tp2;
+              const useOrderLevelsOnCard = Boolean(
+                loadedOrder &&
+                  !orderMetrics?.hitTp2 &&
+                  !orderMetrics?.hitSl &&
+                  Math.abs(loadedOrder.entryPrice - m.price) / Math.max(0.0001, m.price) <= 0.015 &&
+                  loadedOrder.direction === computed.direction
+              );
+              const cardSl = useOrderLevelsOnCard ? loadedOrder!.stopLoss : computed.stopLoss;
+              const cardTp = useOrderLevelsOnCard ? loadedOrder!.tp2 : computed.tp2;
 
               return (
                 <div
