@@ -87,3 +87,84 @@
 .btn-gold:active {
   transform: translateY(0);
 }
+
+/* 3D Volumetric 360° Sovereign Medallion & Dual-Axis Gyroscope Keyframes */
+@keyframes pivotCoin360Y {
+  0% {
+    transform: rotateX(10deg) rotateY(0deg);
+  }
+  25% {
+    transform: rotateX(6deg) rotateY(90deg);
+  }
+  50% {
+    transform: rotateX(-10deg) rotateY(180deg);
+  }
+  75% {
+    transform: rotateX(-6deg) rotateY(270deg);
+  }
+  100% {
+    transform: rotateX(10deg) rotateY(360deg);
+  }
+}
+
+@keyframes pivotGimbalOuter3D {
+  0% {
+    transform: rotateX(66deg) rotateY(-18deg) rotateZ(0deg);
+  }
+  100% {
+    transform: rotateX(66deg) rotateY(-18deg) rotateZ(360deg);
+  }
+}
+
+@keyframes pivotGimbalInner3D {
+  0% {
+    transform: rotateX(-58deg) rotateY(28deg) rotateZ(360deg);
+  }
+  100% {
+    transform: rotateX(-58deg) rotateY(28deg) rotateZ(0deg);
+  }
+}
+
+.pivot-3d-stage {
+  perspective: 820px;
+  transform-style: preserve-3d;
+}
+
+.pivot-coin-3d {
+  transform-style: preserve-3d;
+  animation: pivotCoin360Y 9s linear infinite;
+  will-change: transform;
+}
+
+.pivot-gimbal-outer {
+  transform-style: preserve-3d;
+  animation: pivotGimbalOuter3D 11s linear infinite;
+  will-change: transform;
+}
+
+.pivot-gimbal-inner {
+  transform-style: preserve-3d;
+  animation: pivotGimbalInner3D 7.5s linear infinite;
+  will-change: transform;
+}
+
+.group:hover .pivot-coin-3d {
+  animation-duration: 3.2s;
+}
+
+.group:hover .pivot-gimbal-outer {
+  animation-duration: 4s;
+}
+
+.group:hover .pivot-gimbal-inner {
+  animation-duration: 2.8s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pivot-coin-3d,
+  .pivot-gimbal-outer,
+  .pivot-gimbal-inner {
+    animation: none;
+  }
+}
+

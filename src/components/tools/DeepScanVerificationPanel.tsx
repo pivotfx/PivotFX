@@ -154,9 +154,9 @@ export const DeepScanVerificationPanel: React.FC<DeepScanVerificationPanelProps>
         )}
       </div>
 
-      {/* 6-Point Zero-Mistake Pre-Flight Checklist */}
+      {/* 8-Point Zero-Mistake Pre-Flight Checklist */}
       {activeChecks.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-0.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-0.5">
           {activeChecks.map((chk) => (
             <div
               key={chk.id}

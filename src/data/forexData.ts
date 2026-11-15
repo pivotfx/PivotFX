@@ -1215,11 +1215,11 @@ export const MASTER_STRATEGIES: MasterclassStrategy[] = [
   },
   {
     id: 'strat-6',
-    name: 'BOS/CHoCH + 9-Factor Zero-Mistake Protocol',
+    name: 'BOS/CHoCH + 10-Factor Zero-Mistake Protocol',
     tagline: 'Detects real-time Break of Structure & Change of Character before allowing any BUY or SELL order.',
     winRate: 81,
     timeframe: 'M15 / H1',
-    indicators: ['BOS/CHoCH Swing Tracker', 'EMA 20 & 50', 'RSI 14', 'H1 Macro Bias'],
+    indicators: ['BOS/CHoCH Swing Tracker', 'EMA 20 & 50', 'RSI 14', 'ADX(14) & MACD', 'H1 Macro Bias'],
     rules: {
       entry: [
         'Run Deep AI Scan & Structure Audit before placing any trade on XAU/USD, EUR/USD, BTC/USD, or ETH/USD.',

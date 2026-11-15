@@ -149,7 +149,7 @@ export const PillarsHubModal: React.FC<PillarsHubModalProps> = ({
         {/* Modal Footer Note */}
         <div className="p-4 rounded-2xl bg-[#0B0F17] border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
           <span>
-            💡 Complete all 8 pillars to unlock the special <strong className="text-amber-400">Gilgil Grandmaster Badge</strong>.
+            Complete all 9 pillars to unlock the <strong className="text-amber-400">Gilgil Grandmaster Badge</strong>.
           </span>
           <button
             onClick={onClose}

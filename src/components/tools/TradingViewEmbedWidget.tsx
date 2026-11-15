@@ -147,6 +147,7 @@ export const TradingViewEmbedWidget: React.FC<TradingViewEmbedWidgetProps> = ({
     ema50: reEvalTv ? reEvalTv.ema50 : marketItem?.ema50 ?? currentPrice,
     rsi: reEvalTv ? reEvalTv.rsi : marketItem?.rsi ?? 50,
     atrPips: activeAtr,
+    candles: activeCandles,
     swingLow: reEvalTv ? reEvalTv.swingLow : swings.swingLow,
     swingHigh: reEvalTv ? reEvalTv.swingHigh : swings.swingHigh,
     macro: liveMacro,
@@ -572,6 +573,28 @@ BOS: ${tvBosAnalysis.structureSummary}`;
                   {tvBosAnalysis.structureSummary}
                 </p>
               </div>
+
+              {/* Live Candle Backtest & Quantitative Edge Strip */}
+              {(computed.liveBacktest || computed.executionBrief || computed.plainEnglishGuide) && (
+                <div className="p-2.5 rounded-xl bg-slate-900/80 border border-cyan-500/35 text-[10px] space-y-1.5">
+                  <div className="flex items-center justify-between gap-1 font-bold flex-wrap">
+                    <span className="text-cyan-300">
+                      Walk-Forward Edge · ADX {(computed.adxStrength ?? 21).toFixed(0)} · MACD {computed.macdBias ?? 'FLAT'}
+                    </span>
+                    {computed.liveBacktest && computed.liveBacktest.sampleTrades > 0 && (
+                      <span className="text-[#00C261]">
+                        {computed.liveBacktest.tp1WinRatePct}% TP1 · {computed.liveBacktest.netExpectancyR >= 0 ? '+' : ''}
+                        {computed.liveBacktest.netExpectancyR.toFixed(2)}R/trade (PF {computed.liveBacktest.profitFactor.toFixed(2)})
+                      </span>
+                    )}
+                  </div>
+                  {(computed.executionBrief || computed.plainEnglishGuide) && (
+                    <p className="text-slate-300 font-sans leading-snug">
+                      {(computed.executionBrief || computed.plainEnglishGuide)!.whySlIsSafe}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Bottom Actions: Copy Exact Ticket + Open Independent TV */}

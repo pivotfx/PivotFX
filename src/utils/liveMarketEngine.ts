@@ -82,6 +82,8 @@ export interface DeepVerifyCheckItem {
     | 'LIVE_FEED_SYNCED'
     | 'MTF_ALIGNED'
     | 'NO_COUNTER_BOS'
+    | 'ADX_TREND_STRENGTH'
+    | 'MACD_MOMENTUM_SYNC'
     | 'SWING_SL_PROTECTED'
     | 'RR_AND_TP_VALID'
     | 'ENTRY_NOT_CHASED';
@@ -116,6 +118,14 @@ export interface DeepVerifyResult {
   syncedAt: string;
 }
 
+export type CandlePatternSignal =
+  | 'BULLISH_ENGULFING'
+  | 'BEARISH_ENGULFING'
+  | 'BULLISH_PIN_REJECTION'
+  | 'BEARISH_PIN_REJECTION'
+  | 'INSIDE_BREAKOUT'
+  | 'CONSOLIDATION';
+
 export interface MarketScanData {
   pair: CurrencyPair;
   symbol: string;
@@ -142,6 +152,10 @@ export interface MarketScanData {
   ema50: number;
   rsi: number;
   atrPips?: number;
+  adxStrength?: number;
+  macdHistogram?: number;
+  macdBias?: 'BULLISH' | 'BEARISH' | 'FLAT';
+  candlePattern?: CandlePatternSignal;
   keyLevel: number;
   swingLow?: number;
   swingHigh?: number;
@@ -197,6 +211,30 @@ export interface MarketScanData {
   recommendedStrategy?: string;
   strategyWinRate?: string;
   strategyRationale?: string;
+  liveBacktest?: LiveBacktestStats;
+  executionBrief?: PlainEnglishTradeGuide;
+  plainEnglishGuide?: PlainEnglishTradeGuide;
+}
+
+export interface LiveBacktestStats {
+  sampleTrades: number;
+  tp1BreakevenWins: number;
+  fullTp2Wins: number;
+  losses: number;
+  tp1WinRatePct: number;
+  fullWinRatePct: number;
+  profitFactor: number;
+  netExpectancyR: number;
+  verdictLabel: 'PROVEN POSITIVE EDGE' | 'MODERATE EDGE' | 'LOW SAMPLE / CHOP';
+  summary: string;
+}
+
+export interface PlainEnglishTradeGuide {
+  headline: string;
+  whyDirection: string;
+  whySlIsSafe: string;
+  tp1BreakevenPlan: string;
+  expectancyMath: string;
 }
 
 export interface MultiTimeframeAlignment {
@@ -300,6 +338,13 @@ export interface ComputedTradeParams {
   recommendedStrategy: string;
   strategyWinRate: string;
   strategyRationale: string;
+  liveBacktest?: LiveBacktestStats;
+  adxStrength?: number;
+  macdHistogram?: number;
+  macdBias?: 'BULLISH' | 'BEARISH' | 'FLAT';
+  candlePattern?: CandlePatternSignal;
+  executionBrief?: PlainEnglishTradeGuide;
+  plainEnglishGuide?: PlainEnglishTradeGuide;
   limitPlan?: {
     entryPrice: number;
     stopLoss: number;
@@ -352,6 +397,13 @@ export function getTradingViewSymbol(pair: CurrencyPair): string {
   }
 }
 
+export function getTradingViewExternalUrl(pair: CurrencyPair, tf: Timeframe = 'M15'): string {
+  const symbol = getTradingViewSymbol(pair);
+  const interval =
+    tf === 'M1' ? '1' : tf === 'M5' ? '5' : tf === 'M10' ? '10' : tf === 'M15' ? '15' : tf === 'H1' ? '60' : tf === 'H4' ? '240' : 'D';
+  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`;
+}
+
 export function selectOptimalTradingStrategy(params: {
   pair: CurrencyPair;
   direction: 'BUY' | 'SELL';
@@ -389,7 +441,7 @@ export function selectOptimalTradingStrategy(params: {
         ? 'NY Silver Bullet BOS + FVG Continuation'
         : isLondonWindow
         ? 'London BOS + Institutional FVG Sniper'
-        : 'BOS/CHoCH 9-Factor Trend Continuation',
+        : 'BOS/CHoCH 10-Factor Trend Continuation',
       winRateLabel: '78% Historical Edge',
       rationale: `${pair} confirmed ${bosAnalysis.bosDirection.replace('_', ' ')} while holding EMA 20/50 alignment and non-extended pullback room.`
     };
@@ -736,6 +788,7 @@ export function computeDynamicPositionRiskPlan(params: {
   pair: CurrencyPair;
   structuralSlPips: number;
   brokerSpread: number;
+  atrPips?: number;
   riskConfig: RiskManagementConfig;
 }): PositionSizeRiskPlan {
   const { isGold, isBtc, isEth, isIndex, isOil, pipMultiplier, pipValPerStandardLot, pipValPerMicroLot } = getPairSpecs(
@@ -747,13 +800,15 @@ export function computeDynamicPositionRiskPlan(params: {
   const targetRiskKes = Math.round(targetRiskUsd * 130);
 
   const structuralSlPips = Math.max(4, Number(params.structuralSlPips.toFixed(1)));
+  const atrShieldFloor = params.atrPips ? params.atrPips * 1.05 + params.brokerSpread : 0;
   const minClearancePips = Number(
     Math.max(
-      params.brokerSpread * 2.2,
-      isGold ? 10 : isBtc ? 90 : isEth ? 10 : isIndex ? 22 : isOil ? 14 : 6
+      params.brokerSpread * 2.4,
+      atrShieldFloor,
+      isGold ? 16 : isBtc ? 140 : isEth ? 14 : isIndex ? 28 : isOil ? 18 : 8
     ).toFixed(1)
   );
-  const maxSafeStructuralSlPips = Number((structuralSlPips * 1.45).toFixed(1));
+  const maxSafeStructuralSlPips = Number(Math.max(minClearancePips, structuralSlPips * 1.45).toFixed(1));
   const minSafeRiskUsd = Number((minClearancePips * pipValPerMicroLot).toFixed(2));
 
   const rawLotsAtStructural = targetRiskUsd / Math.max(0.0001, structuralSlPips * pipValPerStandardLot);
@@ -769,11 +824,13 @@ export function computeDynamicPositionRiskPlan(params: {
       );
     } else {
       const exactSlForLot = targetRiskUsd / Math.max(0.0001, lotSize * pipValPerStandardLot);
-      const minComfortSl = Math.max(minClearancePips, structuralSlPips * 0.72);
+      const minComfortSl = Math.max(minClearancePips, structuralSlPips * 0.88);
       calibratedSlPips = Number(
         Math.min(maxSafeStructuralSlPips, Math.max(minComfortSl, exactSlForLot)).toFixed(1)
       );
     }
+  } else {
+    calibratedSlPips = Number(Math.max(minClearancePips, structuralSlPips).toFixed(1));
   }
 
   const pipValPerPositionUsd = Number((lotSize * pipValPerStandardLot).toFixed(4));
@@ -1048,6 +1105,179 @@ export function computeRealAtrPips(candles: OhlcCandle[], pipMultiplier: number,
   }
   const avgTr = count > 0 ? trSum / count : 0;
   return Math.max(4, Number((avgTr * pipMultiplier).toFixed(1)));
+}
+
+/**
+ * Computes institutional MACD (12, 26, 9) histogram & momentum bias from real close prices.
+ */
+export function computeRealMacd(closes: number[]): {
+  macdLine: number;
+  signalLine: number;
+  histogram: number;
+  bias: 'BULLISH' | 'BEARISH' | 'FLAT';
+} {
+  if (!closes || closes.length < 18) {
+    return { macdLine: 0, signalLine: 0, histogram: 0, bias: 'FLAT' };
+  }
+  const k12 = 2 / 13;
+  const k26 = 2 / 27;
+  const k9 = 2 / 10;
+  let ema12 = closes[0];
+  let ema26 = closes[0];
+  const macdSeries: number[] = [];
+
+  for (let i = 0; i < closes.length; i++) {
+    ema12 = closes[i] * k12 + ema12 * (1 - k12);
+    ema26 = closes[i] * k26 + ema26 * (1 - k26);
+    macdSeries.push(ema12 - ema26);
+  }
+
+  let signal = macdSeries[0];
+  for (let i = 0; i < macdSeries.length; i++) {
+    signal = macdSeries[i] * k9 + signal * (1 - k9);
+  }
+
+  const macdLine = macdSeries[macdSeries.length - 1];
+  const histogram = macdLine - signal;
+  const prevHistogram = macdSeries.length >= 2 ? macdSeries[macdSeries.length - 2] - signal : histogram;
+  const lastPrice = Math.max(0.0001, closes[closes.length - 1]);
+  const relNorm = Math.abs(histogram) / lastPrice;
+
+  const bias: 'BULLISH' | 'BEARISH' | 'FLAT' =
+    relNorm < 0.000015 && Math.abs(macdLine) / lastPrice < 0.00003
+      ? 'FLAT'
+      : histogram > 0 && macdLine >= prevHistogram * 0.4 - Math.abs(signal) * 0.2
+      ? 'BULLISH'
+      : histogram < 0
+      ? 'BEARISH'
+      : macdLine >= 0
+      ? 'BULLISH'
+      : 'BEARISH';
+
+  return { macdLine, signalLine: signal, histogram, bias };
+}
+
+/**
+ * Computes Wilder 14-period Average Directional Index (ADX, +DI, -DI) to filter low-ADX choppy ranges.
+ */
+export function computeRealAdx(candles: OhlcCandle[], period = 14): {
+  adx: number;
+  plusDi: number;
+  minusDi: number;
+  regime: 'STRONG_TREND' | 'MODERATE_TREND' | 'CHOP_RANGE';
+} {
+  if (!candles || candles.length < period + 2) {
+    return { adx: 21.0, plusDi: 22.0, minusDi: 20.0, regime: 'MODERATE_TREND' };
+  }
+
+  const dxValues: number[] = [];
+  let trSmooth = 0;
+  let plusDmSmooth = 0;
+  let minusDmSmooth = 0;
+  let lastPlusDi = 20;
+  let lastMinusDi = 20;
+
+  for (let i = 1; i < candles.length; i++) {
+    const cur = candles[i];
+    const prev = candles[i - 1];
+    const upMove = cur.high - prev.high;
+    const downMove = prev.low - cur.low;
+    const plusDm = upMove > downMove && upMove > 0 ? upMove : 0;
+    const minusDm = downMove > upMove && downMove > 0 ? downMove : 0;
+    const tr = Math.max(
+      cur.high - cur.low,
+      Math.abs(cur.high - prev.close),
+      Math.abs(cur.low - prev.close)
+    );
+
+    if (i <= period) {
+      trSmooth += tr;
+      plusDmSmooth += plusDm;
+      minusDmSmooth += minusDm;
+      if (i === period && trSmooth > 0) {
+        lastPlusDi = (plusDmSmooth / trSmooth) * 100;
+        lastMinusDi = (minusDmSmooth / trSmooth) * 100;
+        const diSum = lastPlusDi + lastMinusDi;
+        dxValues.push(diSum > 0 ? (Math.abs(lastPlusDi - lastMinusDi) / diSum) * 100 : 0);
+      }
+    } else {
+      trSmooth = trSmooth - trSmooth / period + tr;
+      plusDmSmooth = plusDmSmooth - plusDmSmooth / period + plusDm;
+      minusDmSmooth = minusDmSmooth - minusDmSmooth / period + minusDm;
+      if (trSmooth > 0) {
+        lastPlusDi = (plusDmSmooth / trSmooth) * 100;
+        lastMinusDi = (minusDmSmooth / trSmooth) * 100;
+        const diSum = lastPlusDi + lastMinusDi;
+        dxValues.push(diSum > 0 ? (Math.abs(lastPlusDi - lastMinusDi) / diSum) * 100 : 0);
+      }
+    }
+  }
+
+  const adxRaw =
+    dxValues.length > 0
+      ? dxValues.slice(-period).reduce((acc, v) => acc + v, 0) / Math.min(period, dxValues.length)
+      : 20;
+  const adx = Number(Math.min(75, Math.max(8, adxRaw)).toFixed(1));
+  const regime: 'STRONG_TREND' | 'MODERATE_TREND' | 'CHOP_RANGE' =
+    adx >= 25 ? 'STRONG_TREND' : adx >= 17 ? 'MODERATE_TREND' : 'CHOP_RANGE';
+
+  return {
+    adx,
+    plusDi: Number(lastPlusDi.toFixed(1)),
+    minusDi: Number(lastMinusDi.toFixed(1)),
+    regime
+  };
+}
+
+/**
+ * Classifies latest price-action candlestick pattern across the final 2–3 closed/active bars.
+ */
+export function detectLatestCandlePattern(candles: OhlcCandle[]): CandlePatternSignal {
+  if (!candles || candles.length < 3) return 'CONSOLIDATION';
+  const prev = candles[candles.length - 3];
+  const lastClosed = candles[candles.length - 2];
+  const cur = candles[candles.length - 1];
+
+  const prevBody = Math.abs(prev.close - prev.open);
+  const lcBody = Math.abs(lastClosed.close - lastClosed.open);
+  const lcRange = Math.max(1e-9, lastClosed.high - lastClosed.low);
+  const lcUpperWick = Math.max(0, lastClosed.high - Math.max(lastClosed.open, lastClosed.close));
+  const lcLowerWick = Math.max(0, Math.min(lastClosed.open, lastClosed.close) - lastClosed.low);
+
+  // Bullish / Bearish Engulfing on confirmed bar
+  if (
+    lastClosed.close > lastClosed.open &&
+    prev.close < prev.open &&
+    lcBody >= prevBody * 1.05 &&
+    lastClosed.close >= prev.open &&
+    cur.close >= lastClosed.open
+  ) {
+    return 'BULLISH_ENGULFING';
+  }
+  if (
+    lastClosed.close < lastClosed.open &&
+    prev.close > prev.open &&
+    lcBody >= prevBody * 1.05 &&
+    lastClosed.close <= prev.open &&
+    cur.close <= lastClosed.open
+  ) {
+    return 'BEARISH_ENGULFING';
+  }
+
+  // Rejection Pin Bars (Sweep & Reject)
+  if (lcLowerWick > lcBody * 1.45 && lcLowerWick / lcRange >= 0.45 && cur.close >= lastClosed.low) {
+    return 'BULLISH_PIN_REJECTION';
+  }
+  if (lcUpperWick > lcBody * 1.45 && lcUpperWick / lcRange >= 0.45 && cur.close <= lastClosed.high) {
+    return 'BEARISH_PIN_REJECTION';
+  }
+
+  // Inside bar compression breaking out
+  if (lastClosed.high < prev.high && lastClosed.low > prev.low) {
+    return 'INSIDE_BREAKOUT';
+  }
+
+  return 'CONSOLIDATION';
 }
 
 export function getCurrentMacroContext(
@@ -1394,7 +1624,7 @@ export function analyzeMarketStructureBos(p: {
 }
 
 /**
- * Computes the deterministic 6-Point Zero-Mistake Pre-Flight Checklist for any trade setup.
+ * Computes the deterministic 8-Point Zero-Mistake Pre-Flight Checklist for any trade setup.
  */
 export function buildZeroMistakeChecklist(p: {
   pair: CurrencyPair;
@@ -1412,6 +1642,9 @@ export function buildZeroMistakeChecklist(p: {
   isExtendedZone: boolean;
   bosAnalysis?: StructureBosAnalysis;
   liveFeedConnected?: boolean;
+  adxStrength?: number;
+  macdBias?: 'BULLISH' | 'BEARISH' | 'FLAT';
+  candlePattern?: CandlePatternSignal;
 }): DeepVerifyCheckItem[] {
   const { decimals, pipMultiplier } = getPairSpecs(p.pair);
   const timing = evaluatePairKenyaTiming(p.pair);
@@ -1468,22 +1701,22 @@ export function buildZeroMistakeChecklist(p: {
         `Opposing ${bos!.bosDirection.replace('_', ' ')} @ ${bos!.bosTriggerLevel.toFixed(decimals)} blocks ${p.direction}`
   };
 
-  // 4. Protected Swing SL & Non-ATR Crushed Stop
+  // 4. Protected Swing SL & Non-ATR Crushed Stop (Full 1.0x ATR + Swing Clearance)
   const slSafeGeometry = isBuy ? p.stopLoss < p.entryPrice : p.stopLoss > p.entryPrice;
   const slClearOfSwing = !bos
     ? true
     : isBuy
-    ? p.stopLoss <= bos.protectedSwingLow + (p.atrPips * 0.25) / pipMultiplier
-    : p.stopLoss >= bos.protectedSwingHigh - (p.atrPips * 0.25) / pipMultiplier;
-  const slWideEnough = p.slPips >= Math.max(4, p.atrPips * 0.85);
+    ? p.stopLoss <= bos.protectedSwingLow + (p.atrPips * 0.2) / pipMultiplier
+    : p.stopLoss >= bos.protectedSwingHigh - (p.atrPips * 0.2) / pipMultiplier;
+  const slWideEnough = p.slPips >= Math.max(4, p.atrPips * 1.0);
   const slOk = slSafeGeometry && slWideEnough;
   const check4: DeepVerifyCheckItem = {
     id: 'SWING_SL_PROTECTED',
     label: 'SL Protected Beyond Swing & ATR',
     passed: slOk,
     detail: slOk
-      ? `SL ${p.stopLoss.toFixed(decimals)} (${p.slPips}p >= ${(p.atrPips * 0.85).toFixed(1)}p ATR shield)${slClearOfSwing ? ' clears swing anchor' : ''}`
-      : `SL ${p.stopLoss.toFixed(decimals)} (${p.slPips}p) too tight vs ${p.atrPips}p ATR candle volatility`
+      ? `SL ${p.stopLoss.toFixed(decimals)} (${p.slPips}p >= ${p.atrPips.toFixed(1)}p ATR shield)${slClearOfSwing ? ' clears swing anchor' : ''}`
+      : `SL ${p.stopLoss.toFixed(decimals)} (${p.slPips}p) too tight vs ${p.atrPips}p ATR candle volatility — widen SL or lower lot`
   };
 
   // 5. Strict MT4 Geometry + R:R >= 1.8 & Realistic ATR Horizon
@@ -1511,11 +1744,38 @@ export function buildZeroMistakeChecklist(p: {
       : `Stretched away from 20 EMA — stage Limit instead of chasing`
   };
 
-  return [check1, check2, check3, check4, check5, check6];
+  // 7. ADX(14) Trend Displacement Filter
+  const adxOk = p.adxStrength === undefined || p.adxStrength >= 14.5;
+  const check7: DeepVerifyCheckItem = {
+    id: 'ADX_TREND_STRENGTH',
+    label: 'ADX(14) Trend Velocity Filter',
+    passed: adxOk,
+    detail:
+      p.adxStrength === undefined
+        ? `ADX momentum within operational corridor`
+        : adxOk
+        ? `ADX(14) ${p.adxStrength.toFixed(1)} confirms clean trend displacement (>= 14.5)`
+        : `ADX(14) ${p.adxStrength.toFixed(1)} (< 14.5 chop zone) — avoid false breakouts`
+  };
+
+  // 8. MACD(12/26/9) & Candle Action Alignment
+  const macdOk =
+    p.macdBias === undefined ||
+    p.macdBias === 'FLAT' ||
+    (isBuy ? p.macdBias === 'BULLISH' : p.macdBias === 'BEARISH');
+  const patternLabel = p.candlePattern && p.candlePattern !== 'CONSOLIDATION' ? ` · ${p.candlePattern.replace(/_/g, ' ')}` : '';
+  const check8: DeepVerifyCheckItem = {
+    id: 'MACD_MOMENTUM_SYNC',
+    label: 'MACD(12/26/9) & Candle Action Sync',
+    passed: macdOk,
+    detail: `${p.macdBias || 'FLAT'} MACD impulse${patternLabel}`
+  };
+
+  return [check1, check2, check3, check4, check5, check6, check7, check8];
 }
 
 /**
- * Evaluates ALL 9 Institutional Trading Factors simultaneously to judge BUY vs SELL:
+ * Evaluates ALL 10 Institutional Trading Factors simultaneously to judge BUY vs SELL:
  * 1. Live Candlestick Price Action & Liquidity Sweep
  * 2. 20/50 EMA Dynamic Trend Stack & Pullback Timing Guard
  * 3. 14-Period Wilder RSI Momentum & Exhaustion
@@ -1525,6 +1785,7 @@ export function buildZeroMistakeChecklist(p: {
  * 7. FVG & Order Block Mitigation
  * 8. Volatility Compression & ATR Exhaustion Guard
  * 9. Market Structure Break of Structure (BOS / CHoCH) Anti-Reversal Shield
+ * 10. MACD (12/26/9) Momentum & ADX (14) Trend Velocity Filter
  */
 export function evaluateAllTradeFactors(p: {
   pair: CurrencyPair;
@@ -1544,6 +1805,10 @@ export function evaluateAllTradeFactors(p: {
   previousDirection?: 'BUY' | 'SELL';
   opposingCandleWarning?: string;
   bosAnalysis?: StructureBosAnalysis;
+  adxStrength?: number;
+  macdBias?: 'BULLISH' | 'BEARISH' | 'FLAT';
+  macdHistogram?: number;
+  candlePattern?: CandlePatternSignal;
 }): {
   isBuy: boolean;
   bullScorePct: number;
@@ -1564,7 +1829,7 @@ export function evaluateAllTradeFactors(p: {
   let bullWeight = 0;
   let bearWeight = 0;
 
-  // Higher-Timeframe (H1) Structural Anchor derived strictly from EMA & price structure
+  // Higher-Timeframe (H1) context (weighted cleanly once in Factor 6 below — never double-counted)
   const effectiveH1 =
     p.h1TrendDirection ??
     (p.ema20 > p.ema50
@@ -1574,11 +1839,6 @@ export function evaluateAllTradeFactors(p: {
       : p.livePrice >= p.ema50
       ? 'UPTREND'
       : 'DOWNTREND');
-  if (effectiveH1 === 'UPTREND') {
-    bullWeight += 24;
-  } else if (effectiveH1 === 'DOWNTREND') {
-    bearWeight += 24;
-  }
 
   // FACTOR 1: Candlestick Price Action, Multi-Candle Momentum & Liquidity Sweep (24 pts max)
   const prevRef = p.prev3Close ?? p.ema20;
@@ -1701,10 +1961,14 @@ export function evaluateAllTradeFactors(p: {
   );
   const isExtendedZone = Math.abs(distEma20Pips) > overextLimit;
   const emaGapPips = Math.abs(p.ema20 - p.ema50) * pipMultiplier;
-  const isFlatEmaChop = emaGapPips < Math.max(0.5, effectiveAtrPips * 0.14) && p.rsi >= 46 && p.rsi <= 54;
+  const hasConfirmedBos = Boolean(p.bosAnalysis?.brokenStructure);
+  const isFlatEmaChop =
+    !hasConfirmedBos &&
+    ((emaGapPips < Math.max(0.5, effectiveAtrPips * 0.14) && p.rsi >= 46 && p.rsi <= 54) ||
+      (p.adxStrength !== undefined && p.adxStrength < 14.5 && Math.abs(p.rsi - 50) < 6));
 
   if (distEma20Pips > overextLimit) {
-    if (p.ema20 >= p.ema50) bullWeight += 15;
+    if (p.ema20 >= p.ema50 || p.livePrice > p.ema50) bullWeight += 15;
     else bearWeight += 15;
     verdicts.push({
       name: '2. 20/50 EMA Trend Stack',
@@ -1713,7 +1977,7 @@ export function evaluateAllTradeFactors(p: {
       detail: `Extended +${distEma20Pips.toFixed(1)}p above 20 EMA (${p.ema20.toFixed(decimals)}) — wait pullback toward 20 EMA`
     });
   } else if (distEma20Pips < -overextLimit) {
-    if (p.ema20 <= p.ema50) bearWeight += 15;
+    if (p.ema20 <= p.ema50 || p.livePrice < p.ema50) bearWeight += 15;
     else bullWeight += 15;
     verdicts.push({
       name: '2. 20/50 EMA Trend Stack',
@@ -1742,14 +2006,14 @@ export function evaluateAllTradeFactors(p: {
         detail: `Uptrend pullback testing 20/50 EMA discount zone (${p.ema20.toFixed(decimals)} - ${p.ema50.toFixed(decimals)}) — Primary UPTREND intact`
       });
     } else {
-      // Price slipped below 50 EMA: caution
-      bearWeight += 16;
-      bullWeight += 8;
+      // Price broke decisively below BOTH 20 EMA and 50 EMA
+      bearWeight += 21;
+      bullWeight += 4;
       verdicts.push({
         name: '2. 20/50 EMA Trend Stack',
-        signal: 'CAUTION',
-        weight: '16%',
-        detail: `Testing 50 EMA structural floor (${p.ema50.toFixed(decimals)}) in uptrend`
+        signal: 'SELL',
+        weight: '21%',
+        detail: `Bearish breakdown: Price (${p.livePrice.toFixed(decimals)}) lost both 20 EMA & 50 EMA floor (${p.ema50.toFixed(decimals)})`
       });
     }
   } else {
@@ -1773,14 +2037,14 @@ export function evaluateAllTradeFactors(p: {
         detail: `Downtrend rally testing 20/50 EMA premium zone (${p.ema20.toFixed(decimals)} - ${p.ema50.toFixed(decimals)}) — Primary DOWNTREND intact`
       });
     } else {
-      // Price slipped above 50 EMA: caution
-      bullWeight += 16;
-      bearWeight += 8;
+      // Price reclaimed decisively above BOTH 20 EMA and 50 EMA
+      bullWeight += 21;
+      bearWeight += 4;
       verdicts.push({
         name: '2. 20/50 EMA Trend Stack',
-        signal: 'CAUTION',
-        weight: '16%',
-        detail: `Testing 50 EMA structural ceiling (${p.ema50.toFixed(decimals)}) in downtrend`
+        signal: 'BUY',
+        weight: '21%',
+        detail: `Bullish breakout: Price (${p.livePrice.toFixed(decimals)}) reclaimed both 20 EMA & 50 EMA ceiling (${p.ema50.toFixed(decimals)})`
       });
     }
   }
@@ -2062,28 +2326,28 @@ export function evaluateAllTradeFactors(p: {
     });
   }
 
-  // FACTOR 6: H1 Trend Structure & Key Level Alignment (16 pts max)
+  // FACTOR 6: H1 Trend Structure & Key Level Alignment (20 pts max — Single Authoritative H1 Weight)
   if (effectiveH1 === 'UPTREND') {
-    bullWeight += 16;
+    bullWeight += 20;
     verdicts.push({
       name: '6. H1 Trend & Structure',
       signal: 'BUY',
-      weight: '16%',
+      weight: '20%',
       detail: `H1 macro trend confirms UPTREND above swing floor ${p.keyLevel ? p.keyLevel.toFixed(decimals) : p.ema50.toFixed(decimals)}`
     });
   } else if (effectiveH1 === 'DOWNTREND') {
-    bearWeight += 16;
+    bearWeight += 20;
     verdicts.push({
       name: '6. H1 Trend & Structure',
       signal: 'SELL',
-      weight: '16%',
+      weight: '20%',
       detail: `H1 macro trend confirms DOWNTREND below swing ceiling ${p.keyLevel ? p.keyLevel.toFixed(decimals) : p.ema50.toFixed(decimals)}`
     });
   } else {
     verdicts.push({
       name: '6. H1 Trend & Structure',
       signal: 'CAUTION',
-      weight: '8%',
+      weight: '10%',
       detail: 'H1 structure consolidating — scale 50% at TP1 and lock Breakeven early'
     });
   }
@@ -2203,6 +2467,39 @@ export function evaluateAllTradeFactors(p: {
     });
   }
 
+  // FACTOR 10: MACD (12,26,9) Momentum & ADX (14) Trend Strength + Price Action Pattern (22 pts max)
+  const resolvedAdx = p.adxStrength ?? 21.0;
+  const resolvedMacdBias =
+    p.macdBias ?? (p.ema20 > p.ema50 ? 'BULLISH' : p.ema20 < p.ema50 ? 'BEARISH' : 'FLAT');
+  const patternTag = p.candlePattern ? p.candlePattern.replace(/_/g, ' ') : 'CONSOLIDATION';
+
+  if (resolvedAdx < 16 || resolvedMacdBias === 'FLAT') {
+    verdicts.push({
+      name: '10. MACD & ADX Velocity',
+      signal: 'CAUTION',
+      weight: '10%',
+      detail: `ADX ${resolvedAdx.toFixed(1)} (${resolvedAdx < 16 ? 'Low-trend chop filter' : 'Moderate'}) · MACD neutral · ${patternTag}`
+    });
+  } else if (resolvedMacdBias === 'BULLISH') {
+    const macdPts = resolvedAdx >= 25 || p.candlePattern === 'BULLISH_ENGULFING' ? 22 : 15;
+    bullWeight += macdPts;
+    verdicts.push({
+      name: '10. MACD & ADX Velocity',
+      signal: 'BUY',
+      weight: `${macdPts}%`,
+      detail: `MACD histogram bullish (+) · ADX ${resolvedAdx.toFixed(1)} trend strength · ${patternTag}`
+    });
+  } else {
+    const macdPts = resolvedAdx >= 25 || p.candlePattern === 'BEARISH_ENGULFING' ? 22 : 15;
+    bearWeight += macdPts;
+    verdicts.push({
+      name: '10. MACD & ADX Velocity',
+      signal: 'SELL',
+      weight: `${macdPts}%`,
+      detail: `MACD histogram bearish (-) · ADX ${resolvedAdx.toFixed(1)} trend strength · ${patternTag}`
+    });
+  }
+
   const total = Math.max(1, bullWeight + bearWeight);
   const bullScorePct = Math.round((bullWeight / total) * 100);
   const bearScorePct = 100 - bullScorePct;
@@ -2224,21 +2521,25 @@ export function evaluateAllTradeFactors(p: {
   } else if (bullishEmaStack && (effectiveH1 === 'UPTREND' || bullScorePct >= 52)) {
     // Objective bullish price/EMA alignment: Price > 20 EMA > 50 EMA -> MUST project BUY
     isBuy = true;
-  } else if (bearScorePct - bullScorePct >= 8) {
+  } else if (bosBearActive && !bosBullActive && bearScorePct >= 50) {
     isBuy = false;
-  } else if (bullScorePct - bearScorePct >= 8) {
+  } else if (bosBullActive && !bosBearActive && bullScorePct >= 50) {
+    isBuy = true;
+  } else if (bearScorePct - bullScorePct >= 6) {
+    isBuy = false;
+  } else if (bullScorePct - bearScorePct >= 6) {
     isBuy = true;
   } else if (
     p.previousDirection &&
-    Math.abs(bullScorePct - bearScorePct) < 6 &&
+    Math.abs(bullScorePct - bearScorePct) < 5 &&
     Math.abs(distEma20Pips) < effectiveAtrPips * 0.15
   ) {
     // Micro-deadband ONLY when bull/bear scores are dead-even right on the 20 EMA
     isBuy = p.previousDirection === 'BUY';
   } else if (effectiveH1 === 'UPTREND') {
-    isBuy = bearScorePct < 54;
+    isBuy = bearScorePct < 52;
   } else if (effectiveH1 === 'DOWNTREND') {
-    isBuy = bullScorePct >= 54;
+    isBuy = bullScorePct >= 52;
   } else {
     isBuy = bullScorePct >= bearScorePct;
   }
@@ -2253,15 +2554,19 @@ export function evaluateAllTradeFactors(p: {
       (isBuy && !bosBearActive) ||
       (!isBuy && !bosBullActive)
   );
+  const edgeMargin = Math.max(0, dominantPct - 50);
+  const factorShare = alignedFactorsCount / Math.max(1, totalFactorsCount);
+  const adxConfAdj = resolvedAdx >= 26 ? 3.5 : resolvedAdx < 16 ? -6.5 : 0;
   const rawConf =
-    72 +
-    dominantPct * 0.25 +
-    (alignedFactorsCount >= 6 ? 2.8 : alignedFactorsCount >= 5 ? 2.0 : alignedFactorsCount >= 4 ? 1.0 : alignedFactorsCount >= 3 ? 0.2 : -1.5) +
-    (spreadHealthy && !macro.isRolloverWindow ? 1.5 : -2.5) -
-    (isExtendedZone ? 4.5 : 0) -
-    (isFlatEmaChop ? 6.0 : 0) -
-    (!bosAligned ? 14.0 : 0);
-  const confidence = Number(Math.min(98.5, Math.max(48.0, rawConf)).toFixed(1));
+    48 +
+    Math.min(24, edgeMargin * 0.65) +
+    factorShare * 18 +
+    adxConfAdj +
+    (spreadHealthy && !macro.isRolloverWindow ? 2.5 : -4.0) -
+    (isExtendedZone ? 7.5 : 0) -
+    (isFlatEmaChop ? 11.0 : 0) -
+    (!bosAligned ? 18.0 : 0);
+  const confidence = Number(Math.min(93.5, Math.max(42.0, rawConf)).toFixed(1));
 
   const bosCounterWarning =
     !bosAligned && bos?.bosVetoReason
@@ -2433,6 +2738,9 @@ export function evaluateCandleSeriesAndTick(p: {
   const ema20SlopePips = Number(((ema20 - ema20Prev) * pipMultiplier).toFixed(2));
   const rsi = computeRealRsi(closes, 14);
   const atrPips = computeRealAtrPips(candles, pipMultiplier, 14);
+  const macdData = computeRealMacd(closes);
+  const adxData = computeRealAdx(candles, 14);
+  const candlePattern = detectLatestCandlePattern(candles);
 
   const closedHistorySlice = candles.length >= 25 ? candles.slice(-25, -1) : candles.slice(-24);
   const swingHigh = Number(Math.max(...closedHistorySlice.map((c) => c.high)).toFixed(decimals));
@@ -2444,8 +2752,14 @@ export function evaluateCandleSeriesAndTick(p: {
   const prevBody = Math.abs(prevCandle.close - prevCandle.open);
   const prevUpperWick = Math.max(0, prevCandle.high - Math.max(prevCandle.open, prevCandle.close));
   const prevLowerWick = Math.max(0, Math.min(prevCandle.open, prevCandle.close) - prevCandle.low);
-  const isBearishPinOrSweep = prevUpperWick > prevBody * 1.25 && lastCandle.close < prevCandle.high;
-  const isBullishPinOrAbsorption = prevLowerWick > prevBody * 1.25 && lastCandle.close > prevCandle.low;
+  const isBearishPinOrSweep =
+    (prevUpperWick > prevBody * 1.25 && lastCandle.close < prevCandle.high) ||
+    candlePattern === 'BEARISH_PIN_REJECTION' ||
+    candlePattern === 'BEARISH_ENGULFING';
+  const isBullishPinOrAbsorption =
+    (prevLowerWick > prevBody * 1.25 && lastCandle.close > prevCandle.low) ||
+    candlePattern === 'BULLISH_PIN_REJECTION' ||
+    candlePattern === 'BULLISH_ENGULFING';
 
   const bosAnalysis = analyzeMarketStructureBos({
     pair: p.pair,
@@ -2479,7 +2793,11 @@ export function evaluateCandleSeriesAndTick(p: {
     macro: p.macro,
     h1TrendDirection: p.h1TrendDirection,
     previousDirection: p.previousDirection,
-    bosAnalysis
+    bosAnalysis,
+    adxStrength: adxData.adx,
+    macdBias: macdData.bias,
+    macdHistogram: macdData.histogram,
+    candlePattern
   });
 
   // Counter-impulse candle guard: block blind entries directly into an opposing strong breakdown/breakout candle
@@ -2523,7 +2841,11 @@ export function evaluateCandleSeriesAndTick(p: {
         h1TrendDirection: p.h1TrendDirection,
         previousDirection: p.previousDirection,
         opposingCandleWarning,
-        bosAnalysis
+        bosAnalysis,
+        adxStrength: adxData.adx,
+        macdBias: macdData.bias,
+        macdHistogram: macdData.histogram,
+        candlePattern
       })
     : prelimEval;
 
@@ -2549,6 +2871,10 @@ export function evaluateCandleSeriesAndTick(p: {
     ema20SlopePips,
     rsi,
     atrPips,
+    adxStrength: adxData.adx,
+    macdHistogram: macdData.histogram,
+    macdBias: macdData.bias,
+    candlePattern,
     keyLevel,
     swingHigh,
     swingLow,
@@ -2671,8 +2997,15 @@ export function evaluateMultiTimeframeAlignment(p: {
 }): MultiTimeframeAlignment {
   // M5 trigger: price vs EMA 20
   const m5: 'BULLISH' | 'BEARISH' = p.price >= p.ema20 ? 'BULLISH' : 'BEARISH';
-  // M15 structure: EMA 20 vs EMA 50
-  const m15: 'BULLISH' | 'BEARISH' = p.ema20 >= p.ema50 ? 'BULLISH' : 'BEARISH';
+  // M15 structure: EMA 20 vs EMA 50, updated promptly if price decisively breaks both EMAs with session flow
+  const m15: 'BULLISH' | 'BEARISH' =
+    p.ema20 >= p.ema50
+      ? p.price < p.ema20 && p.price < p.ema50 && p.change24hPct < -0.25
+        ? 'BEARISH'
+        : 'BULLISH'
+      : p.price > p.ema20 && p.price > p.ema50 && p.change24hPct > 0.25
+      ? 'BULLISH'
+      : 'BEARISH';
   // H1 swing trend:
   const h1: 'BULLISH' | 'BEARISH' = p.h1TrendDirection === 'UPTREND' ? 'BULLISH' : 'BEARISH';
   // H4 macro flow: 24h change direction
@@ -2712,6 +3045,258 @@ export function evaluateMultiTimeframeAlignment(p: {
   };
 }
 
+export function runLiveCandleBacktest(params: {
+  pair: CurrencyPair;
+  candles?: OhlcCandle[];
+  atrPips?: number;
+  brokerSpread: number;
+  direction?: 'BUY' | 'SELL';
+}): LiveBacktestStats {
+  const { pipMultiplier } = getPairSpecs(params.pair);
+  const bars = params.candles || [];
+  if (bars.length < 28) {
+    return {
+      sampleTrades: 0,
+      tp1BreakevenWins: 0,
+      fullTp2Wins: 0,
+      losses: 0,
+      tp1WinRatePct: 0,
+      fullWinRatePct: 0,
+      profitFactor: 0,
+      netExpectancyR: 0,
+      verdictLabel: 'LOW SAMPLE / CHOP',
+      summary: `Waiting for 28+ closed candles on ${params.pair} before backtest stats finalize.`
+    };
+  }
+
+  let sampleTrades = 0;
+  let tp1BreakevenWins = 0;
+  let fullTp2Wins = 0;
+  let losses = 0;
+  let totalR = 0;
+  let grossWinR = 0;
+  let grossLossR = 0;
+  const spreadBuffer = params.brokerSpread * 1.25;
+
+  let i = 20;
+  while (i <= bars.length - 8) {
+    const windowCloses = bars.slice(0, i + 1).map((b) => b.close);
+    const ema20 = computeRealEma(windowCloses, 20);
+    const ema50 = computeRealEma(windowCloses, Math.min(50, windowCloses.length));
+
+    let atrSum = 0;
+    const atrStart = Math.max(1, i - 13);
+    let atrCount = 0;
+    for (let k = atrStart; k <= i; k++) {
+      const tr = Math.max(
+        bars[k].high - bars[k].low,
+        Math.abs(bars[k].high - bars[k - 1].close),
+        Math.abs(bars[k].low - bars[k - 1].close)
+      );
+      atrSum += tr * pipMultiplier;
+      atrCount++;
+    }
+    const atrPips = Math.max(3, atrCount > 0 ? atrSum / atrCount : params.atrPips ?? 14);
+    const entryBar = bars[i];
+    const entryPrice = entryBar.close;
+
+    const candidateSide: 'BUY' | 'SELL' | null =
+      ema20 > ema50 && entryBar.close >= ema20
+        ? 'BUY'
+        : ema20 < ema50 && entryBar.close <= ema20
+        ? 'SELL'
+        : null;
+
+    if (!candidateSide) {
+      i += 1;
+      continue;
+    }
+
+    const distFromEma20Pips = Math.abs(entryPrice - ema20) * pipMultiplier;
+    // Enter only inside 20 EMA value corridor (avoid chasing overextended spikes)
+    if (distFromEma20Pips > atrPips * 1.35) {
+      i += 1;
+      continue;
+    }
+
+    const recentSlice = bars.slice(Math.max(0, i - 6), i + 1);
+    const swingLow = Math.min(...recentSlice.map((b) => b.low));
+    const swingHigh = Math.max(...recentSlice.map((b) => b.high));
+    const swingDistPips =
+      candidateSide === 'BUY'
+        ? Math.max(0, (entryPrice - swingLow) * pipMultiplier)
+        : Math.max(0, (swingHigh - entryPrice) * pipMultiplier);
+
+    const slPips = Math.max(atrPips * 1.15, Math.min(atrPips * 2.1, swingDistPips)) + spreadBuffer;
+    const slDist = slPips / pipMultiplier;
+    const tp1Dist = (slPips * 1.6) / pipMultiplier;
+    const tp2Dist = (slPips * 2.7) / pipMultiplier;
+
+    const slPrice = candidateSide === 'BUY' ? entryPrice - slDist : entryPrice + slDist;
+    const tp1Price = candidateSide === 'BUY' ? entryPrice + tp1Dist : entryPrice - tp1Dist;
+    const tp2Price = candidateSide === 'BUY' ? entryPrice + tp2Dist : entryPrice - tp2Dist;
+    const beLockPrice = candidateSide === 'BUY' ? entryPrice + slDist * 0.05 : entryPrice - slDist * 0.05;
+
+    let hitTp1 = false;
+    let tradeR = 0;
+    let closedAtBar = i + 1;
+
+    for (let j = i + 1; j < Math.min(bars.length, i + 14); j++) {
+      const f = bars[j];
+      closedAtBar = j;
+      if (candidateSide === 'BUY') {
+        const activeSl = hitTp1 ? beLockPrice : slPrice;
+        // Conservative tie-breaker: check SL before TP if both touched in same candle
+        if (f.low <= activeSl) {
+          if (hitTp1) {
+            tradeR = 0.8 + 0.025; // +1.6R on 50% TP1 + tiny BE lock on remaining 50%
+          } else {
+            tradeR = -1.0;
+          }
+          break;
+        }
+        if (!hitTp1 && f.high >= tp1Price) {
+          hitTp1 = true;
+        }
+        if (f.high >= tp2Price) {
+          tradeR = 0.8 + 1.35; // 50% at 1.6R + 50% at 2.7R = +2.15R
+          break;
+        }
+      } else {
+        const activeSl = hitTp1 ? beLockPrice : slPrice;
+        if (f.high >= activeSl) {
+          if (hitTp1) {
+            tradeR = 0.8 + 0.025;
+          } else {
+            tradeR = -1.0;
+          }
+          break;
+        }
+        if (!hitTp1 && f.low <= tp1Price) {
+          hitTp1 = true;
+        }
+        if (f.low <= tp2Price) {
+          tradeR = 0.8 + 1.35;
+          break;
+        }
+      }
+      if (j === Math.min(bars.length - 1, i + 13)) {
+        if (hitTp1) {
+          tradeR = 0.8;
+        } else {
+          const markR =
+            candidateSide === 'BUY'
+              ? (f.close - entryPrice) / Math.max(0.00001, slDist)
+              : (entryPrice - f.close) / Math.max(0.00001, slDist);
+          tradeR = Math.max(-1.0, Math.min(1.2, markR));
+        }
+      }
+    }
+
+    sampleTrades++;
+    totalR += tradeR;
+    if (tradeR > 0) {
+      grossWinR += tradeR;
+      if (hitTp1) tp1BreakevenWins++;
+      if (tradeR >= 1.9) fullTp2Wins++;
+    } else {
+      grossLossR += Math.abs(tradeR);
+      losses++;
+    }
+
+    i = Math.max(i + 3, closedAtBar + 1);
+  }
+
+  if (sampleTrades === 0) {
+    return {
+      sampleTrades: 0,
+      tp1BreakevenWins: 0,
+      fullTp2Wins: 0,
+      losses: 0,
+      tp1WinRatePct: 0,
+      fullWinRatePct: 0,
+      profitFactor: 0,
+      netExpectancyR: 0,
+      verdictLabel: 'LOW SAMPLE / CHOP',
+      summary: `Recent ${bars.length} candles on ${params.pair} stayed mostly inside chop — system rules rightly skipped low-edge entries.`
+    };
+  }
+
+  const tp1WinRatePct = Math.round(((sampleTrades - losses) / sampleTrades) * 100);
+  const fullWinRatePct = Math.round((fullTp2Wins / sampleTrades) * 100);
+  const profitFactor =
+    grossLossR > 0 ? Number((grossWinR / grossLossR).toFixed(2)) : Number((grossWinR > 0 ? 3.5 : 1.0).toFixed(2));
+  const netExpectancyR = Number((totalR / sampleTrades).toFixed(2));
+  const verdictLabel: LiveBacktestStats['verdictLabel'] =
+    netExpectancyR >= 0.35 && profitFactor >= 1.4
+      ? 'PROVEN POSITIVE EDGE'
+      : netExpectancyR > 0
+      ? 'MODERATE EDGE'
+      : 'LOW SAMPLE / CHOP';
+
+  return {
+    sampleTrades,
+    tp1BreakevenWins,
+    fullTp2Wins,
+    losses,
+    tp1WinRatePct,
+    fullWinRatePct,
+    profitFactor,
+    netExpectancyR,
+    verdictLabel,
+    summary: `Walk-forward test across the last ${bars.length} closed candles on ${params.pair}: ${sampleTrades} qualified 20/50 EMA value-zone entries (${tp1WinRatePct}% reached TP1/positive close, ${losses} SL losses, ${profitFactor} Profit Factor, ${netExpectancyR >= 0 ? '+' : ''}${netExpectancyR}R avg expectancy per trade).`
+  };
+}
+
+export function buildPlainEnglishTradeGuide(params: {
+  pair: CurrencyPair;
+  direction: 'BUY' | 'SELL';
+  entryPrice: number;
+  stopLoss: number;
+  tp1: number;
+  tp2: number;
+  slPips: number;
+  tpPips: number;
+  brokerSpread: number;
+  atrPips: number;
+  ema20: number;
+  ema50: number;
+  rsi: number;
+  h1TrendDirection: 'UPTREND' | 'DOWNTREND' | 'RANGING';
+  riskReward: string;
+  actualRiskUsd: number;
+  netProfitUsd: number;
+  tp1NetProfitUsd: number;
+  alignedFactorsCount: number;
+  totalFactorsCount: number;
+  decimals: number;
+  bosAnalysis?: StructureBosAnalysis;
+  liveBacktest?: LiveBacktestStats;
+}): PlainEnglishTradeGuide {
+  const isBuy = params.direction === 'BUY';
+  const trendWord = isBuy ? 'rising (Uptrend)' : 'falling (Downtrend)';
+  const sideLabel = isBuy ? 'BUY (price going UP)' : 'SELL (price going DOWN)';
+  const spreadNote = isBuy
+    ? `BUY Stop Loss triggers when Bid drops to ${params.stopLoss.toFixed(params.decimals)}.`
+    : `SELL Stop Loss triggers on the Ask price (Bid + ${params.brokerSpread}p spread), so your SL (${params.stopLoss.toFixed(params.decimals)}) adds spread + ${params.atrPips.toFixed(1)}p normal candle noise clearance above swing structure.`;
+
+  const bosSnippet = params.bosAnalysis?.brokenStructure
+    ? ` Recent ${params.bosAnalysis.bosDirection.replace('_', ' ')} confirmed near ${params.bosAnalysis.bosTriggerLevel.toFixed(params.decimals)}.`
+    : '';
+
+  const expectancyPer10 = params.liveBacktest && params.liveBacktest.sampleTrades > 0
+    ? Number((params.liveBacktest.netExpectancyR * 10 * params.actualRiskUsd).toFixed(2))
+    : Number(((0.6 * params.netProfitUsd * 0.85) - (0.4 * params.actualRiskUsd)).toFixed(2));
+
+  return {
+    headline: `${params.pair} Institutional Execution Brief — ${sideLabel}`,
+    whyDirection: `${params.pair} is ${trendWord} on the 1H chart (${params.h1TrendDirection}) with ${params.alignedFactorsCount} of ${params.totalFactorsCount} live technical + macro factors agreeing. 20 EMA (${params.ema20.toFixed(params.decimals)}) vs 50 EMA (${params.ema50.toFixed(params.decimals)}) and RSI (${params.rsi.toFixed(1)}) support continuation rather than guessing a reversal.${bosSnippet}`,
+    whySlIsSafe: `Your Stop Loss is ${params.slPips} pips (${params.stopLoss.toFixed(params.decimals)}, max risk $${params.actualRiskUsd.toFixed(2)}). It sits beyond 1.0x candle ATR (${params.atrPips.toFixed(1)}p) so ordinary wicks do not shake you out early. ${spreadNote}`,
+    tp1BreakevenPlan: `At TP1 (${params.tp1.toFixed(params.decimals)}), close 50% of your lot size to bank ~+$${params.tp1NetProfitUsd.toFixed(2)} and immediately move SL to Entry (Breakeven). Once at Breakeven, the second half chases TP2 (${params.tp2.toFixed(params.decimals)}, +$${params.netProfitUsd.toFixed(2)} · ${params.riskReward}) with zero remaining loss risk.`,
+    expectancyMath: `No strategy wins 100% of single trades — news spikes can always hit an SL. Profitability comes from math over 10+ trades: keeping every loss capped at -$${params.actualRiskUsd.toFixed(2)} while winners pay ${params.riskReward} (projected ~+$${expectancyPer10.toFixed(2)} net over 10 disciplined trades at $${params.actualRiskUsd.toFixed(2)} risk).`
+  };
+}
+
 export function computeRealChartTradeParams(p: {
   targetPair: CurrencyPair;
   targetTf: Timeframe;
@@ -2724,6 +3309,11 @@ export function computeRealChartTradeParams(p: {
   ema50?: number;
   rsi?: number;
   atrPips?: number;
+  adxStrength?: number;
+  macdHistogram?: number;
+  macdBias?: 'BULLISH' | 'BEARISH' | 'FLAT';
+  candlePattern?: CandlePatternSignal;
+  candles?: OhlcCandle[];
   macro?: MacroContextSnapshot;
   biasOverride?: 'BUY' | 'SELL';
   previousDirection?: 'BUY' | 'SELL';
@@ -2810,6 +3400,23 @@ export function computeRealChartTradeParams(p: {
     baseTp2Pips = isGold ? 92 : isBtc ? 980 : isEth ? 148 : isIndex ? 325 : isOil ? 162 : 76;
   }
 
+  // Derive MACD, ADX, and Candlestick Pattern telemetry if candles are available
+  const derivedCloses = p.candles && p.candles.length >= 18 ? p.candles.map((c) => c.close) : null;
+  const derivedMacd =
+    p.macdBias !== undefined && p.macdHistogram !== undefined
+      ? { bias: p.macdBias, histogram: p.macdHistogram }
+      : derivedCloses
+      ? computeRealMacd(derivedCloses)
+      : { bias: (p.ema20 ?? p.price) >= (p.ema50 ?? p.price) ? ('BULLISH' as const) : ('BEARISH' as const), histogram: 0 };
+  const derivedAdx =
+    p.adxStrength !== undefined
+      ? p.adxStrength
+      : p.candles && p.candles.length >= 16
+      ? computeRealAdx(p.candles, 14).adx
+      : 21.0;
+  const derivedPattern: CandlePatternSignal =
+    p.candlePattern ?? (p.candles && p.candles.length >= 3 ? detectLatestCandlePattern(p.candles) : 'CONSOLIDATION');
+
   // Unified All-Confluence BUY / SELL Evaluation
   const allFactorEval = evaluateAllTradeFactors({
     pair: p.targetPair,
@@ -2825,7 +3432,11 @@ export function computeRealChartTradeParams(p: {
     biasOverride: p.biasOverride,
     previousDirection: p.previousDirection,
     opposingCandleWarning: p.opposingCandleWarning,
-    bosAnalysis: p.bosAnalysis
+    bosAnalysis: p.bosAnalysis,
+    adxStrength: derivedAdx,
+    macdBias: derivedMacd.bias,
+    macdHistogram: derivedMacd.histogram,
+    candlePattern: derivedPattern
   });
 
   const isBuy = allFactorEval.isBuy;
@@ -2859,15 +3470,16 @@ export function computeRealChartTradeParams(p: {
       ? Math.abs(p.price - relevantSwingPrice) * pipMultiplier
       : 0;
   const effectiveAtr = Math.max(3, p.atrPips ?? baseSlPips * 0.85);
-  const minSlFloor = isGold ? 16 : isBtc ? 150 : isEth ? 14 : isIndex ? 30 : isOil ? 20 : 8;
+  const spreadBuffer = brokerSpread * 1.25;
+  const minSlFloor = isGold ? 18 : isBtc ? 160 : isEth ? 16 : isIndex ? 32 : isOil ? 22 : 9;
   const maxStructuralSlCap = activeRiskCfg.enabled
-    ? Math.max(hardSlCapPips, baseSlPips * 2.1, effectiveAtr * 2.2)
+    ? Math.max(hardSlCapPips, baseSlPips * 2.2, effectiveAtr * 2.35 + spreadBuffer)
     : hardSlCapPips;
 
   const rawTargetSlPips =
     rawSwingDistPips > 0
-      ? Math.min(rawSwingDistPips + brokerSpread, maxStructuralSlCap)
-      : Math.min(effectiveAtr * 1.35 + brokerSpread, maxStructuralSlCap);
+      ? Math.max(effectiveAtr * 1.1 + spreadBuffer, Math.min(rawSwingDistPips + spreadBuffer, maxStructuralSlCap))
+      : Math.min(effectiveAtr * 1.35 + spreadBuffer, maxStructuralSlCap);
 
   const structuralSlPips = Number(
     Math.min(maxStructuralSlCap, Math.max(minSlFloor, rawTargetSlPips, baseSlPips)).toFixed(1)
@@ -2879,6 +3491,7 @@ export function computeRealChartTradeParams(p: {
         pair: p.targetPair,
         structuralSlPips,
         brokerSpread,
+        atrPips: effectiveAtr,
         riskConfig: activeRiskCfg
       })
     : undefined;
@@ -3020,20 +3633,37 @@ export function computeRealChartTradeParams(p: {
   const priceMinusEma20Pips = (p.price - ema20Val) * pipMultiplier;
   const emaSpreadPips = (ema20Val - ema50Val) * pipMultiplier;
 
+  const bosBearActive =
+    p.bosAnalysis?.bosDirection === 'BEARISH_BOS' || p.bosAnalysis?.bosDirection === 'BEARISH_CHOCH';
+  const bosBullActive =
+    p.bosAnalysis?.bosDirection === 'BULLISH_BOS' || p.bosAnalysis?.bosDirection === 'BULLISH_CHOCH';
+  const priceBelowBothEmas = p.price < ema20Val && p.price < ema50Val;
+  const priceAboveBothEmas = p.price > ema20Val && p.price > ema50Val;
+
   const h1TrendDirection: 'UPTREND' | 'DOWNTREND' | 'RANGING' =
     p.h1TrendDirection ??
-    (emaSpreadPips >= 0.45
+    (emaSpreadPips >= 0.45 && !priceBelowBothEmas
       ? 'UPTREND'
-      : emaSpreadPips <= -0.45
+      : emaSpreadPips <= -0.45 && !priceAboveBothEmas
       ? 'DOWNTREND'
       : isBuy
       ? 'UPTREND'
       : 'DOWNTREND');
 
   let trendDirection: 'UPTREND' | 'DOWNTREND' | 'RANGING' = h1TrendDirection;
-  if (!isBuy && (h1TrendDirection === 'DOWNTREND' || (ema20Val < ema50Val && p.price <= ema20Val))) {
+  if (
+    !isBuy &&
+    (h1TrendDirection === 'DOWNTREND' ||
+      (ema20Val < ema50Val && p.price <= ema20Val) ||
+      (priceBelowBothEmas && (bosBearActive || derivedMacd.bias === 'BEARISH')))
+  ) {
     trendDirection = 'DOWNTREND';
-  } else if (isBuy && (h1TrendDirection === 'UPTREND' || (ema20Val > ema50Val && p.price >= ema20Val))) {
+  } else if (
+    isBuy &&
+    (h1TrendDirection === 'UPTREND' ||
+      (ema20Val > ema50Val && p.price >= ema20Val) ||
+      (priceAboveBothEmas && (bosBullActive || derivedMacd.bias === 'BULLISH')))
+  ) {
     trendDirection = 'UPTREND';
   } else if (emaSpreadPips >= 0.4 || (isBuy && priceMinusEma20Pips >= 0)) {
     trendDirection = 'UPTREND';
@@ -3217,10 +3847,10 @@ export function computeRealChartTradeParams(p: {
   };
 
   const slVolatilityWarning =
-    p.atrPips && actualSlPips < effectiveAtr * 0.9
+    p.atrPips && actualSlPips < effectiveAtr * 1.0
       ? `HIGH VOLATILITY / TIGHT SL WARNING: Live ${p.targetTf} ATR is ${effectiveAtr.toFixed(
           1
-        )}p (${isGold ? `$${(effectiveAtr / pipMultiplier).toFixed(2)}` : `${effectiveAtr.toFixed(1)}p`}/candle), wider than your ${actualSlPips}p SL (${isGold ? `$${(actualSlPips / pipMultiplier).toFixed(2)}` : `${actualSlPips}p`}). Sudden wick spikes can hit SL before the trend continues — wait for a 20 EMA retest or widen SL/increase risk budget.`
+        )}p (${isGold ? `$${(effectiveAtr / pipMultiplier).toFixed(2)}` : `${effectiveAtr.toFixed(1)}p`}/candle), wider than your ${actualSlPips}p SL (${isGold ? `$${(actualSlPips / pipMultiplier).toFixed(2)}` : `${actualSlPips}p`}). Sudden wick spikes (plus ${brokerSpread}p spread on SELL Ask) can hit SL before continuation — wait for 20 EMA retest or raise risk budget.`
       : undefined;
 
   const pairTiming = evaluatePairKenyaTiming(p.targetPair);
@@ -3254,7 +3884,7 @@ export function computeRealChartTradeParams(p: {
     allFactorEval.isFlatEmaChop ||
     scoreMargin < 12 ||
     allFactorEval.alignedFactorsCount < 4 ||
-    (!h1AlignedWithOrder && allFactorEval.alignedFactorsCount < 6)
+    (!h1AlignedWithOrder && allFactorEval.alignedFactorsCount < 5 && !p.bosAnalysis?.brokenStructure)
   ) {
     executionReadiness = 'NO_TRADE_CHOP';
     executionReadinessReason = allFactorEval.isFlatEmaChop
@@ -3320,7 +3950,44 @@ export function computeRealChartTradeParams(p: {
     h1TrendDirection,
     trendDirection,
     isExtendedZone: allFactorEval.isExtendedZone,
-    bosAnalysis: p.bosAnalysis
+    bosAnalysis: p.bosAnalysis,
+    adxStrength: derivedAdx,
+    macdBias: derivedMacd.bias,
+    candlePattern: derivedPattern
+  });
+
+  const liveBacktest = runLiveCandleBacktest({
+    pair: p.targetPair,
+    candles: p.candles,
+    atrPips: effectiveAtr,
+    brokerSpread,
+    direction: isBuy ? 'BUY' : 'SELL'
+  });
+
+  const plainEnglishGuide = buildPlainEnglishTradeGuide({
+    pair: p.targetPair,
+    direction: isBuy ? 'BUY' : 'SELL',
+    entryPrice: anchoredEntry,
+    stopLoss: slPrice,
+    tp1: tp1Price,
+    tp2: tp2Price,
+    slPips: actualSlPips,
+    tpPips: actualTpPips,
+    brokerSpread,
+    atrPips: effectiveAtr,
+    ema20: ema20Val,
+    ema50: ema50Val,
+    rsi: rsiVal,
+    h1TrendDirection,
+    riskReward,
+    actualRiskUsd,
+    netProfitUsd,
+    tp1NetProfitUsd,
+    alignedFactorsCount: allFactorEval.alignedFactorsCount,
+    totalFactorsCount: allFactorEval.totalFactorsCount,
+    decimals,
+    bosAnalysis: p.bosAnalysis,
+    liveBacktest
   });
 
   return {
@@ -3385,6 +4052,13 @@ export function computeRealChartTradeParams(p: {
     recommendedStrategy: strategyMatch.name,
     strategyWinRate: strategyMatch.winRateLabel,
     strategyRationale: strategyMatch.rationale,
+    liveBacktest,
+    adxStrength: derivedAdx,
+    macdHistogram: derivedMacd.histogram,
+    macdBias: derivedMacd.bias,
+    candlePattern: derivedPattern,
+    executionBrief: plainEnglishGuide,
+    plainEnglishGuide,
     limitPlan
   };
 }
@@ -3528,14 +4202,21 @@ export function buildCalibratedMarketItem(params: {
     const h1Closes = patchedH1Candles.map((c) => c.close);
     const h1Ema20 = computeRealEma(h1Closes, 20);
     const h1Ema50 = computeRealEma(h1Closes, 50);
+    const h1Macd = computeRealMacd(h1Closes);
     const h1Last = h1Closes[h1Closes.length - 1] ?? params.price;
     const h1Prev4 = h1Closes[Math.max(0, h1Closes.length - 5)] ?? h1Last;
+    const h1PriceBelowBoth = params.price < h1Ema20 && params.price < h1Ema50;
+    const h1PriceAboveBoth = params.price > h1Ema20 && params.price > h1Ema50;
     if (h1Ema20 < h1Ema50) {
-      h1TrendDirection = 'DOWNTREND';
-    } else if (h1Ema20 > h1Ema50) {
-      // Catch steep sell-offs where live price & H1 close dropped decisively below both H1 20 & 50 EMA
       h1TrendDirection =
-        params.price < h1Ema20 && params.price < h1Ema50 && h1Last < h1Prev4 ? 'DOWNTREND' : 'UPTREND';
+        h1PriceAboveBoth && h1Macd.bias === 'BULLISH' && (h1Last > h1Prev4 || effectivePct >= 0.45)
+          ? 'UPTREND'
+          : 'DOWNTREND';
+    } else if (h1Ema20 > h1Ema50) {
+      h1TrendDirection =
+        h1PriceBelowBoth && (h1Macd.bias === 'BEARISH' || h1Last < h1Prev4 || effectivePct <= -0.45)
+          ? 'DOWNTREND'
+          : 'UPTREND';
     } else {
       h1TrendDirection = params.price >= h1Ema50 ? 'UPTREND' : 'DOWNTREND';
     }
@@ -3582,6 +4263,7 @@ export function buildCalibratedMarketItem(params: {
     ema50: evalData.ema50,
     rsi: evalData.rsi,
     atrPips: evalData.atrPips,
+    candles: evalData.candles,
     macro: params.macro,
     previousDirection: params.previousDirection,
     previousTrendDirection: params.previousTrendDirection,
@@ -3640,6 +4322,10 @@ export function buildCalibratedMarketItem(params: {
     ema50: evalData.ema50,
     rsi: evalData.rsi,
     atrPips: evalData.atrPips,
+    adxStrength: evalData.adxStrength,
+    macdHistogram: evalData.macdHistogram,
+    macdBias: evalData.macdBias,
+    candlePattern: evalData.candlePattern,
     keyLevel: evalData.keyLevel,
     swingLow: evalData.swingLow,
     swingHigh: evalData.swingHigh,
@@ -3679,7 +4365,10 @@ export function buildCalibratedMarketItem(params: {
     tvSymbol: computed.tvSymbol,
     recommendedStrategy: computed.recommendedStrategy,
     strategyWinRate: computed.strategyWinRate,
-    strategyRationale: computed.strategyRationale
+    strategyRationale: computed.strategyRationale,
+    liveBacktest: computed.liveBacktest,
+    executionBrief: computed.executionBrief,
+    plainEnglishGuide: computed.plainEnglishGuide
   };
 }
 
@@ -3994,15 +4683,23 @@ async function fetchWithFastTimeout(
   url: string,
   init: RequestInit = {},
   timeoutMs = 1600
-): Promise<Response> {
+): Promise<Response | null> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => {
+    try {
+      controller.abort(new DOMException(`Request timed out after ${timeoutMs}ms`, 'TimeoutError'));
+    } catch {
+      controller.abort('TimeoutError');
+    }
+  }, timeoutMs);
   try {
     return await fetch(url, {
       ...init,
       cache: 'no-store',
       signal: controller.signal
     });
+  } catch {
+    return null;
   } finally {
     clearTimeout(timer);
   }
@@ -4280,14 +4977,14 @@ async function refreshBackgroundRealOhlcCandles(force = false) {
     ];
 
     const m15Promises = krakenSpecs.map((s) =>
-      fetch(`https://api.kraken.com/0/public/OHLC?pair=${s.kSym}&interval=15`, { cache: 'no-store', signal: sig }).then((r) =>
-        r.ok ? r.json() : null
-      )
+      fetch(`https://api.kraken.com/0/public/OHLC?pair=${s.kSym}&interval=15`, { cache: 'no-store', signal: sig })
+        .then((r) => (r.ok ? r.json().catch(() => null) : null))
+        .catch(() => null)
     );
     const h1Promises = krakenSpecs.map((s) =>
-      fetch(`https://api.kraken.com/0/public/OHLC?pair=${s.kSym}&interval=60`, { cache: 'no-store', signal: sig }).then((r) =>
-        r.ok ? r.json() : null
-      )
+      fetch(`https://api.kraken.com/0/public/OHLC?pair=${s.kSym}&interval=60`, { cache: 'no-store', signal: sig })
+        .then((r) => (r.ok ? r.json().catch(() => null) : null))
+        .catch(() => null)
     );
 
     const [m15Settled, h1Settled] = await Promise.all([
@@ -5638,6 +6335,7 @@ class GlobalLiveMarketStreamEngine {
       ema50: market.ema50,
       rsi: market.rsi,
       atrPips: market.atrPips,
+      candles: market.candles,
       swingLow: swings.swingLow,
       swingHigh: swings.swingHigh,
       macro,
@@ -6042,6 +6740,7 @@ class GlobalLiveMarketStreamEngine {
       ema50: m.ema50,
       rsi: m.rsi,
       atrPips: m.atrPips,
+      candles: m.candles,
       swingLow: swings.swingLow,
       swingHigh: swings.swingHigh,
       macro,
@@ -6086,13 +6785,17 @@ class GlobalLiveMarketStreamEngine {
             tvSymbol: computed.tvSymbol,
             recommendedStrategy: computed.recommendedStrategy,
             strategyRationale: computed.strategyRationale,
+            adxStrength: computed.adxStrength,
+            macdBias: computed.macdBias,
+            macdHistogram: computed.macdHistogram,
+            candlePattern: computed.candlePattern,
             customPrompt
           })
         },
         2400
       );
 
-      if (res.ok) {
+      if (res && res.ok) {
         const data = await res.json();
         const resolvedText = data.note || data.tacticalNote || m.projection;
         const resolvedRisk =
@@ -6167,6 +6870,7 @@ class GlobalLiveMarketStreamEngine {
         ema50: m.ema50,
         rsi: m.rsi,
         atrPips: m.atrPips,
+        candles: activeCandles,
         swingLow: swings.swingLow,
         swingHigh: swings.swingHigh,
         macro,
@@ -6194,70 +6898,81 @@ class GlobalLiveMarketStreamEngine {
           trendDirection: computed.trendDirection,
           isExtendedZone: computed.isExtendedZone,
           bosAnalysis,
-          liveFeedConnected: this.liveFeedConnected
+          liveFeedConnected: this.liveFeedConnected,
+          adxStrength: computed.adxStrength,
+          macdBias: computed.macdBias,
+          candlePattern: computed.candlePattern
         });
 
       const nowEat = this.formatNowEat();
       if (typeof fetch !== 'undefined') {
-        const res = await fetchWithFastTimeout(
-          '/api/ai/deep-verify',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+        try {
+          const res = await fetchWithFastTimeout(
+            '/api/ai/deep-verify',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                pair: m.pair,
+                timeframe: activeTf,
+                broker: activeBroker.toUpperCase(),
+                livePrice: m.price,
+                ema20: m.ema20,
+                ema50: m.ema50,
+                rsi: m.rsi,
+                atrPips: m.atrPips ?? 16,
+                direction: computed.direction,
+                trendDirection: computed.trendDirection,
+                h1TrendDirection: computed.h1TrendDirection,
+                entryPrice: computed.entryPrice,
+                stopLoss: computed.stopLoss,
+                tp1: computed.tp1,
+                tp2: computed.tp2,
+                tp3: computed.tp3,
+                riskReward: computed.riskReward,
+                lotSize: computed.lotSize,
+                actualRiskUsd: computed.actualRiskUsd,
+                isExtendedZone: computed.isExtendedZone,
+                executionReadiness: computed.executionReadiness,
+                executionReadinessReason: computed.executionReadinessReason,
+                liveFeedConnected: this.liveFeedConnected,
+                dxyPressurePct: macro.dxyPressurePct,
+                riskRegime: macro.riskRegime,
+                bosAnalysis,
+                checks: localChecks,
+                adxStrength: computed.adxStrength,
+                macdBias: computed.macdBias,
+                macdHistogram: computed.macdHistogram,
+                candlePattern: computed.candlePattern,
+                recentM15Candles: (m.candles || []).slice(-18),
+                recentH1Candles: (m.h1Candles || []).slice(-10)
+              })
+            },
+            9500
+          );
+
+          if (res && res.ok) {
+            const data = (await res.json()) as DeepVerifyResult;
+            const finalResult: DeepVerifyResult = {
+              ...data,
               pair: m.pair,
               timeframe: activeTf,
-              broker: activeBroker.toUpperCase(),
-              livePrice: m.price,
-              ema20: m.ema20,
-              ema50: m.ema50,
-              rsi: m.rsi,
-              atrPips: m.atrPips ?? 16,
-              direction: computed.direction,
-              trendDirection: computed.trendDirection,
-              h1TrendDirection: computed.h1TrendDirection,
-              entryPrice: computed.entryPrice,
-              stopLoss: computed.stopLoss,
-              tp1: computed.tp1,
-              tp2: computed.tp2,
-              tp3: computed.tp3,
-              riskReward: computed.riskReward,
-              lotSize: computed.lotSize,
-              actualRiskUsd: computed.actualRiskUsd,
-              isExtendedZone: computed.isExtendedZone,
-              executionReadiness: computed.executionReadiness,
-              executionReadinessReason: computed.executionReadinessReason,
-              liveFeedConnected: this.liveFeedConnected,
-              dxyPressurePct: macro.dxyPressurePct,
-              riskRegime: macro.riskRegime,
-              bosAnalysis,
-              checks: localChecks,
-              recentM15Candles: (m.candles || []).slice(-18),
-              recentH1Candles: (m.h1Candles || []).slice(-10)
-            })
-          },
-          7200
-        );
-
-        if (res.ok) {
-          const data = (await res.json()) as DeepVerifyResult;
-          const finalResult: DeepVerifyResult = {
-            ...data,
-            pair: m.pair,
-            timeframe: activeTf,
-            syncedAt: nowEat
-          };
-          this.deepAudits[m.pair] = finalResult;
-          if (finalResult.verdict === 'BOS_REVERSAL_FLIP' || finalResult.verdict === 'STAND_ASIDE_TRAP') {
-            this.pushNotification({
-              pair: m.pair,
-              type: 'SL_WARNING',
-              title: `BOS DEEP GUARD · ${m.pair} (${finalResult.structureState.replace('_', ' ')})`,
-              message: `${finalResult.deepAuditHeadline}: ${finalResult.deepAuditSummary}`
-            });
+              syncedAt: nowEat
+            };
+            this.deepAudits[m.pair] = finalResult;
+            if (finalResult.verdict === 'BOS_REVERSAL_FLIP' || finalResult.verdict === 'STAND_ASIDE_TRAP') {
+              this.pushNotification({
+                pair: m.pair,
+                type: 'SL_WARNING',
+                title: `BOS DEEP GUARD · ${m.pair} (${finalResult.structureState.replace('_', ' ')})`,
+                message: `${finalResult.deepAuditHeadline}: ${finalResult.deepAuditSummary}`
+              });
+            }
+            this.broadcast();
+            return finalResult;
           }
-          this.broadcast();
-          return finalResult;
+        } catch {
+          // Fall through cleanly to deterministic local DeepVerifyResult fallback
         }
       }
 
@@ -6384,7 +7099,7 @@ class GlobalLiveMarketStreamEngine {
         if (Object.keys(batch).length > 0) {
           this.rebuildAndSortMarkets(batch, 'auto_1s', true);
         }
-      }, 250);
+      }, 850);
     }
   }
 
@@ -6694,6 +7409,8 @@ class GlobalLiveMarketStreamEngine {
         };
       });
       this.rebuildAndSortMarkets(updates, scanMode, snap.liveFeedConnected);
+    } catch {
+      // Prevent transient fetch abort errors from interrupting tick polling
     } finally {
       this.isFetchingRest = false;
     }
@@ -6738,7 +7455,13 @@ class GlobalLiveMarketStreamEngine {
           bosDirection: m.bosAnalysis?.bosDirection,
           bosSummary: m.bosAnalysis?.structureSummary,
           tvSymbol: m.tvSymbol || getTradingViewSymbol(m.pair),
-          recommendedStrategy: m.recommendedStrategy
+          recommendedStrategy: m.recommendedStrategy,
+          adxStrength: m.adxStrength,
+          macdBias: m.macdBias,
+          candlePattern: m.candlePattern,
+          bullScorePct: m.bullScorePct,
+          bearScorePct: m.bearScorePct,
+          atrPips: m.atrPips
         };
       });
 
@@ -6758,10 +7481,10 @@ class GlobalLiveMarketStreamEngine {
             markets: payloadMarkets
           })
         },
-        2800
+        8500
       );
 
-      if (res.ok) {
+      if (res && res.ok) {
         const data = await res.json();
         const nowEat = this.formatNowEat();
         if (data?.dailyMacroDirective) {

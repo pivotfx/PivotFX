@@ -55,13 +55,13 @@ export const DownloadLogoModal: React.FC<DownloadLogoModalProps> = ({ isOpen, on
           </div>
           <div>
             <h3 className="text-xl font-bold text-white">PivotFx Institutional Brand Kit</h3>
-            <p className="text-xs text-slate-400">Official Precision Crest — Twin Candlesticks, Fibonacci Reticle &amp; Breakout Vector</p>
+            <p className="text-xs text-slate-400">3D Volumetric 360° Gyroscopic Medallion &amp; Dual-Face Sovereign Vector</p>
           </div>
         </div>
 
         {/* Logo Preview */}
-        <div className="p-6 rounded-2xl bg-[#080C14] border border-slate-800 flex items-center justify-center">
-          <Logo size="lg" />
+        <div className="p-8 rounded-2xl bg-[#080C14] border border-slate-800 flex items-center justify-center">
+          <Logo size="xl" />
         </div>
 
         {/* Action Buttons */}

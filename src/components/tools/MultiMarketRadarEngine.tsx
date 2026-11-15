@@ -19,7 +19,9 @@ import {
   TrendSustainabilityVerdict,
   RiskManagementConfig,
   DeepVerifyResult,
-  positionRiskStore
+  positionRiskStore,
+  getTradingViewSymbol,
+  getTradingViewExternalUrl
 } from '../../utils/liveMarketEngine';
 import { EntryConfirmationController } from './EntryConfirmationController';
 import { LiveInteractiveCandleChart } from './LiveInteractiveCandleChart';
@@ -66,7 +68,8 @@ import {
   BookOpen,
   Volume2,
   VolumeX,
-  Radio
+  Radio,
+  ExternalLink
 } from 'lucide-react';
 
 export type { MarketScanData };
@@ -126,6 +129,9 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
     () => globalLiveStream.getState().activeOrders
   );
   const [inspectedSideByPair, setInspectedSideByPair] = useState<Partial<Record<CurrencyPair, 'AUTO' | 'BUY' | 'SELL'>>>({});
+  const [focusedSubTabByPair, setFocusedSubTabByPair] = useState<
+    Partial<Record<CurrencyPair, 'ORDER' | 'DEEP_AI' | 'THESIS' | 'FACTORS' | 'TV_EA'>>
+  >({});
   const [viewSavedOrderByPair, setViewSavedOrderByPair] = useState<Partial<Record<CurrencyPair, boolean>>>({});
   const [riskConfig, setRiskConfig] = useState<RiskManagementConfig>(() => positionRiskStore.getConfig());
   const [scanBanner, setScanBanner] = useState<string | null>(null);
@@ -633,6 +639,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
             ema50: focusedMarket.ema50,
             rsi: focusedMarket.rsi,
             atrPips: focusedMarket.atrPips,
+            candles: focusedMarket.candles,
             swingLow: focusedSwings.swingLow,
             swingHigh: focusedSwings.swingHigh,
             change24hPct: focusedMarket.change24hPct,
@@ -653,6 +660,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
             ema50: focusedMarket.ema50,
             rsi: focusedMarket.rsi,
             atrPips: focusedMarket.atrPips,
+            candles: focusedMarket.candles,
             swingLow: focusedSwings.swingLow,
             swingHigh: focusedSwings.swingHigh,
             change24hPct: focusedMarket.change24hPct,
@@ -665,7 +673,12 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
           const kenyaTiming = evaluatePairKenyaTiming(focusedMarket.pair);
           const isBuy = computed.direction === 'BUY';
           const pctPositive = focusedMarket.change24hPct >= 0;
-          const rankNum = markets.findIndex((x) => x.pair === focusedMarket.pair) + 1;
+          const focusedIdx = Math.max(0, markets.findIndex((x) => x.pair === focusedMarket.pair));
+          const rankNum = focusedIdx + 1;
+          const prevCardMarket = markets[(focusedIdx - 1 + markets.length) % Math.max(1, markets.length)];
+          const nextCardMarket = markets[(focusedIdx + 1) % Math.max(1, markets.length)];
+          const activeSubTab = focusedSubTabByPair[focusedMarket.pair] || 'ORDER';
+          const execBrief = computed.executionBrief || computed.plainEnglishGuide;
 
           const loadedOrder = activeOrders[focusedMarket.pair] || null;
           const loadedOrderMetrics = loadedOrder
@@ -683,12 +696,17 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
             loadedOrder && (!isOrderCompletedOrStale || viewSavedOrderByPair[focusedMarket.pair])
           );
           const displayOrder = showSavedOrder ? loadedOrder : null;
+          const shownEntry = displayOrder ? displayOrder.entryPrice : computed.entryPrice;
+          const shownSl = displayOrder ? displayOrder.stopLoss : computed.stopLoss;
+          const shownTp1 = displayOrder ? displayOrder.tp1 : computed.tp1;
+          const shownTp2 = displayOrder ? displayOrder.tp2 : computed.tp2;
+          const isHighWinRateSetup = computed.alignedFactorsCount >= 7 && !computed.isExtendedZone;
 
           const eaMqlCode = `// --- PIVOTFX LIVE AUTO-SYNC EA CONFIG ---
 // Broker: ${selectedBroker.toUpperCase()} | Synced: ${lastScannedTime} | Rank #${rankNum}
 // Symbol: ${computed.brokerSymbol} (${focusedMarket.pair} · ${activeTf})
 // Direction: ${computed.orderType} | Trend: ${computed.trendProjectionText} | 24h Move: ${pctPositive ? '+' : ''}${focusedMarket.change24hPct}%
-// Live Indicators: 20 EMA = ${focusedMarket.ema20} | 50 EMA = ${focusedMarket.ema50} | RSI = ${focusedMarket.rsi}
+// Live Indicators: 20 EMA = ${focusedMarket.ema20} | 50 EMA = ${focusedMarket.ema50} | RSI = ${focusedMarket.rsi} | ADX = ${computed.adxStrength ?? 21} | MACD = ${computed.macdBias ?? 'FLAT'}
 // Risk Management: ${computed.lotSize.toFixed(2)} Lots ($${computed.actualRiskUsd.toFixed(2)} / ${Math.round(computed.actualRiskUsd * 130)} KES Max Risk · ${riskConfig.riskPct}% of $${riskConfig.accountBalanceUsd})
 
 input double   LotSize             = ${computed.lotSize.toFixed(2)};
@@ -699,58 +717,129 @@ input double   TakeProfit_2        = ${computed.tp2}; // 4H-12H Session Target (
 input double   TakeProfit_3_48H    = ${computed.tp3}; // 12H-48H Extended Swing (+${computed.tp3Pips} pips / +$${computed.netProfit48hUsd.toFixed(2)})
 input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
 
+          const subTabItems: Array<{
+            id: 'ORDER' | 'DEEP_AI' | 'THESIS' | 'FACTORS' | 'TV_EA';
+            label: string;
+          }> = [
+            { id: 'ORDER', label: 'Live Order & Sizing' },
+            { id: 'DEEP_AI', label: 'Deep AI & BOS' },
+            { id: 'THESIS', label: 'Backtest & Brief' },
+            { id: 'FACTORS', label: `Quant Matrix (${computed.totalFactorsCount})` },
+            { id: 'TV_EA', label: 'TradingView & EA' }
+          ];
+
           return (
-            <div className="space-y-5 font-mono tabular-nums">
-              {/* Top Independent Card Action Toolbar + Back to All Cards */}
-              <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-4 font-mono tabular-nums">
+              {/* Top Independent Card Action Toolbar + Return / Prev / Next Card */}
+              <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex flex-wrap items-center justify-between gap-2.5">
                 <div className="flex items-center gap-2 flex-wrap">
                   <button
                     type="button"
                     onClick={handleClosePairCard}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] hover:text-white border border-slate-700 text-xs font-bold transition whitespace-nowrap"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] hover:text-white border border-slate-700 text-xs font-bold transition whitespace-nowrap shrink-0"
                   >
-                    <ArrowLeft className="w-4 h-4" />
-                    <span>Back to All {markets.length} Cards (Top % → Least)</span>
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>All {markets.length} Cards</span>
                   </button>
+
+                  {markets.length > 1 && (
+                    <div className="inline-flex items-center rounded-xl bg-slate-950 border border-slate-800 p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenPairCard(prevCardMarket.pair)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-slate-300 hover:text-white hover:bg-slate-800 transition whitespace-nowrap shrink-0"
+                        title={`Previous card: ${prevCardMarket.pair}`}
+                      >
+                        <ArrowLeft className="w-3 h-3" />
+                        <span>{prevCardMarket.pair}</span>
+                      </button>
+                      <span className="px-2 text-[10px] font-bold text-slate-500 whitespace-nowrap">
+                        {rankNum}/{markets.length}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenPairCard(nextCardMarket.pair)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-slate-300 hover:text-white hover:bg-slate-800 transition whitespace-nowrap shrink-0"
+                        title={`Next card: ${nextCardMarket.pair}`}
+                      >
+                        <span>{nextCardMarket.pair}</span>
+                        <ArrowRight className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
 
                   <button
                     type="button"
                     onClick={() => handleRescanFocusedCard(focusedMarket.pair, activeTf)}
                     disabled={isRescanningCard}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-[#00C261]/20 hover:bg-[#00C261] text-[#00C261] hover:text-black border border-[#00C261]/50 text-xs font-black transition whitespace-nowrap"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#00C261]/20 hover:bg-[#00C261] text-[#00C261] hover:text-black border border-[#00C261]/50 text-xs font-black transition whitespace-nowrap shrink-0"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isRescanningCard ? 'animate-spin' : ''}`} />
-                    <span>Rescan {focusedMarket.pair}</span>
+                    <span>Rescan</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => handleReanalyseFocusedCardAi(focusedMarket.pair, activeTf)}
                     disabled={isReanalysingCardAi}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl btn-gold text-black text-xs font-black transition whitespace-nowrap"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl btn-gold text-black text-xs font-black transition whitespace-nowrap shrink-0"
                   >
                     <Sparkles className={`w-3.5 h-3.5 ${isReanalysingCardAi ? 'animate-spin' : ''}`} />
-                    <span>Reanalyse {focusedMarket.pair} with Super AI</span>
+                    <span>Deep AI Audit</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => globalLiveStream.requestOpenScannerView('trade_log', focusedMarket.pair)}
-                    className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition whitespace-nowrap"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition whitespace-nowrap shrink-0"
                   >
                     <ClipboardList className="w-3.5 h-3.5" />
                     <span>Trade Log</span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onOpenTradingViewForPair(focusedMarket.pair, activeTf, focusedMarket.price)
+                    }
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-950/70 hover:bg-sky-500 text-sky-300 hover:text-black border border-sky-400/50 text-xs font-black transition whitespace-nowrap shrink-0"
+                    title={`Open live TradingView & synchronized Order Ticket (${computed.tvSymbol})`}
+                  >
+                    <BarChart3 className="w-3.5 h-3.5" />
+                    <span>TradingView ({computed.tvSymbol})</span>
+                  </button>
+
+                  <a
+                    href={getTradingViewExternalUrl(focusedMarket.pair, activeTf)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl bg-slate-950 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black border border-[#D4AF37]/40 text-xs font-black transition whitespace-nowrap shrink-0"
+                    title={`Launch ${computed.tvSymbol} directly on TradingView.com`}
+                  >
+                    <span>TV.com</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onSelectMarketForAnalysis({ ...focusedMarket, recommendedTf: activeTf }, 'deep_ai')
+                    }
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-white border border-slate-700 text-xs font-bold transition whitespace-nowrap shrink-0"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-[#D4AF37]" />
+                    <span>Order Ticket</span>
+                  </button>
                 </div>
 
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[11px] text-slate-400 mr-1">Top % Jump:</span>
+                  <span className="text-[11px] text-slate-400 mr-0.5">Top Movers:</span>
                   {markets.slice(0, 4).map((mItem, idx) => (
                     <button
                       key={mItem.pair}
                       type="button"
                       onClick={() => handleOpenPairCard(mItem.pair)}
-                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap ${
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition whitespace-nowrap shrink-0 ${
                         mItem.pair === focusedMarket.pair
                           ? 'bg-[#D4AF37] text-black font-black'
                           : 'bg-slate-950 text-slate-300 hover:text-white border border-slate-800'
@@ -762,17 +851,17 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                 </div>
               </div>
 
-              {/* Main Single-Market Live Chart & Execution Card */}
-              <div className="rounded-3xl p-5 sm:p-6 bg-slate-950 border-2 border-[#D4AF37] shadow-2xl space-y-5">
-                {/* Market Title, Rank, Direction, % Move & Timeframe Controls */}
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              {/* Main Independent Market Card */}
+              <div className="rounded-3xl p-4 sm:p-6 bg-slate-950 border-2 border-[#D4AF37]/80 shadow-2xl space-y-4">
+                {/* Compact Header: Identity, Live Quote, Verdict & Controls */}
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-800 pb-4">
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-2 flex-wrap text-xs">
-                      <span className="px-2.5 py-1 rounded-lg bg-[#D4AF37] text-black font-black">
-                        RANK #{rankNum} BY %
+                      <span className="px-2.5 py-0.5 rounded-lg bg-[#D4AF37] text-black font-black">
+                        RANK #{rankNum}
                       </span>
                       <span
-                        className={`px-2.5 py-1 rounded-lg font-black ${
+                        className={`px-2.5 py-0.5 rounded-lg font-black ${
                           isBuy
                             ? 'bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/50'
                             : 'bg-red-500/20 text-red-300 border border-red-500/50'
@@ -781,11 +870,14 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                         {computed.orderType}
                       </span>
                       <span className="text-[#00C261] font-black">{computed.confidence}% AI Confidence</span>
+                      <span className="text-slate-500">·</span>
+                      <span className="text-cyan-300 font-bold">{computed.recommendedStrategy}</span>
                     </div>
 
                     <div className="flex items-baseline gap-3 flex-wrap">
                       <h2 className="text-2xl sm:text-3xl font-black text-white">
-                        {focusedMarket.pair} ({computed.brokerSymbol})
+                        {focusedMarket.pair}{' '}
+                        <span className="text-base text-slate-400 font-bold">({computed.brokerSymbol})</span>
                       </h2>
                       <span className="text-xl font-black text-[#D4AF37]">@ {focusedMarket.price}</span>
                       <span
@@ -797,9 +889,41 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                         {pctPositive ? `+${focusedMarket.change24hPct.toFixed(2)}%` : `${focusedMarket.change24hPct.toFixed(2)}%`}
                       </span>
                     </div>
+
+                    <div className="flex items-center gap-2 flex-wrap text-[11px] text-slate-300 font-sans">
+                      <span
+                        className={`font-bold ${
+                          kenyaTiming.windowStatusCode === 'OPEN'
+                            ? 'text-[#00C261]'
+                            : kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                            ? 'text-amber-300'
+                            : 'text-red-400'
+                        }`}
+                      >
+                        {kenyaTiming.currentWindowName} ({kenyaTiming.countdownFormatted})
+                      </span>
+                      <span aria-hidden="true" className="text-slate-600">·</span>
+                      <span>H1 {computed.h1TrendDirection}</span>
+                      <span aria-hidden="true" className="text-slate-600">·</span>
+                      <span>ADX {computed.adxStrength ?? 21}</span>
+                      <span aria-hidden="true" className="text-slate-600">·</span>
+                      <span>MACD {computed.macdBias ?? 'FLAT'}</span>
+                      {kenyaTiming.windowStatusCode === 'CLOSED_WAIT' && (
+                        <>
+                          <span aria-hidden="true" className="text-slate-600">·</span>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenPairCard('BTC/USD')}
+                            className="text-[#00C261] hover:underline font-bold"
+                          >
+                            Switch 24/7 BTC/USD
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
 
-                  {/* Timeframe Selector Bar + Inspect Other Side (BUY vs SELL) */}
+                  {/* Timeframe Selector & Inspect Side Toggle */}
                   <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-wrap">
                     <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
                       {(['AUTO', 'BUY', 'SELL'] as const).map((sideOpt) => (
@@ -812,7 +936,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                               [focusedMarket.pair]: sideOpt
                             }))
                           }
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-black transition whitespace-nowrap ${
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-black transition whitespace-nowrap shrink-0 ${
                             selectedSideMode === sideOpt
                               ? sideOpt === 'BUY'
                                 ? 'bg-[#00C261] text-black'
@@ -833,7 +957,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                           key={tf}
                           type="button"
                           onClick={() => globalLiveStream.setPairTimeframe(focusedMarket.pair, tf)}
-                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition ${
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap shrink-0 ${
                             activeTf === tf
                               ? 'bg-[#D4AF37] text-black font-black'
                               : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
@@ -846,107 +970,6 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                   </div>
                 </div>
 
-                {/* GO-AHEAD ASSURANCE, INSTANT SL/TP COPY & LIVE LOADED ORDER TRACKER */}
-                <ActiveMarketOrderPanel
-                  mode="full"
-                  pair={focusedMarket.pair}
-                  direction={computed.direction}
-                  timeframe={activeTf}
-                  broker={selectedBroker}
-                />
-
-                {/* COLOR-CODED MARKET OPEN / COUNTDOWN & LOCKED TREND PROJECTION BANNER */}
-                <div
-                  className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs ${
-                    kenyaTiming.windowStatusCode === 'OPEN'
-                      ? 'bg-emerald-950/45 border-[#00C261]/70 text-emerald-100'
-                      : kenyaTiming.windowStatusCode === 'OPENING_SOON'
-                      ? 'bg-amber-950/45 border-amber-400/70 text-amber-100'
-                      : 'bg-red-950/55 border-red-500/80 text-red-100'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Clock className="w-4 h-4 shrink-0" />
-                    <strong className="text-white">{kenyaTiming.bannerHeadline}</strong>
-                    <span className="text-slate-300">· Timeframe: {activeTf}</span>
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap font-black">
-                    <span
-                      className={
-                        computed.trendDirection === 'UPTREND'
-                          ? 'text-[#00C261]'
-                          : computed.trendDirection === 'DOWNTREND'
-                          ? 'text-red-300'
-                          : 'text-amber-300'
-                      }
-                    >
-                      {computed.trendProjectionText}
-                    </span>
-                  </div>
-                </div>
-
-                {/* WHAT TO ORDER & NET TRAJECTORY PROFIT EXPECTANCY CARD */}
-                <div
-                  className={`p-4 rounded-2xl border flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs ${
-                    computed.direction === 'BUY'
-                      ? 'bg-emerald-950/25 border-[#00C261]/50'
-                      : 'bg-red-950/25 border-red-500/50'
-                  }`}
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span
-                        className={`px-2.5 py-0.5 rounded-lg font-black text-[11px] ${
-                          computed.direction === 'BUY'
-                            ? 'bg-[#00C261] text-black'
-                            : 'bg-red-500 text-white'
-                        }`}
-                      >
-                        {selectedSideMode === 'AUTO'
-                          ? `AI PRIMARY ORDER: PLACE ${computed.direction} (${computed.orderType})`
-                          : `CHOSEN SIDE ANALYSIS (${selectedSideMode}): ${computed.orderType}`}
-                      </span>
-                      <span className="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700 text-[#D4AF37] font-bold text-[10px]">
-                        H1 MACRO LOCK: {computed.h1TrendDirection} · Anti-Whipsaw Active
-                      </span>
-                      <span className="px-2 py-0.5 rounded-lg bg-slate-900 border border-cyan-500/40 text-cyan-300 font-bold text-[10px]">
-                        Strategy: {computed.recommendedStrategy} ({computed.tvSymbol})
-                      </span>
-                    </div>
-                    <p className="text-slate-200 font-bold leading-snug">
-                      {computed.profitOutlookText}
-                    </p>
-                    {computed.isExtendedZone && computed.entryTimingWarning && (
-                      <p className="text-amber-300 font-bold text-[11px] bg-amber-950/50 border border-amber-500/40 px-2.5 py-1.5 rounded-lg">
-                        {computed.entryTimingWarning}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 shrink-0 text-center">
-                    <div className="px-3 py-2 rounded-xl bg-slate-950/90 border border-emerald-500/35">
-                      <span className="text-[10px] text-emerald-300 block">12H TP2 Net Profit</span>
-                      <strong className="text-sm text-[#00C261]">
-                        +${computed.netProfitUsd.toFixed(2)} (+{computed.netProfitKes} KES)
-                      </strong>
-                    </div>
-                    <div className="px-3 py-2 rounded-xl bg-slate-950/90 border border-cyan-500/35">
-                      <span className="text-[10px] text-cyan-300 block">48H Extended TP3</span>
-                      <strong className="text-sm text-cyan-300">
-                        +${computed.netProfit48hUsd.toFixed(2)} (+{computed.netProfit48hKes} KES)
-                      </strong>
-                    </div>
-                    <div className="px-3 py-2 rounded-xl bg-slate-950/90 border border-[#D4AF37]/35">
-                      <span className="text-[10px] text-[#D4AF37] block">
-                        {computed.lotSize.toFixed(2)} Lot Risk ({riskConfig.riskPct}%)
-                      </span>
-                      <strong className="text-sm text-[#D4AF37]">
-                        ${computed.actualRiskUsd.toFixed(2)}
-                      </strong>
-                    </div>
-                  </div>
-                </div>
-
                 {/* INTERACTIVE LIVE CANDLESTICK CHART */}
                 <LiveInteractiveCandleChart
                   pair={focusedMarket.pair}
@@ -955,10 +978,10 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                   livePrice={focusedMarket.price}
                   ema20={focusedMarket.ema20}
                   ema50={focusedMarket.ema50}
-                  entryPrice={displayOrder ? displayOrder.entryPrice : computed.entryPrice}
-                  stopLoss={displayOrder ? displayOrder.stopLoss : computed.stopLoss}
-                  tp1={displayOrder ? displayOrder.tp1 : computed.tp1}
-                  tp2={displayOrder ? displayOrder.tp2 : computed.tp2}
+                  entryPrice={shownEntry}
+                  stopLoss={shownSl}
+                  tp1={shownTp1}
+                  tp2={shownTp2}
                   advisoryEntryPrice={computed.advisoryEntryPrice}
                   direction={displayOrder ? displayOrder.direction : computed.direction}
                   change24hPct={focusedMarket.change24hPct}
@@ -974,525 +997,626 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                   onResetToLiveStream={() => globalLiveStream.unlockPairToLiveStream(focusedMarket.pair)}
                 />
 
-                {/* ZERO-MISTAKE DEEP AI & BOS/CHOCH STRUCTURE VERIFICATION */}
-                <DeepScanVerificationPanel
-                  pair={focusedMarket.pair}
-                  timeframe={activeTf}
-                  computed={computed}
-                  deepAudit={deepAudits[focusedMarket.pair]}
-                  isVerifying={Boolean(isDeepVerifyingPair[focusedMarket.pair])}
-                  onRunDeepVerify={() =>
-                    void globalLiveStream.verifyMarketDeepScan(
-                      focusedMarket.pair,
-                      activeTf,
-                      selectedBroker,
-                      selectedSideMode === 'AUTO' ? undefined : selectedSideMode
-                    )
-                  }
-                />
-
-                {/* DYNAMIC POSITION SIZE & SL/TP RISK CALCULATOR */}
-                <DynamicPositionSizeCalculator
-                  pair={focusedMarket.pair}
-                  computed={computed}
-                  lockedOrder={displayOrder}
-                />
-
-                {/* 5-CARD AUTO-SYNCED EXECUTION NUMBERS ROW WITH DIRECT 1-CLICK SL / TP COPY */}
-                {(() => {
-                  const lockedOrder = displayOrder;
-                  const shownEntry = lockedOrder ? lockedOrder.entryPrice : computed.entryPrice;
-                  const shownSl = lockedOrder ? lockedOrder.stopLoss : computed.stopLoss;
-                  const shownTp1 = lockedOrder ? lockedOrder.tp1 : computed.tp1;
-                  const shownTp2 = lockedOrder ? lockedOrder.tp2 : computed.tp2;
-                  const isHighWinRateSetup = computed.alignedFactorsCount >= 6 && !computed.isExtendedZone;
-
-                  return (
-                    <div className="space-y-3">
-                      {/* Institutional Win-Rate Gate & Quick Full Ticket Copy Bar */}
-                      <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span
-                            className={`px-3 py-1 rounded-lg font-black text-xs flex items-center gap-1.5 ${
-                              isHighWinRateSetup
-                                ? 'bg-[#00C261] text-black'
-                                : 'bg-[#D4AF37] text-black'
-                            }`}
-                          >
-                            <Shield className="w-3.5 h-3.5" />
-                            <span>
-                              {isHighWinRateSetup
-                                ? `ALIGNED 1H+M15 SETUP (${computed.alignedFactorsCount}/${computed.totalFactorsCount} FACTORS)`
-                                : 'SELECTIVE SETUP (WAIT CONFIRMATION)'}
-                            </span>
-                          </span>
-                          <span className="text-cyan-300 font-bold">
-                            {computed.alignedFactorsCount}/{computed.totalFactorsCount} Factors Aligned
-                          </span>
-                          <span className="text-slate-400">·</span>
-                          <span className="text-emerald-400 font-bold flex items-center gap-1">
-                            <Zap className="w-3 h-3" />
-                            <span>Sub-Second MT4/MT5 Tick Sync</span>
-                          </span>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const fullTicket = `${computed.brokerSymbol} ${computed.orderType} | Price: ${shownEntry} | SL: ${shownSl} | TP1: ${shownTp1} | TP2: ${shownTp2} | Vol: ${computed.lotSize.toFixed(2)} Lots ($${computed.actualRiskUsd.toFixed(2)} Risk) | Broker: ${selectedBroker.toUpperCase()}`;
-                            handleQuickCopyValue(fullTicket, `full-ticket-${focusedMarket.pair}`);
-                          }}
-                          className="px-4 py-2 rounded-xl bg-[#D4AF37] hover:bg-amber-400 text-black font-black text-xs flex items-center gap-1.5 transition whitespace-nowrap shadow-md self-start md:self-auto"
-                        >
-                          {copiedCardPair === `full-ticket-${focusedMarket.pair}` ? (
-                            <Check className="w-3.5 h-3.5" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5" />
-                          )}
-                          <span>
-                            {copiedCardPair === `full-ticket-${focusedMarket.pair}`
-                              ? 'Copied Full Ticket ✓'
-                              : 'Copy Complete MT4/MT5 Order'}
-                          </span>
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
-                        <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col justify-between gap-1.5">
-                        <div>
-                          <span className="text-[10px] text-slate-400 block">
-                            {lockedOrder ? 'Order Entry' : 'Live Entry'}
-                          </span>
-                          <strong className="text-base text-white">{shownEntry}</strong>
-                          <span className="text-[10px] text-[#00C261] block">
-                            {lockedOrder ? `Locked (${lockedOrder.direction})` : `${computed.lotSize.toFixed(2)} Lots Auto-Synced`}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleQuickCopyValue(shownEntry, `focus-entry-${focusedMarket.pair}`)}
-                          className="w-full py-1 px-2 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-800 text-[10px] font-bold flex items-center justify-center gap-1 transition"
-                        >
-                          {copiedCardPair === `focus-entry-${focusedMarket.pair}` ? (
-                            <Check className="w-3 h-3 text-[#00C261]" />
-                          ) : (
-                            <Copy className="w-3 h-3 text-[#D4AF37]" />
-                          )}
-                          <span>
-                            {copiedCardPair === `focus-entry-${focusedMarket.pair}` ? 'Entry Copied ✓' : 'Copy Entry'}
-                          </span>
-                        </button>
-                      </div>
-
-                      <div className="p-3.5 rounded-2xl bg-red-950/35 border border-red-500/40 flex flex-col justify-between gap-1.5">
-                        <div>
-                          <span className="text-[10px] text-red-300 block">
-                            {lockedOrder ? 'Protected SL' : `Stop Loss (-${computed.slPips}p)`}
-                          </span>
-                          <strong className="text-base text-red-400">{shownSl}</strong>
-                          <span className="text-[10px] text-red-300 block">
-                            {lockedOrder
-                              ? `SL Updates: ${lockedOrder.slUpdatesCount}`
-                              : `$${computed.actualRiskUsd.toFixed(2)} Max Risk (${computed.lotSize.toFixed(2)} Lot)`}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleQuickCopyValue(shownSl, `focus-sl-${focusedMarket.pair}`)}
-                          className="w-full py-1 px-2 rounded-lg bg-slate-950 hover:bg-red-900/60 text-red-200 border border-red-500/40 text-[10px] font-black flex items-center justify-center gap-1 transition"
-                        >
-                          {copiedCardPair === `focus-sl-${focusedMarket.pair}` ? (
-                            <Check className="w-3 h-3 text-[#00C261]" />
-                          ) : (
-                            <Copy className="w-3 h-3" />
-                          )}
-                          <span>
-                            {copiedCardPair === `focus-sl-${focusedMarket.pair}` ? 'SL Copied ✓' : 'Copy SL'}
-                          </span>
-                        </button>
-                      </div>
-
-                      <div className="p-3.5 rounded-2xl bg-cyan-950/35 border border-cyan-500/40 flex flex-col justify-between gap-1.5">
-                        <div>
-                          <span className="text-[10px] text-cyan-300 block">TP1 (50% Scale-Out)</span>
-                          <strong className="text-base text-cyan-300">{shownTp1}</strong>
-                          <span className="text-[10px] text-slate-400 block">Move SL to Breakeven</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleQuickCopyValue(shownTp1, `focus-tp1-${focusedMarket.pair}`)}
-                          className="w-full py-1 px-2 rounded-lg bg-slate-950 hover:bg-cyan-900/60 text-cyan-200 border border-cyan-500/40 text-[10px] font-bold flex items-center justify-center gap-1 transition"
-                        >
-                          {copiedCardPair === `focus-tp1-${focusedMarket.pair}` ? (
-                            <Check className="w-3 h-3 text-[#00C261]" />
-                          ) : (
-                            <Copy className="w-3 h-3" />
-                          )}
-                          <span>
-                            {copiedCardPair === `focus-tp1-${focusedMarket.pair}` ? 'TP1 Copied ✓' : 'Copy TP1'}
-                          </span>
-                        </button>
-                      </div>
-
-                      <div className="p-3.5 rounded-2xl bg-emerald-950/35 border border-emerald-500/40 flex flex-col justify-between gap-1.5">
-                        <div>
-                          <span className="text-[10px] text-emerald-300 block">
-                            {lockedOrder ? 'Active TP2 Target' : `Final TP2 (+${computed.tpPips}p)`}
-                          </span>
-                          <strong className="text-base text-[#00C261]">{shownTp2}</strong>
-                          <span className="text-[10px] text-emerald-300 block">R:R {computed.riskReward}</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleQuickCopyValue(shownTp2, `focus-tp2-${focusedMarket.pair}`)}
-                          className="w-full py-1 px-2 rounded-lg bg-slate-950 hover:bg-emerald-900/60 text-emerald-200 border border-emerald-500/40 text-[10px] font-black flex items-center justify-center gap-1 transition"
-                        >
-                          {copiedCardPair === `focus-tp2-${focusedMarket.pair}` ? (
-                            <Check className="w-3 h-3 text-[#00C261]" />
-                          ) : (
-                            <Copy className="w-3 h-3" />
-                          )}
-                          <span>
-                            {copiedCardPair === `focus-tp2-${focusedMarket.pair}` ? 'TP2 Copied ✓' : 'Copy TP2'}
-                          </span>
-                        </button>
-                      </div>
-
-                      <div
-                        className={`p-3.5 rounded-2xl border flex flex-col justify-between ${
-                          kenyaTiming.windowStatusCode === 'OPEN'
-                            ? 'bg-emerald-950/30 border-[#00C261]/50'
-                            : kenyaTiming.windowStatusCode === 'OPENING_SOON'
-                            ? 'bg-amber-950/30 border-amber-400/50'
-                            : 'bg-red-950/30 border-red-500/50'
+                {/* CLEAN 1-ROW KEY EXECUTION LEVELS STRIP */}
+                <div className="space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className={`px-2.5 py-1 rounded-lg font-black text-[11px] flex items-center gap-1.5 ${
+                          isHighWinRateSetup ? 'bg-[#00C261] text-black' : 'bg-[#D4AF37] text-black'
                         }`}
                       >
-                        <span
-                          className={`text-[10px] block font-bold ${
-                            kenyaTiming.windowStatusCode === 'OPEN'
-                              ? 'text-[#00C261]'
-                              : kenyaTiming.windowStatusCode === 'OPENING_SOON'
-                              ? 'text-amber-300'
-                              : 'text-red-300'
-                          }`}
-                        >
-                          {kenyaTiming.windowStatusCode === 'OPEN'
-                            ? 'MARKET OPEN · CLOSES IN'
-                            : kenyaTiming.windowStatusCode === 'OPENING_SOON'
-                            ? 'TO OPEN · OPENS IN'
-                            : 'CLOSED · OPENS IN'}
-                        </span>
-                        <strong className="text-sm text-white block">{kenyaTiming.countdownFormatted}</strong>
-                        <span className="text-[10px] text-slate-300 block truncate">{kenyaTiming.currentWindowName}</span>
-                      </div>
-                    </div>
-
-                    {/* ADVANCED ENTRY CONFIRMATION & TRAJECTORY SUSTAINABILITY STATE CONTROLLER */}
-                    <div className="pt-2 border-t border-slate-800/80">
-                      <EntryConfirmationController
-                        pair={focusedMarket.pair}
-                        computed={computed}
-                        kenyaTiming={kenyaTiming}
-                        livePrice={focusedMarket.price}
-                        timeframe={activeTf}
-                        lockedOrder={loadedOrder}
-                        showSavedOrder={showSavedOrder}
-                        onToggleSavedOrder={() =>
-                          setViewSavedOrderByPair((prev) => ({
-                            ...prev,
-                            [focusedMarket.pair]: !showSavedOrder
-                          }))
-                        }
-                        ema20={focusedMarket.ema20}
-                        ema50={focusedMarket.ema50}
-                        rsi={focusedMarket.rsi}
-                        variant="focused"
-                      />
-                    </div>
-                    </div>
-                  );
-                })()}
-
-                {/* REAL-TIME SUPER AI LIVE TACTICAL NOTES PANEL */}
-                {(() => {
-                  const aiNote = superAiNotes[focusedMarket.pair];
-                  return (
-                    <div className="p-4 rounded-2xl bg-slate-900 border border-[#D4AF37]/40 space-y-2 text-xs">
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <div className="flex items-center gap-2 text-[#D4AF37] font-bold">
-                          <Sparkles className="w-4 h-4 shrink-0" />
-                          <span>
-                            {aiNote?.headline || `Super AI Live Note · ${focusedMarket.pair} (${activeTf})`}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                          <span>
-                            {aiNote
-                              ? `${aiNote.source === 'gemini-4-hydrogen' || aiNote.source === 'gemini-3.8-flash' ? 'Super AI Live' : 'Quant Stream'} · ${aiNote.syncedAt}`
-                              : `Synced · ${lastScannedTime}`}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleReanalyseFocusedCardAi(focusedMarket.pair, activeTf)}
-                            className="px-2.5 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 text-[#D4AF37] border border-slate-700 font-bold transition whitespace-nowrap"
-                          >
-                            Refresh AI Note
-                          </button>
-                        </div>
-                      </div>
-                      <p className="text-slate-200 leading-relaxed">
-                        {aiNote?.note || focusedMarket.projection}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-300 pt-1">
+                        <Shield className="w-3.5 h-3.5" />
                         <span>
-                          Invalidation:{' '}
-                          <strong className="text-red-300">
-                            {aiNote?.invalidationNote || `Close beyond SL ${computed.stopLoss}`}
-                          </strong>
+                          {computed.alignedFactorsCount}/{computed.totalFactorsCount} Factors Aligned · R:R {computed.riskReward}
                         </span>
-                        <span aria-hidden="true">·</span>
-                        <span>
-                          Catalyst Watch:{' '}
-                          <strong className="text-cyan-300">
-                            {aiNote?.catalystWatch || `${kenyaTiming.currentWindowName} · DXY ${macroContext.dxyPressurePct >= 0 ? `+${macroContext.dxyPressurePct}%` : `${macroContext.dxyPressurePct}%`}`}
-                          </strong>
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Opposite Side Quick Comparison + Human Co-Pilot Verification */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 text-xs">
-                  <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-3">
-                    <div>
-                      <span className="text-[10px] text-slate-400 block uppercase font-bold">
-                        Opposite Side Reference ({oppositeSide} BY MARKET):
                       </span>
-                      <span className="text-slate-200 font-bold">
-                        Entry {oppositeComputed.entryPrice} · SL{' '}
-                        <strong className="text-red-400">{oppositeComputed.stopLoss}</strong> · TP2{' '}
-                        <strong className="text-[#00C261]">{oppositeComputed.tp2}</strong>
+                      <span className="text-slate-300 font-sans text-xs">
+                        12H Est: <strong className="text-[#00C261]">+${computed.netProfitUsd.toFixed(2)}</strong> ({computed.lotSize.toFixed(2)} Lots · ${computed.actualRiskUsd.toFixed(2)} risk)
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setInspectedSideByPair((prev) => ({
-                          ...prev,
-                          [focusedMarket.pair]: oppositeSide
-                        }))
-                      }
-                      className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] border border-slate-700 text-[11px] font-black shrink-0 transition whitespace-nowrap"
-                    >
-                      Switch to {oppositeSide}
-                    </button>
-                  </div>
 
-                  <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-start gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-[#00C261] shrink-0 mt-0.5" />
-                    <span className="text-slate-200 leading-snug">{computed.humanCheckNote}</span>
-                  </div>
-                </div>
-
-                {/* Multi-Horizon Longer Institutional Trajectory + Technical Indicators */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 text-xs">
-                  <div className="lg:col-span-8 p-4 rounded-2xl bg-slate-900/75 border border-[#D4AF37]/40 space-y-3">
-                    <div className="flex items-center justify-between text-[#D4AF37] font-bold flex-wrap gap-1">
-                      <span className="flex items-center gap-1.5">
-                        <Target className="w-4 h-4" />
-                        <span>Longer 1H–48H {computed.direction} Trajectory &amp; Factor Projection</span>
-                      </span>
-                      <span className="text-emerald-400">Spread ~{computed.brokerSpread}p · 48H TP3: {computed.tp3}</span>
-                    </div>
-                    <p className="text-slate-200 leading-relaxed">{computed.trajectory}</p>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-1">
-                      {computed.trajectoryHorizons.map((step) => (
-                        <div
-                          key={step.horizon}
-                          className="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1"
-                        >
-                          <span className="text-[10px] text-[#D4AF37] font-black block">{step.horizon}</span>
-                          <div className="text-sm font-black text-white">
-                            @ {step.targetPrice}{' '}
-                            <span className="text-[#00C261] text-xs">
-                              ({isBuy ? `+${step.targetPips}p` : `-${step.targetPips}p`})
-                            </span>
-                          </div>
-                          <div className="text-[10px] text-cyan-300 font-bold">
-                            Est. Net: +${step.netProfitUsd.toFixed(2)} (+{step.netProfitKes} KES)
-                          </div>
-                          <p className="text-[10px] text-slate-300 leading-snug">{step.driverSummary}</p>
-                        </div>
-                      ))}
-                    </div>
-
-                    <p className="text-[11px] text-cyan-300">
-                      {kenyaTiming.statusLabel}: {kenyaTiming.reasonText}
-                    </p>
-                  </div>
-
-                  <div className="lg:col-span-4 p-4 rounded-2xl bg-slate-900/70 border border-slate-800 grid grid-cols-2 gap-2.5 content-start">
-                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
-                      <span className="text-[10px] text-slate-400 block">20 EMA (Cyan)</span>
-                      <strong className="text-cyan-300">{focusedMarket.ema20}</strong>
-                    </div>
-                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
-                      <span className="text-[10px] text-slate-400 block">50 EMA (Amber)</span>
-                      <strong className="text-amber-300">{focusedMarket.ema50}</strong>
-                    </div>
-                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
-                      <span className="text-[10px] text-slate-400 block">RSI (14) Momentum</span>
-                      <strong className="text-white">{focusedMarket.rsi}</strong>
-                    </div>
-                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
-                      <span className="text-[10px] text-slate-400 block">H1 Macro Structure</span>
-                      <strong className="text-[#D4AF37]">{computed.h1TrendDirection}</strong>
-                    </div>
-                  </div>
-                </div>
-
-                {/* ALL-FACTOR INSTITUTIONAL BUY / SELL JUDGMENT MATRIX (6 Factors) */}
-                <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-[#D4AF37]/40 space-y-3 text-xs">
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-[#D4AF37]" />
-                      <span className="text-[#D4AF37] font-black uppercase tracking-wider">
-                        All-Factor AI Judgment Scorecard ({computed.alignedFactorsCount}/{computed.totalFactorsCount} Confirmed · {computed.orderType})
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 font-black">
-                      <span className="text-[#00C261]">BULL: {computed.bullScorePct}%</span>
-                      <span className="text-slate-600">vs</span>
-                      <span className="text-red-400">BEAR: {computed.bearScorePct}%</span>
-                      <span className="text-slate-400">· DXY {macroContext.dxyPressurePct >= 0 ? `+${macroContext.dxyPressurePct}%` : `${macroContext.dxyPressurePct}%`}</span>
-                    </div>
-                  </div>
-
-                  {/* Visual Bull vs Bear Weight Bar */}
-                  <div className="w-full h-2.5 rounded-full bg-red-950/70 overflow-hidden flex border border-slate-800">
-                    <div
-                      className="h-full bg-[#00C261] transition-all duration-300"
-                      style={{ width: `${computed.bullScorePct}%` }}
-                    />
-                    <div
-                      className="h-full bg-red-500 transition-all duration-300"
-                      style={{ width: `${computed.bearScorePct}%` }}
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5">
-                    {computed.factorVerdicts.map((fv) => (
-                      <div
-                        key={fv.name}
-                        className={`p-3 rounded-xl border space-y-1 ${
-                          fv.signal === 'BUY'
-                            ? 'bg-emerald-950/25 border-emerald-500/35'
-                            : fv.signal === 'SELL'
-                            ? 'bg-red-950/25 border-red-500/35'
-                            : 'bg-amber-950/25 border-amber-500/35'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-[10px] font-bold text-slate-300 truncate">{fv.name}</span>
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-[9px] font-black ${
-                              fv.signal === 'BUY'
-                                ? 'bg-[#00C261]/25 text-[#00C261]'
-                                : fv.signal === 'SELL'
-                                ? 'bg-red-500/25 text-red-300'
-                                : 'bg-amber-500/25 text-amber-300'
-                            }`}
-                          >
-                            {fv.signal}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-slate-300 leading-snug">{fv.detail}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Auto-Synced EA Script */}
-                <div className="p-4 rounded-2xl bg-[#070B14] border border-slate-800 space-y-2.5 text-xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[#D4AF37] font-bold flex items-center gap-1.5">
-                      <Bot className="w-4 h-4" />
-                      <span>Live Auto-Synced EA Parameters ({focusedMarket.pair} [{activeTf}])</span>
-                    </span>
                     <button
                       type="button"
                       onClick={() => {
-                        navigator.clipboard.writeText(eaMqlCode);
-                        setCopiedEa(true);
-                        setTimeout(() => setCopiedEa(false), 2000);
+                        const fullTicket = `${computed.brokerSymbol} ${computed.orderType} | Price: ${shownEntry} | SL: ${shownSl} | TP1: ${shownTp1} | TP2: ${shownTp2} | Vol: ${computed.lotSize.toFixed(2)} Lots ($${computed.actualRiskUsd.toFixed(2)} Risk) | Broker: ${selectedBroker.toUpperCase()}`;
+                        handleQuickCopyValue(fullTicket, `full-ticket-${focusedMarket.pair}`);
                       }}
-                      className="px-3 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/40 text-[11px] font-bold flex items-center gap-1 transition"
+                      className="px-3.5 py-1.5 rounded-xl bg-[#D4AF37] hover:bg-amber-400 text-black font-black text-xs flex items-center gap-1.5 transition whitespace-nowrap shrink-0"
                     >
-                      {copiedEa ? <Check className="w-3.5 h-3.5 text-[#00C261]" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedEa ? 'EA Copied!' : 'Copy EA Config'}</span>
+                      {copiedCardPair === `full-ticket-${focusedMarket.pair}` ? (
+                        <Check className="w-3.5 h-3.5" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                      <span>
+                        {copiedCardPair === `full-ticket-${focusedMarket.pair}`
+                          ? 'Ticket Copied ✓'
+                          : 'Copy MT4/MT5 Ticket'}
+                      </span>
                     </button>
                   </div>
-                  <pre className="p-3 rounded-xl bg-black/70 border border-slate-800/80 text-[11px] text-emerald-300 overflow-x-auto leading-relaxed">
-                    {eaMqlCode}
-                  </pre>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 text-xs">
+                    <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex flex-col justify-between gap-1.5">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">
+                          {displayOrder ? 'Order Entry' : 'Entry Price'}
+                        </span>
+                        <strong className="text-base text-white">{shownEntry}</strong>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickCopyValue(shownEntry, `focus-entry-${focusedMarket.pair}`)}
+                        className="w-full py-1 px-2 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-800 text-[10px] font-bold flex items-center justify-center gap-1 transition"
+                      >
+                        {copiedCardPair === `focus-entry-${focusedMarket.pair}` ? (
+                          <Check className="w-3 h-3 text-[#00C261]" />
+                        ) : (
+                          <Copy className="w-3 h-3 text-[#D4AF37]" />
+                        )}
+                        <span>{copiedCardPair === `focus-entry-${focusedMarket.pair}` ? 'Copied' : 'Copy EP'}</span>
+                      </button>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-red-950/30 border border-red-500/40 flex flex-col justify-between gap-1.5">
+                      <div>
+                        <span className="text-[10px] text-red-300 block">Stop Loss (-{computed.slPips}p)</span>
+                        <strong className="text-base text-red-400">{shownSl}</strong>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickCopyValue(shownSl, `focus-sl-${focusedMarket.pair}`)}
+                        className="w-full py-1 px-2 rounded-lg bg-slate-950 hover:bg-red-900/60 text-red-200 border border-red-500/40 text-[10px] font-black flex items-center justify-center gap-1 transition"
+                      >
+                        {copiedCardPair === `focus-sl-${focusedMarket.pair}` ? (
+                          <Check className="w-3 h-3 text-[#00C261]" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                        <span>{copiedCardPair === `focus-sl-${focusedMarket.pair}` ? 'Copied' : 'Copy SL'}</span>
+                      </button>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-cyan-950/30 border border-cyan-500/40 flex flex-col justify-between gap-1.5">
+                      <div>
+                        <span className="text-[10px] text-cyan-300 block">TP1 (50% BE Lock)</span>
+                        <strong className="text-base text-cyan-300">{shownTp1}</strong>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickCopyValue(shownTp1, `focus-tp1-${focusedMarket.pair}`)}
+                        className="w-full py-1 px-2 rounded-lg bg-slate-950 hover:bg-cyan-900/60 text-cyan-200 border border-cyan-500/40 text-[10px] font-bold flex items-center justify-center gap-1 transition"
+                      >
+                        {copiedCardPair === `focus-tp1-${focusedMarket.pair}` ? (
+                          <Check className="w-3 h-3 text-[#00C261]" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                        <span>{copiedCardPair === `focus-tp1-${focusedMarket.pair}` ? 'Copied' : 'Copy TP1'}</span>
+                      </button>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/40 flex flex-col justify-between gap-1.5">
+                      <div>
+                        <span className="text-[10px] text-emerald-300 block">TP2 Target (+{computed.tpPips}p)</span>
+                        <strong className="text-base text-[#00C261]">{shownTp2}</strong>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickCopyValue(shownTp2, `focus-tp2-${focusedMarket.pair}`)}
+                        className="w-full py-1 px-2 rounded-lg bg-slate-950 hover:bg-emerald-900/60 text-emerald-200 border border-emerald-500/40 text-[10px] font-black flex items-center justify-center gap-1 transition"
+                      >
+                        {copiedCardPair === `focus-tp2-${focusedMarket.pair}` ? (
+                          <Check className="w-3 h-3 text-[#00C261]" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                        <span>{copiedCardPair === `focus-tp2-${focusedMarket.pair}` ? 'Copied' : 'Copy TP2'}</span>
+                      </button>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex flex-col justify-between">
+                      <span className="text-[10px] text-slate-400 block">48H Extended TP3</span>
+                      <strong className="text-base text-[#D4AF37]">{computed.tp3}</strong>
+                      <span className="text-[10px] text-cyan-300">+${computed.netProfit48hUsd.toFixed(2)} est.</span>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Bottom Independent Card Controls + Return to All 8 Cards */}
-                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={() => handleRescanFocusedCard(focusedMarket.pair, activeTf)}
-                      disabled={isRescanningCard}
-                      className="px-4 py-2.5 rounded-xl bg-[#00C261] hover:bg-[#00dc6e] text-black font-black text-xs uppercase tracking-wider flex items-center gap-1.5 transition"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isRescanningCard ? 'animate-spin' : ''}`} />
-                      <span>Rescan {focusedMarket.pair}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleReanalyseFocusedCardAi(focusedMarket.pair, activeTf)}
-                      disabled={isReanalysingCardAi}
-                      className="px-4 py-2.5 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center gap-1.5 transition"
-                    >
-                      <Sparkles className={`w-3.5 h-3.5 ${isReanalysingCardAi ? 'animate-spin' : ''}`} />
-                      <span>Reanalyse with Super AI</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onSelectMarketForAnalysis({ ...focusedMarket, recommendedTf: activeTf }, 'deep_ai')
-                      }
-                      className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition"
-                    >
-                      <Zap className="w-3.5 h-3.5 text-[#D4AF37]" />
-                      <span>Open Full Order Ticket</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onOpenTradingViewForPair(focusedMarket.pair, activeTf, focusedMarket.price)
-                      }
-                      className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 font-bold text-xs flex items-center gap-1.5 transition"
-                    >
-                      <BarChart3 className="w-3.5 h-3.5" />
-                      <span>External TradingView</span>
-                    </button>
+                {/* 5 CLICKABLE INDEPENDENT SUB-CARD TABS */}
+                <div className="pt-2 border-t border-slate-800">
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-2">
+                    {subTabItems.map((tab) => {
+                      const active = activeSubTab === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() =>
+                            setFocusedSubTabByPair((prev) => ({
+                              ...prev,
+                              [focusedMarket.pair]: tab.id
+                            }))
+                          }
+                          className={`px-3.5 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap shrink-0 border ${
+                            active
+                              ? 'bg-[#D4AF37] text-black border-[#D4AF37] font-black'
+                              : 'bg-slate-900 text-slate-300 hover:text-white border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      );
+                    })}
                   </div>
 
+                  <div className="pt-3 space-y-4">
+                    {/* SUB-CARD 1: LIVE ORDER EXECUTION & RISK SIZING */}
+                    {activeSubTab === 'ORDER' && (
+                      <div className="space-y-4">
+                        <ActiveMarketOrderPanel
+                          mode="full"
+                          pair={focusedMarket.pair}
+                          direction={computed.direction}
+                          timeframe={activeTf}
+                          broker={selectedBroker}
+                        />
+
+                        <EntryConfirmationController
+                          pair={focusedMarket.pair}
+                          computed={computed}
+                          kenyaTiming={kenyaTiming}
+                          livePrice={focusedMarket.price}
+                          timeframe={activeTf}
+                          lockedOrder={loadedOrder}
+                          showSavedOrder={showSavedOrder}
+                          onToggleSavedOrder={() =>
+                            setViewSavedOrderByPair((prev) => ({
+                              ...prev,
+                              [focusedMarket.pair]: !showSavedOrder
+                            }))
+                          }
+                          ema20={focusedMarket.ema20}
+                          ema50={focusedMarket.ema50}
+                          rsi={focusedMarket.rsi}
+                          variant="focused"
+                        />
+
+                        <DynamicPositionSizeCalculator
+                          pair={focusedMarket.pair}
+                          computed={computed}
+                          lockedOrder={displayOrder}
+                        />
+
+                        <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+                          <div>
+                            <span className="text-[10px] text-slate-400 block uppercase font-bold">
+                              Alternative Side Reference ({oppositeSide} BY MARKET)
+                            </span>
+                            <span className="text-slate-200 font-bold">
+                              Entry {oppositeComputed.entryPrice} · SL{' '}
+                              <strong className="text-red-400">{oppositeComputed.stopLoss}</strong> · TP2{' '}
+                              <strong className="text-[#00C261]">{oppositeComputed.tp2}</strong>
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setInspectedSideByPair((prev) => ({
+                                ...prev,
+                                [focusedMarket.pair]: oppositeSide
+                              }))
+                            }
+                            className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] border border-slate-700 text-[11px] font-black shrink-0 transition whitespace-nowrap"
+                          >
+                            Switch to {oppositeSide}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SUB-CARD 2: DEEP AI & BOS/CHOCH STRUCTURE AUDIT */}
+                    {activeSubTab === 'DEEP_AI' && (
+                      <div className="space-y-4">
+                        <DeepScanVerificationPanel
+                          pair={focusedMarket.pair}
+                          timeframe={activeTf}
+                          computed={computed}
+                          deepAudit={deepAudits[focusedMarket.pair]}
+                          isVerifying={Boolean(isDeepVerifyingPair[focusedMarket.pair])}
+                          onRunDeepVerify={() =>
+                            void globalLiveStream.verifyMarketDeepScan(
+                              focusedMarket.pair,
+                              activeTf,
+                              selectedBroker,
+                              selectedSideMode === 'AUTO' ? undefined : selectedSideMode
+                            )
+                          }
+                        />
+
+                        {(() => {
+                          const aiNote = superAiNotes[focusedMarket.pair];
+                          return (
+                            <div className="p-4 rounded-2xl bg-slate-900 border border-[#D4AF37]/40 space-y-2 text-xs">
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <div className="flex items-center gap-2 text-[#D4AF37] font-bold">
+                                  <Sparkles className="w-4 h-4 shrink-0" />
+                                  <span>
+                                    {aiNote?.headline || `Quantitative Desk Note · ${focusedMarket.pair} (${activeTf})`}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                                  <span>
+                                    {aiNote
+                                      ? `${aiNote.source === 'gemini-4-hydrogen' || aiNote.source === 'gemini-3.8-flash' ? 'Gemini AI Live' : 'Quant Stream'} · ${aiNote.syncedAt}`
+                                      : `Synced · ${lastScannedTime}`}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleReanalyseFocusedCardAi(focusedMarket.pair, activeTf)}
+                                    className="px-2.5 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 text-[#D4AF37] border border-slate-700 font-bold transition whitespace-nowrap"
+                                  >
+                                    Refresh AI Note
+                                  </button>
+                                </div>
+                              </div>
+                              <p className="text-slate-200 leading-relaxed font-sans">
+                                {aiNote?.note || focusedMarket.projection}
+                              </p>
+                              <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-300 pt-1">
+                                <span>
+                                  Invalidation:{' '}
+                                  <strong className="text-red-300">
+                                    {aiNote?.invalidationNote || `Close beyond SL ${computed.stopLoss}`}
+                                  </strong>
+                                </span>
+                                <span aria-hidden="true">·</span>
+                                <span>
+                                  Catalyst:{' '}
+                                  <strong className="text-cyan-300">
+                                    {aiNote?.catalystWatch || `${kenyaTiming.currentWindowName} · DXY ${macroContext.dxyPressurePct >= 0 ? `+${macroContext.dxyPressurePct}%` : `${macroContext.dxyPressurePct}%`}`}
+                                  </strong>
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-start gap-2 text-xs">
+                          <CheckCircle2 className="w-4 h-4 text-[#00C261] shrink-0 mt-0.5" />
+                          <span className="text-slate-200 leading-snug font-sans">{computed.humanCheckNote}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SUB-CARD 3: WALK-FORWARD BACKTEST, EXECUTION BRIEF & MULTI-HORIZON TRAJECTORY */}
+                    {activeSubTab === 'THESIS' && (
+                      <div className="space-y-4">
+                        {(execBrief || computed.liveBacktest) && (
+                          <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-cyan-500/35 space-y-4 text-xs">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                              <div>
+                                <span className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider block">
+                                  Institutional Execution Brief &amp; Live Walk-Forward Proof
+                                </span>
+                                <h3 className="text-sm sm:text-base font-black text-white mt-0.5">
+                                  {execBrief?.headline || `${focusedMarket.pair} (${activeTf}) Execution Clarity`}
+                                </h3>
+                              </div>
+                              {computed.liveBacktest && (
+                                <span
+                                  className={`px-3 py-1 rounded-lg text-[10px] font-black shrink-0 ${
+                                    computed.liveBacktest.verdictLabel === 'PROVEN POSITIVE EDGE'
+                                      ? 'bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/50'
+                                      : computed.liveBacktest.verdictLabel === 'MODERATE EDGE'
+                                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50'
+                                      : 'bg-amber-500/20 text-amber-300 border border-amber-500/50'
+                                  }`}
+                                >
+                                  {computed.liveBacktest.verdictLabel}
+                                </span>
+                              )}
+                            </div>
+
+                            {computed.liveBacktest && (
+                              <div className="space-y-2">
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
+                                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                                    <span className="text-[10px] text-slate-400 block">TP1 / Positive Rate</span>
+                                    <strong className="text-sm sm:text-base text-[#00C261]">
+                                      {computed.liveBacktest.sampleTrades > 0 ? `${computed.liveBacktest.tp1WinRatePct}%` : '—'}
+                                    </strong>
+                                    <span className="text-[10px] text-slate-500 block">
+                                      {computed.liveBacktest.sampleTrades} qualified trades
+                                    </span>
+                                  </div>
+                                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                                    <span className="text-[10px] text-slate-400 block">Full TP2 Hit Rate</span>
+                                    <strong className="text-sm sm:text-base text-cyan-300">
+                                      {computed.liveBacktest.sampleTrades > 0 ? `${computed.liveBacktest.fullWinRatePct}%` : '—'}
+                                    </strong>
+                                    <span className="text-[10px] text-slate-500 block">
+                                      {computed.liveBacktest.fullTp2Wins} full wins · {computed.liveBacktest.losses} SL
+                                    </span>
+                                  </div>
+                                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                                    <span className="text-[10px] text-slate-400 block">Profit Factor</span>
+                                    <strong className="text-sm sm:text-base text-[#D4AF37]">
+                                      {computed.liveBacktest.sampleTrades > 0 ? computed.liveBacktest.profitFactor.toFixed(2) : '—'}
+                                    </strong>
+                                    <span className="text-[10px] text-slate-500 block">&gt; 1.40 = healthy</span>
+                                  </div>
+                                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                                    <span className="text-[10px] text-slate-400 block">Avg Expectancy / Trade</span>
+                                    <strong
+                                      className={`text-sm sm:text-base ${
+                                        computed.liveBacktest.netExpectancyR >= 0 ? 'text-[#00C261]' : 'text-red-400'
+                                      }`}
+                                    >
+                                      {computed.liveBacktest.sampleTrades > 0
+                                        ? `${computed.liveBacktest.netExpectancyR >= 0 ? '+' : ''}${computed.liveBacktest.netExpectancyR.toFixed(2)}R`
+                                        : '0.00R'}
+                                    </strong>
+                                    <span className="text-[10px] text-slate-500 block">TP1 BE + TP2 scale</span>
+                                  </div>
+                                </div>
+                                <p className="text-[11px] text-slate-300 font-sans leading-relaxed bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2">
+                                  {computed.liveBacktest.summary}
+                                </p>
+                              </div>
+                            )}
+
+                            {execBrief && (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 font-sans">
+                                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                                  <span className="text-[10px] font-mono font-bold text-[#00C261] uppercase">
+                                    1. Directional Structure ({computed.direction})
+                                  </span>
+                                  <p className="text-xs text-slate-200 leading-relaxed">{execBrief.whyDirection}</p>
+                                </div>
+                                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                                  <span className="text-[10px] font-mono font-bold text-red-300 uppercase">
+                                    2. Stop Loss Spread &amp; ATR Buffer
+                                  </span>
+                                  <p className="text-xs text-slate-200 leading-relaxed">{execBrief.whySlIsSafe}</p>
+                                </div>
+                                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                                  <span className="text-[10px] font-mono font-bold text-cyan-300 uppercase">
+                                    3. TP1 50% Lock &amp; Breakeven Protocol
+                                  </span>
+                                  <p className="text-xs text-slate-200 leading-relaxed">{execBrief.tp1BreakevenPlan}</p>
+                                </div>
+                                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                                  <span className="text-[10px] font-mono font-bold text-[#D4AF37] uppercase">
+                                    4. 10-Trade Statistical Expectancy
+                                  </span>
+                                  <p className="text-xs text-slate-200 leading-relaxed">{execBrief.expectancyMath}</p>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="p-4 rounded-2xl bg-slate-900/75 border border-[#D4AF37]/40 space-y-3 text-xs">
+                          <div className="flex items-center justify-between text-[#D4AF37] font-bold flex-wrap gap-1">
+                            <span className="flex items-center gap-1.5">
+                              <Target className="w-4 h-4" />
+                              <span>1H–48H {computed.direction} Trajectory Projection</span>
+                            </span>
+                            <span className="text-emerald-400">Spread ~{computed.brokerSpread}p · 48H TP3: {computed.tp3}</span>
+                          </div>
+                          <p className="text-slate-200 leading-relaxed font-sans">{computed.trajectory}</p>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-1">
+                            {computed.trajectoryHorizons.map((step) => (
+                              <div
+                                key={step.horizon}
+                                className="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1"
+                              >
+                                <span className="text-[10px] text-[#D4AF37] font-black block">{step.horizon}</span>
+                                <div className="text-sm font-black text-white">
+                                  @ {step.targetPrice}{' '}
+                                  <span className="text-[#00C261] text-xs">
+                                    ({isBuy ? `+${step.targetPips}p` : `-${step.targetPips}p`})
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-cyan-300 font-bold">
+                                  Est. Net: +${step.netProfitUsd.toFixed(2)} (+{step.netProfitKes} KES)
+                                </div>
+                                <p className="text-[10px] text-slate-300 leading-snug font-sans">{step.driverSummary}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SUB-CARD 4: 10-FACTOR INSTITUTIONAL MATRIX + ADX/MACD/PATTERN TELEMETRY */}
+                    {activeSubTab === 'FACTORS' && (
+                      <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-[#D4AF37]/40 space-y-4 text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="w-4 h-4 text-[#D4AF37]" />
+                            <span className="text-[#D4AF37] font-black uppercase tracking-wider">
+                              {computed.totalFactorsCount}-Factor Quantitative Matrix ({computed.alignedFactorsCount}/{computed.totalFactorsCount} Confirmed · {computed.orderType})
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 font-black">
+                            <span className="text-[#00C261]">BULL: {computed.bullScorePct}%</span>
+                            <span className="text-slate-600">vs</span>
+                            <span className="text-red-400">BEAR: {computed.bearScorePct}%</span>
+                            <span className="text-slate-400">· DXY {macroContext.dxyPressurePct >= 0 ? `+${macroContext.dxyPressurePct}%` : `${macroContext.dxyPressurePct}%`}</span>
+                          </div>
+                        </div>
+
+                        {/* Quantitative Technical Telemetry Row */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                          <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                            <span className="text-[10px] text-slate-400 block">20 / 50 EMA</span>
+                            <strong className="text-cyan-300 text-xs">{focusedMarket.ema20} / {focusedMarket.ema50}</strong>
+                          </div>
+                          <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                            <span className="text-[10px] text-slate-400 block">RSI (14)</span>
+                            <strong className="text-white text-xs">{focusedMarket.rsi}</strong>
+                          </div>
+                          <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                            <span className="text-[10px] text-slate-400 block">ADX (14) Strength</span>
+                            <strong className={`text-xs ${(computed.adxStrength ?? 21) >= 25 ? 'text-[#00C261]' : (computed.adxStrength ?? 21) < 16 ? 'text-red-400' : 'text-[#D4AF37]'}`}>
+                              {(computed.adxStrength ?? 21).toFixed(1)}
+                            </strong>
+                          </div>
+                          <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                            <span className="text-[10px] text-slate-400 block">MACD (12/26/9)</span>
+                            <strong className={`text-xs ${computed.macdBias === 'BULLISH' ? 'text-[#00C261]' : computed.macdBias === 'BEARISH' ? 'text-red-400' : 'text-amber-300'}`}>
+                              {computed.macdBias ?? 'FLAT'}
+                            </strong>
+                          </div>
+                          <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                            <span className="text-[10px] text-slate-400 block">Candle Pattern</span>
+                            <strong className="text-cyan-300 text-xs truncate block">
+                              {(computed.candlePattern || 'CONSOLIDATION').replace(/_/g, ' ')}
+                            </strong>
+                          </div>
+                          <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                            <span className="text-[10px] text-slate-400 block">H1 Structure</span>
+                            <strong className="text-[#D4AF37] text-xs">{computed.h1TrendDirection}</strong>
+                          </div>
+                        </div>
+
+                        <div className="w-full h-2.5 rounded-full bg-red-950/70 overflow-hidden flex border border-slate-800">
+                          <div className="h-full bg-[#00C261] transition-all duration-300" style={{ width: `${computed.bullScorePct}%` }} />
+                          <div className="h-full bg-red-500 transition-all duration-300" style={{ width: `${computed.bearScorePct}%` }} />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+                          {computed.factorVerdicts.map((fv) => (
+                            <div
+                              key={fv.name}
+                              className={`p-3 rounded-xl border space-y-1 ${
+                                fv.signal === 'BUY'
+                                  ? 'bg-emerald-950/25 border-emerald-500/35'
+                                  : fv.signal === 'SELL'
+                                  ? 'bg-red-950/25 border-red-500/35'
+                                  : 'bg-amber-950/25 border-amber-500/35'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-[10px] font-bold text-slate-300 truncate">{fv.name}</span>
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-black shrink-0 ${
+                                    fv.signal === 'BUY'
+                                      ? 'bg-[#00C261]/25 text-[#00C261]'
+                                      : fv.signal === 'SELL'
+                                      ? 'bg-red-500/25 text-red-300'
+                                      : 'bg-amber-500/25 text-amber-300'
+                                  }`}
+                                >
+                                  {fv.signal}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-300 leading-snug font-sans">{fv.detail}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SUB-CARD 5: TRADINGVIEW SYNC & MQL4/MQL5 EA PARAMETERS */}
+                    {activeSubTab === 'TV_EA' && (
+                      <div className="space-y-4">
+                        <div className="p-4 rounded-2xl bg-[#070B14] border border-slate-800 space-y-2.5 text-xs">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="text-[#D4AF37] font-bold flex items-center gap-1.5">
+                              <Bot className="w-4 h-4" />
+                              <span>Live Auto-Synced EA Parameters ({focusedMarket.pair} [{activeTf}])</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(eaMqlCode);
+                                setCopiedEa(true);
+                                setTimeout(() => setCopiedEa(false), 2000);
+                              }}
+                              className="px-3 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/40 text-[11px] font-bold flex items-center gap-1 transition whitespace-nowrap"
+                            >
+                              {copiedEa ? <Check className="w-3.5 h-3.5 text-[#00C261]" /> : <Copy className="w-3.5 h-3.5" />}
+                              <span>{copiedEa ? 'EA Copied!' : 'Copy EA Config'}</span>
+                            </button>
+                          </div>
+                          <pre className="p-3 rounded-xl bg-black/70 border border-slate-800/80 text-[11px] text-emerald-300 overflow-x-auto leading-relaxed">
+                            {eaMqlCode}
+                          </pre>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onSelectMarketForAnalysis({ ...focusedMarket, recommendedTf: activeTf }, 'deep_ai')
+                            }
+                            className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition whitespace-nowrap"
+                          >
+                            <Zap className="w-3.5 h-3.5 text-[#D4AF37]" />
+                            <span>Open Full Order Ticket</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onOpenTradingViewForPair(focusedMarket.pair, activeTf, focusedMarket.price)
+                            }
+                            className="px-4 py-2.5 rounded-xl bg-sky-950/70 hover:bg-sky-500 text-sky-300 hover:text-black border border-sky-400/50 font-black text-xs flex items-center gap-1.5 transition whitespace-nowrap"
+                          >
+                            <BarChart3 className="w-3.5 h-3.5" />
+                            <span>Synced TradingView ({computed.tvSymbol})</span>
+                          </button>
+
+                          <a
+                            href={getTradingViewExternalUrl(focusedMarket.pair, activeTf)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black border border-[#D4AF37]/40 font-black text-xs flex items-center gap-1.5 transition whitespace-nowrap"
+                          >
+                            <span>Open TradingView.com ({computed.tvSymbol})</span>
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Bottom Card Return / Prev / Next Footer */}
+                <div className="flex flex-wrap items-center justify-between gap-2.5 pt-3 border-t border-slate-800">
                   <button
                     type="button"
                     onClick={handleClosePairCard}
-                    className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/50 font-black text-xs flex items-center gap-1.5 transition"
+                    className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/50 font-black text-xs flex items-center gap-1.5 transition whitespace-nowrap"
                   >
                     <ArrowLeft className="w-4 h-4" />
-                    <span>Back to All {markets.length} Cards (Top % → Least)</span>
+                    <span>Return to All {markets.length} Cards</span>
                   </button>
+
+                  {markets.length > 1 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenPairCard(prevCardMarket.pair)}
+                        className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition whitespace-nowrap"
+                      >
+                        <ArrowLeft className="w-3.5 h-3.5" />
+                        <span>Prev: {prevCardMarket.pair}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenPairCard(nextCardMarket.pair)}
+                        className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition whitespace-nowrap"
+                      >
+                        <span>Next: {nextCardMarket.pair}</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1525,6 +1649,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
               ema50: topLeader.ema50,
               rsi: topLeader.rsi,
               atrPips: topLeader.atrPips,
+              candles: topLeader.candles,
               swingLow: topSwings.swingLow,
               swingHigh: topSwings.swingHigh,
               change24hPct: topLeader.change24hPct,
@@ -1757,6 +1882,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                 ema50: m.ema50,
                 rsi: m.rsi,
                 atrPips: m.atrPips,
+                candles: m.candles,
                 swingLow: cardSwings.swingLow,
                 swingHigh: cardSwings.swingHigh,
                 change24hPct: m.change24hPct,
@@ -2058,6 +2184,27 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                     </span>
 
                     <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => onOpenTradingViewForPair(m.pair, activeTf, m.price)}
+                        className="px-2 py-1.5 rounded-lg bg-sky-950/80 hover:bg-sky-500 text-sky-300 hover:text-black border border-sky-500/40 font-black text-[10px] inline-flex items-center gap-1 transition whitespace-nowrap shrink-0"
+                        title={`Open ${m.pair} synced TradingView chart (${getTradingViewSymbol(m.pair)})`}
+                      >
+                        <BarChart3 className="w-3 h-3" />
+                        <span>TV</span>
+                      </button>
+
+                      <a
+                        href={getTradingViewExternalUrl(m.pair, activeTf)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1.5 rounded-lg bg-slate-900 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black border border-[#D4AF37]/40 transition shrink-0"
+                        title={`Launch ${getTradingViewSymbol(m.pair)} on TradingView.com`}
+                        aria-label={`Open ${m.pair} externally on TradingView.com`}
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+
                       {!loadedOrder && (
                         <button
                           type="button"

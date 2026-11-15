@@ -85,6 +85,10 @@ interface SuperAnalysisRequest {
   executionReadinessReason?: string;
   bosDirection?: string;
   bosSummary?: string;
+  adxStrength?: number;
+  macdBias?: 'BULLISH' | 'BEARISH' | 'FLAT';
+  macdHistogram?: number;
+  candlePattern?: string;
   customPrompt?: string;
 }
 
@@ -113,6 +117,14 @@ interface BatchMarketSnapshotInput {
   executionReadinessReason?: string;
   bosDirection?: string;
   bosSummary?: string;
+  tvSymbol?: string;
+  recommendedStrategy?: string;
+  adxStrength?: number;
+  macdBias?: 'BULLISH' | 'BEARISH' | 'FLAT';
+  candlePattern?: string;
+  bullScorePct?: number;
+  bearScorePct?: number;
+  atrPips?: number;
 }
 
 interface BatchScanRequest {
@@ -174,6 +186,10 @@ interface DeepVerifyRequest {
     bosVetoReason?: string;
   };
   checks?: DeepVerifyCheckInput[];
+  adxStrength?: number;
+  macdBias?: 'BULLISH' | 'BEARISH' | 'FLAT';
+  macdHistogram?: number;
+  candlePattern?: string;
   recentM15Candles?: OhlcBar[];
   recentH1Candles?: OhlcBar[];
 }
@@ -1297,6 +1313,26 @@ function buildDeterministicDeepVerify(body: DeepVerifyRequest) {
           detail: bos.bosVetoReason || bos.structureSummary || 'Structure intact',
         },
         {
+          id: 'ADX_TREND_STRENGTH',
+          label: 'ADX(14) Trend Velocity Filter',
+          passed: body.adxStrength === undefined || body.adxStrength >= 14.5,
+          detail:
+            body.adxStrength === undefined
+              ? 'Trend momentum active'
+              : body.adxStrength >= 14.5
+              ? `ADX(14) = ${body.adxStrength.toFixed(1)} (>= 14.5 trending displacement)`
+              : `ADX(14) = ${body.adxStrength.toFixed(1)} (< 14.5 dead chop zone — stand aside)`,
+        },
+        {
+          id: 'MACD_MOMENTUM_SYNC',
+          label: 'MACD(12/26/9) & Candle Action Sync',
+          passed:
+            body.macdBias === undefined ||
+            body.macdBias === 'FLAT' ||
+            (isBuy ? body.macdBias === 'BULLISH' : body.macdBias === 'BEARISH'),
+          detail: `${body.macdBias || 'FLAT'} MACD momentum${body.candlePattern ? ` · ${body.candlePattern.replace(/_/g, ' ')}` : ''}`,
+        },
+        {
           id: 'SWING_SL_PROTECTED',
           label: 'SL Protected Beyond Swing & ATR',
           passed: isBuy ? sl < livePrice : sl > livePrice,
@@ -1317,6 +1353,7 @@ function buildDeterministicDeepVerify(body: DeepVerifyRequest) {
       ];
 
   const failedCounterBos = rawChecks.some((c) => c.id === 'NO_COUNTER_BOS' && !c.passed);
+  const failedChopAdx = rawChecks.some((c) => c.id === 'ADX_TREND_STRENGTH' && !c.passed);
   const failedWindowOrRr = rawChecks.some(
     (c) => (c.id === 'LIVE_FEED_SYNCED' || c.id === 'RR_AND_TP_VALID' || c.id === 'MTF_ALIGNED') && !c.passed
   );
@@ -1330,7 +1367,12 @@ function buildDeterministicDeepVerify(body: DeepVerifyRequest) {
   if (failedCounterBos) {
     verdict = 'BOS_REVERSAL_FLIP';
     verifiedDirection = isBuy ? 'SELL' : 'BUY';
-  } else if (body.executionReadiness === 'NO_TRADE_CLOSED' || body.executionReadiness === 'NO_TRADE_CHOP' || failedWindowOrRr) {
+  } else if (
+    body.executionReadiness === 'NO_TRADE_CLOSED' ||
+    body.executionReadiness === 'NO_TRADE_CHOP' ||
+    failedWindowOrRr ||
+    failedChopAdx
+  ) {
     verdict = 'STAND_ASIDE_TRAP';
     verifiedDirection = 'STAND_ASIDE';
   } else if (body.executionReadiness === 'WAIT_PULLBACK' || failedPullbackOrSl) {
@@ -1344,8 +1386,8 @@ function buildDeterministicDeepVerify(body: DeepVerifyRequest) {
   const passedCount = rawChecks.filter((c) => c.passed).length;
   const confidenceScore = Number(
     Math.min(
-      96,
-      Math.max(42, 52 + passedCount * 7.2 - (failedCounterBos ? 22 : 0))
+      97,
+      Math.max(42, 46 + passedCount * 6.4 - (failedCounterBos ? 22 : 0))
     ).toFixed(1)
   );
 
@@ -1398,9 +1440,87 @@ function buildDeterministicDeepVerify(body: DeepVerifyRequest) {
   };
 }
 
+interface VisionChartRequest {
+  imageBase64?: string;
+  mimeType?: string;
+  fallbackPair?: string;
+  fallbackTimeframe?: string;
+  broker?: string;
+  liveQuotes?: Record<string, { price: number; change24hPct: number }>;
+}
+
+function normalizeVisionPair(raw: string | undefined, fallback = 'GBP/USD'): string {
+  const cleaned = String(raw || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9/]/g, '');
+  if (!cleaned) return fallback;
+  const aliasMap: Record<string, string> = {
+    EURUSD: 'EUR/USD',
+    'EUR/USD': 'EUR/USD',
+    GBPUSD: 'GBP/USD',
+    'GBP/USD': 'GBP/USD',
+    USDJPY: 'USD/JPY',
+    'USD/JPY': 'USD/JPY',
+    GBPJPY: 'GBP/JPY',
+    'GBP/JPY': 'GBP/JPY',
+    USDCHF: 'USD/CHF',
+    'USD/CHF': 'USD/CHF',
+    EURJPY: 'EUR/JPY',
+    'EUR/JPY': 'EUR/JPY',
+    USDCAD: 'USD/CAD',
+    'USD/CAD': 'USD/CAD',
+    AUDUSD: 'AUD/USD',
+    'AUD/USD': 'AUD/USD',
+    XAUUSD: 'XAU/USD',
+    'XAU/USD': 'XAU/USD',
+    GOLD: 'XAU/USD',
+    GCF: 'XAU/USD',
+    BTCUSD: 'BTC/USD',
+    'BTC/USD': 'BTC/USD',
+    BTCUSDT: 'BTC/USD',
+    ETHUSD: 'ETH/USD',
+    'ETH/USD': 'ETH/USD',
+    ETHUSDT: 'ETH/USD',
+    US30: 'US30',
+    DJI: 'US30',
+    DJ30: 'US30',
+    DOW: 'US30',
+    NAS100: 'NAS100',
+    USTEC: 'NAS100',
+    NDX: 'NAS100',
+    NQ: 'NAS100',
+    GER40: 'GER40',
+    DAX: 'GER40',
+    DE40: 'GER40',
+    GDAXI: 'GER40',
+    USOIL: 'USOIL',
+    WTI: 'USOIL',
+    WTIUSD: 'USOIL',
+    CLF: 'USOIL',
+  };
+  if (aliasMap[cleaned]) return aliasMap[cleaned];
+  for (const [key, canonical] of Object.entries(aliasMap)) {
+    if (cleaned.includes(key)) return canonical;
+  }
+  return fallback;
+}
+
+function normalizeVisionTimeframe(raw: string | undefined, fallback = 'M15'): string {
+  const cleaned = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!cleaned) return fallback;
+  if (cleaned === '1M' || cleaned === 'M1' || cleaned === '1MIN' || cleaned === '1') return 'M1';
+  if (cleaned === '5M' || cleaned === 'M5' || cleaned === '5MIN' || cleaned === '5') return 'M5';
+  if (cleaned === '10M' || cleaned === 'M10' || cleaned === '10MIN' || cleaned === '10') return 'M10';
+  if (cleaned === '15M' || cleaned === 'M15' || cleaned === '15MIN' || cleaned === '15') return 'M15';
+  if (cleaned === '1H' || cleaned === 'H1' || cleaned === '60' || cleaned === '1HOUR') return 'H1';
+  if (cleaned === '4H' || cleaned === 'H4' || cleaned === '240' || cleaned === '4HOUR') return 'H4';
+  if (cleaned === '1D' || cleaned === 'D1' || cleaned === 'D' || cleaned === 'DAILY') return 'D1';
+  return fallback;
+}
+
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '512kb' }));
+  app.use(express.json({ limit: '15mb' }));
 
   app.get('/api/health', (_req, res) => {
     res.json({
@@ -1480,7 +1600,7 @@ async function startServer() {
         body.bosDirection ? `BOS/CHoCH Structure: ${body.bosDirection} (${body.bosSummary || ''})` : '',
         `Trend Structure: ${body.trendDirection || 'UPTREND'}, Primary Order: ${body.direction || 'BUY'}, Live Price: ${body.price}`,
         `SL: ${body.stopLoss}, TP1: ${body.tp1}, TP2: ${body.tp2}, TP3: ${body.tp3}, R:R: ${body.riskReward || '1:2.4'}`,
-        `Indicators: EMA20=${body.ema20}, EMA50=${body.ema50}, RSI=${body.rsi}`,
+        `Indicators: EMA20=${body.ema20}, EMA50=${body.ema50}, RSI=${body.rsi}${body.adxStrength !== undefined ? `, ADX(14)=${body.adxStrength}` : ''}${body.macdBias ? `, MACD=${body.macdBias}` : ''}${body.candlePattern ? `, Pattern=${body.candlePattern}` : ''}`,
         body.isExtendedZone
           ? `ENTRY TIMING ALERT: Price is extended from 20 EMA (${body.entryTimingWarning || 'wait pullback'}). Warn trader to enter on pullback to 20 EMA rather than chasing.`
           : '',
@@ -1496,7 +1616,7 @@ async function startServer() {
         contents: prompt,
         config: {
           systemInstruction:
-            'You are an institutional FX quantitative execution desk assistant. Reply with 2 concise, plain-English sentences naming the matched strategy and Execution Readiness Gate (if blocked or wait-pullback, tell the trader not to chase market orders), the locked trend direction, exact structure-protected SL and TP1/TP2/TP3 targets, and strict lot-size risk discipline. Do not use markdown headers or bullet points.',
+            'You are an institutional FX quantitative execution desk strategist. Reply with 2 concise, crystal-clear executive sentences naming the matched strategy and Execution Readiness Gate (if blocked or wait-pullback, tell the trader not to chase market orders), the locked trend direction, exact structure-protected SL and TP1/TP2/TP3 targets, and strict lot-size risk discipline. Do not use markdown headers or bullet points.',
           thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
           abortSignal: AbortSignal.timeout(5500),
         },
@@ -1545,7 +1665,7 @@ async function startServer() {
         contents: prompt,
         config: {
           systemInstruction:
-            'You are a Senior Prop Desk Risk Manager advising a trader who placed an order on their broker (FXPesa/Exness/HFM/FBS). Output strict JSON matching the schema with clear, decisive advice in 2 plain-English sentences: if in drawdown, state whether H1 structure still supports holding the ATR-protected SL or if H1 has reversed so SL should be tightened immediately (never widen SL into loss); if in profit, explain how much profit SL locks and where to extend TP.',
+            'You are a Senior Prop Desk Risk Manager advising a trader who placed an order on their broker (FXPesa/Exness/HFM/FBS). Output strict JSON matching the schema with clear, decisive guidance in 2 executive sentences: if in drawdown, state whether H1 structure still supports holding the ATR-protected SL or if H1 has reversed so SL should be tightened immediately (never widen SL into loss); if in profit, explain how much profit SL locks and where to extend TP.',
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           responseMimeType: 'application/json',
           responseSchema: {
@@ -1590,7 +1710,7 @@ async function startServer() {
       const marketSummaryLines = body.markets
         .map(
           (m, i) =>
-            `#${i + 1} ${m.pair} (${m.timeframe}): Price=${m.price}, 24h=${m.change24hPct}%, Trend=${m.trendDirection}, BOS=${m.bosDirection || 'RANGING'}, Order=${m.direction}, Gate=${m.executionReadiness || 'READY_ENTER'}, Lot=${Number(m.lotSize ?? 0.01).toFixed(2)}, Risk=$${Number(m.actualRiskUsd ?? 2.5).toFixed(2)}, EMA20=${m.ema20}, EMA50=${m.ema50}, RSI=${m.rsi}, SL=${m.stopLoss}, TP1=${m.tp1}, TP2=${m.tp2}, TP3=${m.tp3}, Extended=${Boolean(
+            `#${i + 1} ${m.pair} (${m.timeframe}${m.tvSymbol ? ` · ${m.tvSymbol}` : ''}): Price=${m.price}, 24h=${m.change24hPct}%, Trend=${m.trendDirection}, BOS=${m.bosDirection || 'RANGING'}, Strategy=${m.recommendedStrategy || '10-Factor EMA/BOS'}, Order=${m.direction}, Bull/Bear=${m.bullScorePct ?? 50}%/${m.bearScorePct ?? 50}%, ADX=${m.adxStrength ?? 20}, MACD=${m.macdBias || 'FLAT'}, Pattern=${m.candlePattern || 'NONE'}, Gate=${m.executionReadiness || 'READY_ENTER'}, Lot=${Number(m.lotSize ?? 0.01).toFixed(2)}, Risk=$${Number(m.actualRiskUsd ?? 2.5).toFixed(2)}, EMA20=${m.ema20}, EMA50=${m.ema50}, RSI=${m.rsi}, ATR=${m.atrPips ?? 18}p, SL=${m.stopLoss}, TP1=${m.tp1}, TP2=${m.tp2}, TP3=${m.tp3}, Extended=${Boolean(
               m.isExtendedZone
             )}, Window=${m.windowStatus}`
         )
@@ -1600,7 +1720,7 @@ async function startServer() {
         `Session Context: Nairobi EAT=${body.eatTimeString || 'Active'}, Window=${body.sessionWindowName || 'Global Liquidity'}, Safety=${body.overallDaySafety || 'FAVOURABLE'}`,
         `Macro Context: DXY Basket=${body.dxyPressurePct ?? 0}%, Regime=${body.riskRegime || 'BALANCED'}`,
         `${marketCount} Markets Sorted Top % to Least:\n${marketSummaryLines}`,
-        `Generate a clear today & current-hour macro directive (favouring BUY vs SELL) and a crisp 2-sentence institutional execution note for each of the ${marketCount} pairs referencing their exact price, BOS/CHoCH structure, Execution Readiness Gate (READY_ENTER vs WAIT_PULLBACK vs NO_TRADE_CHOP/NO_TRADE_CLOSED), SL, TP2, and configured lot discipline.`,
+        `Generate a clear today & current-hour macro directive (favouring BUY vs SELL) and a crisp 2-sentence institutional execution note for each of the ${marketCount} pairs referencing their exact price, BOS/CHoCH structure, ADX(14)/MACD(12/26/9) momentum, Execution Readiness Gate (READY_ENTER vs WAIT_PULLBACK vs NO_TRADE_CHOP/NO_TRADE_CLOSED), SL, TP2, and configured lot discipline.`,
       ].join('\n\n');
 
       const response = await aiClient.models.generateContent({
@@ -1608,7 +1728,7 @@ async function startServer() {
         contents: prompt,
         config: {
           systemInstruction:
-            'You are the Chief Currency Strategist at an institutional prop trading desk in Nairobi. Output strict JSON matching the schema with plain-English actionable execution analysis and zero markdown.',
+            'You are the Chief Currency Strategist at an institutional prop trading desk in Nairobi. Output strict JSON matching the schema with decisive, institutional actionable execution analysis and zero markdown.',
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           responseMimeType: 'application/json',
           responseSchema: {
@@ -1629,7 +1749,7 @@ async function startServer() {
               },
             },
           },
-          abortSignal: AbortSignal.timeout(4800),
+          abortSignal: AbortSignal.timeout(6800),
         },
       });
 
@@ -1686,16 +1806,16 @@ async function startServer() {
 
       const prompt = [
         `Instrument: ${baseline.pair} (${baseline.timeframe}) on ${body.broker || 'FXPESA'}`,
-        `Live Price: ${body.livePrice}, EMA20: ${body.ema20}, EMA50: ${body.ema50}, RSI(14): ${body.rsi}, ATR: ${body.atrPips}p`,
+        `Live Price: ${body.livePrice}, EMA20: ${body.ema20}, EMA50: ${body.ema50}, RSI(14): ${body.rsi}, ATR: ${body.atrPips}p${body.adxStrength !== undefined ? `, ADX(14): ${body.adxStrength}` : ''}${body.macdBias ? `, MACD: ${body.macdBias}` : ''}${body.candlePattern ? `, Pattern: ${body.candlePattern}` : ''}`,
         `Proposed Direction: ${baseline.proposedDirection}, MTF: Active=${body.trendDirection}, H1=${body.h1TrendDirection}, Gate=${body.executionReadiness} (${body.executionReadinessReason || ''})`,
         `BOS/CHoCH Quantitative State: ${baseline.structureState}, Trigger=${baseline.bosLevel}, ProtectedSwingLow=${body.bosAnalysis?.protectedSwingLow}, ProtectedSwingHigh=${body.bosAnalysis?.protectedSwingHigh}`,
         `Proposed Levels: EP=${body.entryPrice}, SL=${body.stopLoss}, TP1=${body.tp1}, TP2=${body.tp2}, TP3=${body.tp3}, R:R=${body.riskReward}, Lot=${Number(body.lotSize ?? 0.01).toFixed(2)}, Risk=$${Number(body.actualRiskUsd ?? 2).toFixed(2)}`,
         `Macro: DXY=${body.dxyPressurePct ?? 0}%, Regime=${body.riskRegime || 'BALANCED'}`,
         m15Str ? `Recent M15 Candles (oldest->newest): ${m15Str}` : '',
         h1Str ? `Recent H1 Candles (oldest->newest): ${h1Str}` : '',
-        `6-Point Quantitative Pre-Flight Checks:\n${checksStr}`,
+        `8-Point Quantitative Pre-Flight Checks:\n${checksStr}`,
         `Baseline Quantitative Verdict: ${baseline.verdict} (${baseline.verifiedDirection})`,
-        `Audit raw M15 + H1 candlesticks for Break of Structure (BOS), Change of Character (CHoCH), liquidity sweeps, and trajectory alignment. Ensure zero false BUY in downtrend/Bearish BOS and zero false SELL in uptrend/Bullish BOS.`,
+        `Audit raw M15 + H1 candlesticks, ADX trend strength, MACD histogram momentum, and candlestick price-action patterns for Break of Structure (BOS), Change of Character (CHoCH), liquidity sweeps, and trajectory alignment. Ensure zero false BUY in downtrend/Bearish BOS and zero false SELL in uptrend/Bullish BOS.`,
       ]
         .filter(Boolean)
         .join('\n\n');
@@ -1746,14 +1866,18 @@ async function startServer() {
           ? parsed.verdict
           : baseline.verdict;
 
-        const finalVerifiedDir =
+        const finalVerifiedDir: 'BUY' | 'SELL' | 'STAND_ASIDE' =
           finalVerdict === 'CONFIRMED_BUY'
             ? 'BUY'
             : finalVerdict === 'CONFIRMED_SELL'
             ? 'SELL'
-            : finalVerdict === 'WAIT_PULLBACK'
-            ? baseline.proposedDirection
-            : baseline.verifiedDirection;
+            : finalVerdict === 'BOS_REVERSAL_FLIP'
+            ? baseline.proposedDirection === 'BUY'
+              ? 'SELL'
+              : 'BUY'
+            : finalVerdict === 'STAND_ASIDE_TRAP'
+            ? 'STAND_ASIDE'
+            : baseline.proposedDirection;
 
         res.json({
           ...baseline,
@@ -1782,6 +1906,187 @@ async function startServer() {
       res.json(baseline);
     } catch {
       res.json(baseline);
+    }
+  });
+
+  app.post('/api/ai/vision-chart', async (req, res) => {
+    const body = (req.body || {}) as VisionChartRequest;
+    const fallbackPair = normalizeVisionPair(body.fallbackPair, 'GBP/USD');
+    const fallbackTf = normalizeVisionTimeframe(body.fallbackTimeframe, 'M15');
+    const rawDataUrl = String(body.imageBase64 || '').trim();
+    const mimeMatch = rawDataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+    const mimeType = body.mimeType || mimeMatch?.[1] || 'image/jpeg';
+    const cleanBase64 = mimeMatch ? mimeMatch[2] : rawDataUrl.replace(/^data:[^,]+,/, '');
+
+    const cachedQuote = liveMarketsCache?.quotes?.[fallbackPair];
+    const reqQuote = body.liveQuotes?.[fallbackPair];
+    const fallbackSpec = YAHOO_PAIR_SPECS.find((s) => s.pair === fallbackPair) || YAHOO_PAIR_SPECS[0];
+    const fallbackPrice = reqQuote?.price || cachedQuote?.price || fallbackSpec.defaultPrice;
+    const fallbackPct = reqQuote?.change24hPct ?? cachedQuote?.change24hPct ?? fallbackSpec.defaultPct;
+
+    const baselineResult = {
+      source: 'quantitative-engine' as 'gemini-4-hydrogen' | 'quantitative-engine',
+      detectedPair: fallbackPair,
+      detectedTimeframe: fallbackTf,
+      detectedTrend: (fallbackPct >= 0.05 ? 'UPTREND' : fallbackPct <= -0.05 ? 'DOWNTREND' : 'RANGING') as
+        | 'UPTREND'
+        | 'DOWNTREND'
+        | 'RANGING',
+      recommendedDirection: (fallbackPct < 0 ? 'SELL' : 'BUY') as 'BUY' | 'SELL',
+      detectedPrice: fallbackPrice,
+      detectedKeyLevel: fallbackPrice,
+      detectedPattern: fallbackPct < 0 ? 'Bearish Resistance Rejection' : 'Bullish Value Zone Reclaim',
+      rsiEstimate: fallbackPct >= 0 ? 57 : 43,
+      aiSummary: `Calibrated captured frame to live interbank ${fallbackPair} [${fallbackTf}] @ ${fallbackPrice}. Structure anchored with live BOS/EMA validation before computing protected EP/SL/TP levels.`,
+      invalidationWarning: 'Verify spread before execution and enforce stop loss protection.',
+      imageIngested: cleanBase64.length > 64,
+      syncedAt: formatEatNow(),
+    };
+
+    if (!aiClient || cleanBase64.length < 64 || mimeType.includes('svg')) {
+      res.json(baselineResult);
+      return;
+    }
+
+    try {
+      const liveTickerLine = YAHOO_PAIR_SPECS.map((s) => {
+        const liveP = body.liveQuotes?.[s.pair]?.price ?? liveMarketsCache?.quotes?.[s.pair]?.price ?? s.defaultPrice;
+        return `${s.pair}=${liveP}`;
+      }).join(', ');
+
+      const prompt = [
+        'Inspect this TradingView / MT4 / MT5 / broker candlestick chart image carefully.',
+        `Supported market pairs (choose closest canonical match): ${YAHOO_PAIR_SPECS.map((s) => s.pair).join(', ')}.`,
+        `Current live benchmark quotes for decimal cross-check: ${liveTickerLine}.`,
+        'Extract accurately from the visible image header, ticker, timeframe button, price axis, EMAs, and candles:',
+        '1) detectedPair (exact canonical pair name from supported list above)',
+        '2) detectedTimeframe (M1, M5, M10, M15, H1, H4, or D1)',
+        '3) detectedTrend (UPTREND, DOWNTREND, or RANGING from visible HH/HL vs LH/LL, BOS/CHoCH, and EMA slope)',
+        '4) recommendedDirection (BUY or SELL aligning strictly with visible market structure)',
+        '5) detectedPrice (exact highlighted live close/bid price visible on the right price axis, or 0 if illegible)',
+        '6) detectedKeyLevel (major visible swing high/resistance for SELL or swing low/support for BUY, or 0 if unclear)',
+        '7) detectedPattern (e.g. Bearish BOS / Tower Top, Bullish Engulfing / Value Zone Pullback)',
+        '8) rsiEstimate (estimated RSI 20-80 based on candle extension or visible oscillator)',
+        '9) aiSummary (2 clear, decisive institutional sentences summarizing structure, trend, and EP/SL/TP guidance)',
+        '10) invalidationWarning (exact structural invalidation trigger)',
+      ].join('\n');
+
+      const response = await aiClient.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                inlineData: {
+                  data: cleanBase64,
+                  mimeType,
+                },
+              },
+              { text: prompt },
+            ],
+          },
+        ],
+        config: {
+          systemInstruction:
+            'You are an institutional FX & Futures Quantitative Chart Vision Reader. Read candlestick charts with precision and output strict JSON matching the schema.',
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              detectedPair: { type: Type.STRING },
+              detectedTimeframe: { type: Type.STRING },
+              detectedTrend: { type: Type.STRING, enum: ['UPTREND', 'DOWNTREND', 'RANGING'] },
+              recommendedDirection: { type: Type.STRING, enum: ['BUY', 'SELL'] },
+              detectedPrice: { type: Type.NUMBER },
+              detectedKeyLevel: { type: Type.NUMBER },
+              detectedPattern: { type: Type.STRING },
+              rsiEstimate: { type: Type.NUMBER },
+              aiSummary: { type: Type.STRING },
+              invalidationWarning: { type: Type.STRING },
+            },
+          },
+          abortSignal: AbortSignal.timeout(9500),
+        },
+      });
+
+      const rawJson = response.text?.trim();
+      if (rawJson) {
+        const parsed = JSON.parse(rawJson);
+        const resolvedPair = normalizeVisionPair(parsed?.detectedPair, fallbackPair);
+        const resolvedTf = normalizeVisionTimeframe(parsed?.detectedTimeframe, fallbackTf);
+        const spec = YAHOO_PAIR_SPECS.find((s) => s.pair === resolvedPair) || fallbackSpec;
+        const benchmarkPrice =
+          body.liveQuotes?.[resolvedPair]?.price ||
+          liveMarketsCache?.quotes?.[resolvedPair]?.price ||
+          spec.defaultPrice;
+
+        // Cross-check OCR price against live interbank benchmark (guard against >12% OCR misreads)
+        const ocrPriceRaw = Number(parsed?.detectedPrice);
+        const validOcrPrice =
+          Number.isFinite(ocrPriceRaw) &&
+          ocrPriceRaw > 0 &&
+          Math.abs(ocrPriceRaw - benchmarkPrice) / benchmarkPrice <= 0.12
+            ? Number(ocrPriceRaw.toFixed(spec.decimals))
+            : benchmarkPrice;
+
+        const ocrKeyRaw = Number(parsed?.detectedKeyLevel);
+        const validKeyLevel =
+          Number.isFinite(ocrKeyRaw) &&
+          ocrKeyRaw > 0 &&
+          Math.abs(ocrKeyRaw - validOcrPrice) / validOcrPrice <= 0.12
+            ? Number(ocrKeyRaw.toFixed(spec.decimals))
+            : validOcrPrice;
+
+        const resolvedTrend: 'UPTREND' | 'DOWNTREND' | 'RANGING' =
+          parsed?.detectedTrend === 'UPTREND' ||
+          parsed?.detectedTrend === 'DOWNTREND' ||
+          parsed?.detectedTrend === 'RANGING'
+            ? parsed.detectedTrend
+            : baselineResult.detectedTrend;
+
+        const resolvedDir: 'BUY' | 'SELL' =
+          parsed?.recommendedDirection === 'BUY' || parsed?.recommendedDirection === 'SELL'
+            ? parsed.recommendedDirection
+            : resolvedTrend === 'DOWNTREND'
+            ? 'SELL'
+            : 'BUY';
+
+        res.json({
+          source: 'gemini-4-hydrogen',
+          detectedPair: resolvedPair,
+          detectedTimeframe: resolvedTf,
+          detectedTrend: resolvedTrend,
+          recommendedDirection: resolvedDir,
+          detectedPrice: validOcrPrice,
+          detectedKeyLevel: validKeyLevel,
+          detectedPattern:
+            parsed?.detectedPattern && String(parsed.detectedPattern).length > 3
+              ? String(parsed.detectedPattern)
+              : baselineResult.detectedPattern,
+          rsiEstimate:
+            Number.isFinite(Number(parsed?.rsiEstimate)) && Number(parsed.rsiEstimate) >= 10 && Number(parsed.rsiEstimate) <= 90
+              ? Math.round(Number(parsed.rsiEstimate))
+              : resolvedDir === 'BUY'
+              ? 56
+              : 44,
+          aiSummary:
+            parsed?.aiSummary && String(parsed.aiSummary).length > 15
+              ? String(parsed.aiSummary)
+              : `Gemini Vision identified ${resolvedPair} (${resolvedTf}) in ${resolvedTrend} structure aligned for ${resolvedDir}. Protected EP, SL, TP1, and TP2 have been synchronized across all scanners.`,
+          invalidationWarning:
+            parsed?.invalidationWarning && String(parsed.invalidationWarning).length > 8
+              ? String(parsed.invalidationWarning)
+              : baselineResult.invalidationWarning,
+          imageIngested: true,
+          syncedAt: formatEatNow(),
+        });
+        return;
+      }
+      res.json(baselineResult);
+    } catch {
+      res.json(baselineResult);
     }
   });
 

@@ -607,6 +607,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                   riskUsd={computed.actualRiskUsd}
                   executionReadiness={computed.executionReadiness}
                   executionReadinessReason={computed.executionReadinessReason}
+                  bosAnalysis={computed.bosAnalysis}
                   isLockedToCustom={Boolean(lockedPairs[focusedMarket.pair])}
                   onCandlePriceChange={(newP) => globalLiveStream.setCustomCandlePrice(focusedMarket.pair, newP)}
                   onResetToLiveStream={() => globalLiveStream.unlockPairToLiveStream(focusedMarket.pair)}

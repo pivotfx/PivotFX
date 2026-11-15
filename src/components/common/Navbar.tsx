@@ -455,6 +455,31 @@ export const Navbar: React.FC<NavbarProps> = ({
               );
             })}
           </div>
+
+          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/80">
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                globalLiveStream.requestOpenScannerView('trade_log');
+              }}
+              className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-900 border border-[#00C261]/40 text-[#00C261] text-xs font-bold"
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span>Trade Log &amp; Orders</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                onOpenLogoModal();
+              }}
+              className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-900 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-bold"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>3D Brand Kit</span>
+            </button>
+          </div>
         </div>
       )}
     </header>

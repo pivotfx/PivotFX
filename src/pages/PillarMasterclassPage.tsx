@@ -42,7 +42,8 @@ import {
   Search,
   Check,
   ChevronRight,
-  Zap
+  Zap,
+  ShieldCheck
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -525,7 +526,7 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
             {/* Subtle Pillar Independence Footer */}
             <div className="pt-6 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-mono text-slate-400">
               <span className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-[#00C261]" />
+                <ShieldCheck className="w-3.5 h-3.5 text-[#00C261]" />
                 <span>Pillar {pillar.number} Dedicated Live Workstation Active</span>
               </span>
               <button

@@ -72,7 +72,7 @@ export default function App() {
     if (tab === 'landing') {
       window.history.pushState(null, '', '#/');
     } else {
-      window.history.pushState(null, '', `#/${tab}`);
+      window.history.pushState(null, '', `#/${tab.replace(/^\//, '')}`);
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };

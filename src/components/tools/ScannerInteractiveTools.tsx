@@ -25,7 +25,8 @@ import {
   evaluateOrderTrendSustainability,
   RiskManagementConfig,
   DeepVerifyResult,
-  positionRiskStore
+  positionRiskStore,
+  getPairSpecs
 } from '../../utils/liveMarketEngine';
 import {
   SlidersHorizontal,
@@ -70,7 +71,8 @@ import {
   Download,
   X,
   Crosshair,
-  ClipboardList
+  ClipboardList,
+  CandlestickChart
 } from 'lucide-react';
 
 interface ScannerInteractiveToolsProps {
@@ -667,44 +669,150 @@ InpMagicNumber=777129
     setRsi(m.rsi);
     setPatternType(m.patternType);
     setLiveAutoNotes(m.projection);
-    runInstitutionalVisionAnalysis(
-      sampleType === 'gbpusd'
-        ? '/samples/gbpusd_tower.png'
-        : sampleType === 'eurusd'
-        ? '/samples/eurusd_bounce.png'
-        : '/samples/xauusd_sweep.png'
+    void runInstitutionalVisionAnalysis(
+      `sample://${sampleType}`,
+      m.pair,
+      m.recommendedTf
     );
   };
 
-  // Zero-Latency Institutional Vision Analysis (Immediate MT4 S/L & T/P Resolution)
-  const runInstitutionalVisionAnalysis = (imageSrc: string) => {
-    setAnalyzingCamera(false);
+  // Real Multimodal Gemini Vision Analysis + Global Market Auto-Sync
+  const runInstitutionalVisionAnalysis = async (
+    imageSrc: string,
+    explicitPair?: CurrencyPair,
+    explicitTf?: Timeframe
+  ) => {
+    setAnalyzingCamera(true);
     try {
-      const pipMultiplier = pair.includes('JPY') ? 100 : pair.includes('XAU') ? 10 : pair.includes('BTC') ? 1 : 10000;
-      const distFromEma20Pips = Math.abs(currentPrice - ema20) * pipMultiplier;
-      const matchedCamMkt = liveMarkets.find((m) => m.pair === pair);
-      const camSwings = computeCandleSwingLevels(matchedCamMkt?.candles);
+      let resolvedPair: CurrencyPair = explicitPair || pair;
+      let resolvedTf: Timeframe = explicitTf || timeframe;
+      let visionSource: 'gemini-4-hydrogen' | 'quantitative-engine' = 'quantitative-engine';
+      let visionDirectionOverride: 'BUY' | 'SELL' | undefined;
+      let visionTrendLabel: 'UPTREND' | 'DOWNTREND' | 'RANGING' | undefined;
+      let visionSummary = '';
+      let visionInvalidation = '';
+      let ocrDetectedPrice = 0;
+      let ocrKeyLevel = 0;
+      let ocrPattern = '';
+      let ocrRsi = rsi;
+
+      // Send captured photo / uploaded chart screenshot to Gemini Multimodal Vision (/api/ai/vision-chart)
+      if (imageSrc.startsWith('data:image/')) {
+        const liveQuotesMap: Record<string, { price: number; change24hPct: number }> = {};
+        liveMarkets.forEach((m) => {
+          liveQuotesMap[m.pair] = { price: m.price, change24hPct: m.change24hPct };
+        });
+
+        const controller = new AbortController();
+        const timeoutTimer = setTimeout(() => {
+          controller.abort('VisionTimeout');
+        }, 11000);
+
+        try {
+          const res = await fetch('/api/ai/vision-chart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+              imageBase64: imageSrc,
+              fallbackPair: resolvedPair,
+              fallbackTimeframe: resolvedTf,
+              broker,
+              liveQuotes: liveQuotesMap
+            })
+          });
+          if (res.ok) {
+            const vData = await res.json();
+            if (vData?.detectedPair) resolvedPair = vData.detectedPair as CurrencyPair;
+            if (vData?.detectedTimeframe) resolvedTf = vData.detectedTimeframe as Timeframe;
+            if (vData?.source === 'gemini-4-hydrogen') visionSource = 'gemini-4-hydrogen';
+            if (vData?.recommendedDirection === 'BUY' || vData?.recommendedDirection === 'SELL') {
+              visionDirectionOverride = vData.recommendedDirection;
+            }
+            if (
+              vData?.detectedTrend === 'UPTREND' ||
+              vData?.detectedTrend === 'DOWNTREND' ||
+              vData?.detectedTrend === 'RANGING'
+            ) {
+              visionTrendLabel = vData.detectedTrend;
+            }
+            if (Number(vData?.detectedPrice) > 0) ocrDetectedPrice = Number(vData.detectedPrice);
+            if (Number(vData?.detectedKeyLevel) > 0) ocrKeyLevel = Number(vData.detectedKeyLevel);
+            if (vData?.detectedPattern) ocrPattern = String(vData.detectedPattern);
+            if (Number(vData?.rsiEstimate) > 0) ocrRsi = Number(vData.rsiEstimate);
+            if (vData?.aiSummary) visionSummary = String(vData.aiSummary);
+            if (vData?.invalidationWarning) visionInvalidation = String(vData.invalidationWarning);
+          }
+        } catch {
+          // Graceful quantitative calibration continues below if request aborts/times out
+        } finally {
+          clearTimeout(timeoutTimer);
+        }
+      }
+
+      // Auto-sync entire app & live stream to the detected market pair + timeframe
+      setPair(resolvedPair);
+      setTimeframe(resolvedTf);
+      globalLiveStream.setPairTimeframe(resolvedPair, resolvedTf);
+      globalLiveStream.setSelectedPair(resolvedPair, resolvedTf);
+
+      const matchedCamMkt =
+        liveMarkets.find((m) => m.pair === resolvedPair) ||
+        INITIAL_MARKETS_DATA.find((m) => m.pair === resolvedPair);
+      const baseLivePrice = ocrDetectedPrice > 0 ? ocrDetectedPrice : (matchedCamMkt?.price ?? currentPrice);
+      const liveEval = evaluateCandleSeriesAndTick({
+        pair: resolvedPair,
+        timeframe: resolvedTf,
+        livePrice: baseLivePrice,
+        baseCandles:
+          resolvedTf === 'H1' || resolvedTf === 'H4' || resolvedTf === 'D1'
+            ? matchedCamMkt?.h1Candles || matchedCamMkt?.candles
+            : matchedCamMkt?.candles,
+        candlesAreRealOhlc: matchedCamMkt?.candlesAreRealOhlc,
+        change24hPct: matchedCamMkt?.change24hPct,
+        h1TrendDirection: matchedCamMkt?.h1TrendDirection
+      });
+
+      const resolvedPrice = baseLivePrice;
+      const resolvedEma20 = liveEval.ema20;
+      const resolvedEma50 = liveEval.ema50;
+      const resolvedKeyLevel = ocrKeyLevel > 0 ? ocrKeyLevel : liveEval.keyLevel;
+      const resolvedPattern = ocrPattern || liveEval.patternType || patternType;
+      const resolvedRsi = ocrDetectedPrice > 0 ? ocrRsi : liveEval.rsi;
+
+      setCurrentPrice(resolvedPrice);
+      setKeyLevel(resolvedKeyLevel);
+      setEma20(resolvedEma20);
+      setEma50(resolvedEma50);
+      setRsi(resolvedRsi);
+      setPatternType(liveEval.patternType || matchedCamMkt?.patternType || patternType);
+
+      const { pipMultiplier } = getPairSpecs(resolvedPair);
+      const distFromEma20Pips = Math.abs(resolvedPrice - resolvedEma20) * pipMultiplier;
+      const camSwings = computeCandleSwingLevels(liveEval.candles);
       const pctMapCam: Partial<Record<CurrencyPair, number>> = {};
       liveMarkets.forEach((m) => {
         pctMapCam[m.pair] = m.change24hPct;
       });
       const camMacro = getCurrentMacroContext(pctMapCam);
       const computed = computeRealChartTradeParams({
-        targetPair: pair,
-        targetTf: timeframe,
+        targetPair: resolvedPair,
+        targetTf: resolvedTf,
         targetBroker: broker,
-        price: currentPrice,
-        keyLevel,
-        ema20,
-        ema50,
-        rsi,
-        atrPips: matchedCamMkt?.atrPips,
+        price: resolvedPrice,
+        keyLevel: resolvedKeyLevel,
+        ema20: resolvedEma20,
+        ema50: resolvedEma50,
+        rsi: resolvedRsi,
+        atrPips: liveEval.atrPips,
+        candles: liveEval.candles,
         swingLow: camSwings.swingLow,
         swingHigh: camSwings.swingHigh,
         change24hPct: matchedCamMkt?.change24hPct,
         macro: camMacro,
+        biasOverride: visionDirectionOverride,
         h1TrendDirection: matchedCamMkt?.h1TrendDirection,
-        bosAnalysis: matchedCamMkt?.bosAnalysis,
+        bosAnalysis: liveEval.bosAnalysis,
         riskConfig
       });
 
@@ -713,21 +821,25 @@ InpMagicNumber=777129
         computed.executionReadiness === 'NO_TRADE_CHOP' || computed.executionReadiness === 'NO_TRADE_CLOSED'
           ? `WAIT / STAND ASIDE (${computed.executionReadiness})`
           : computed.direction === 'BUY'
-          ? `HIGH PROBABILITY BUY (${patternType.toUpperCase()})`
-          : `HIGH PROBABILITY SELL (${patternType.toUpperCase()})`;
+          ? `HIGH PROBABILITY BUY (${resolvedPattern.toUpperCase()})`
+          : `HIGH PROBABILITY SELL (${resolvedPattern.toUpperCase()})`;
 
       const brokerSpreadCostUsd = computed.spreadCostUsd.toFixed(2);
       const decimals = computed.decimals;
 
       setCameraAnalysisResult({
         imageSrc,
-        pair,
-        timeframe,
+        pair: resolvedPair,
+        timeframe: resolvedTf,
         session,
         broker,
+        visionSource,
+        detectedTrend: visionTrendLabel || computed.trendDirection,
+        aiSummary: visionSummary || computed.trajectory,
+        invalidationWarning: visionInvalidation || computed.executionReadinessReason,
         currentPrice: computed.entryPrice,
-        keyLevel,
-        pattern: patternType,
+        keyLevel: resolvedKeyLevel,
+        pattern: resolvedPattern,
         score,
         confidencePercent: computed.confidence,
         orderType: computed.orderType,
@@ -746,39 +858,40 @@ InpMagicNumber=777129
         brokerSpreadCostUsd,
         mt4SafetyProof: computed.mt4SafetyProof,
         ocrExtracted: {
-          detectedPair: pair,
-          detectedTimeframe: timeframe,
+          detectedPair: resolvedPair,
+          detectedTimeframe: resolvedTf,
           detectedPrice: computed.entryPrice,
-          detectedWickPeak: keyLevel,
-          wickExcessPips: (Math.abs(keyLevel - currentPrice) * pipMultiplier).toFixed(1),
-          fvgZone: `${(currentPrice - 6 / pipMultiplier).toFixed(decimals)} - ${(currentPrice + 6 / pipMultiplier).toFixed(decimals)}`,
-          obStatus: 'Defended Mean Threshold (50%)',
-          status: '100% INGESTED'
+          detectedWickPeak: resolvedKeyLevel,
+          wickExcessPips: (Math.abs(resolvedKeyLevel - resolvedPrice) * pipMultiplier).toFixed(1),
+          fvgZone: `${(resolvedPrice - 6 / pipMultiplier).toFixed(decimals)} - ${(resolvedPrice + 6 / pipMultiplier).toFixed(decimals)}`,
+          obStatus: liveEval.bosAnalysis?.bosDirection?.replace(/_/g, ' ') || 'Structure Validated',
+          status: visionSource === 'gemini-4-hydrogen' ? 'GEMINI VISION + AUTO-SYNCED' : 'QUANT ENGINE AUTO-SYNCED'
         },
         confluences: [
+          `Detected Chart & Trend: ${resolvedPair} [${resolvedTf}] · ${visionTrendLabel || computed.trendDirection} · BOS: ${liveEval.bosAnalysis?.bosDirection?.replace(/_/g, ' ') || 'ALIGNED'}.`,
           `Execution Gate: ${computed.executionReadiness} — ${computed.executionReadinessReason}`,
           `Spread Check: ${broker.toUpperCase()} typical spread is ~${computed.brokerSpread} pips ($${brokerSpreadCostUsd} on ${computed.lotSize.toFixed(2)} lot).`,
-          `Mean Reversion: Price positioned ${distFromEma20Pips.toFixed(1)} pips from 20 EMA (${ema20}).`,
-          `Momentum Engine: RSI (14) at ${rsi} · 1H ${computed.h1TrendDirection}.`,
+          `Mean Reversion: Price positioned ${distFromEma20Pips.toFixed(1)} pips from 20 EMA (${resolvedEma20.toFixed(decimals)}).`,
+          `Momentum Engine: RSI (14) at ${resolvedRsi} · 1H ${computed.h1TrendDirection}.`,
           `${computed.mt4SafetyProof}`,
           `Dynamic Capital Protection: ${computed.lotSize.toFixed(2)} lots capped at $${computed.actualRiskUsd.toFixed(2)} (${riskConfig.riskPct}% of $${riskConfig.accountBalanceUsd.toLocaleString()}).`
         ],
         mt4Steps: [
-          `1. Open MT4/MT5 -> Select ${computed.brokerSymbol} (${timeframe}) -> Press F9 (New Order Ticket)`,
-          `2. Type: ${computed.orderType} @ ${computed.entryPrice}`,
+          `1. Open MT4/MT5 -> Select ${computed.brokerSymbol} (${resolvedTf}) -> Press F9 (New Order Ticket)`,
+          `2. Type: ${computed.orderType} @ ${computed.entryPrice.toFixed(decimals)}`,
           `3. Volume: ${computed.lotSize.toFixed(2)} Lots ($${computed.actualRiskUsd.toFixed(2)} Max Risk)`,
-          `4. Set Stop Loss: ${computed.stopLoss} (-${computed.slPips} pips)`,
-          `5. Set Take Profit: ${computed.tp2} (+${computed.tpPips} pips)`,
-          `6. Scale-Out Protocol: Close 50% at ${computed.tp1} & move SL to Breakeven`
+          `4. Set Stop Loss: ${computed.stopLoss.toFixed(decimals)} (-${computed.slPips} pips)`,
+          `5. Set Take Profit: ${computed.tp2.toFixed(decimals)} (+${computed.tpPips} pips)`,
+          `6. Scale-Out Protocol: Close 50% at ${computed.tp1.toFixed(decimals)} & move SL to Breakeven`
         ],
-        notes: traderNotes || computed.trajectory,
+        notes: visionSummary || traderNotes || computed.trajectory
       });
-      } catch (err) {
-        console.error('Vision analysis calculation error:', err);
-      } finally {
-        setAnalyzingCamera(false);
-        playAudioBeep(880, 0.12);
-      }
+    } catch (err) {
+      console.error('Vision analysis calculation error:', err);
+    } finally {
+      setAnalyzingCamera(false);
+      playAudioBeep(880, 0.12);
+    }
   };
 
   // Run Analysis Engine (Supports both Standard Confluence and Deep AI Institutional EA)
@@ -1454,7 +1567,7 @@ InpMagicNumber=777129
   };
 
   return (
-    <div className="space-y-6 rounded-3xl p-6 sm:p-8 glass-panel-gold border border-[#D4AF37]/30 my-8">
+    <div id="scanner-tools" className="space-y-6 rounded-3xl p-6 sm:p-8 glass-panel-gold border border-[#D4AF37]/30 my-8">
       {/* Top Scanner Hub or Single-Line Return Header */}
       {scannerView === 'hub' ? (
         <div className="p-6 rounded-3xl bg-[#090F1D] border border-slate-800 space-y-3">
@@ -1950,7 +2063,7 @@ InpMagicNumber=777129
 
               <DynamicPositionSizeCalculator pair={pair} computed={favorableComputed} />
 
-              <div className="rounded-2xl border border-slate-800 overflow-hidden bg-slate-950 shadow-2xl">
+              <div id="scanner-tradingview-panel" className="rounded-2xl border border-slate-800 overflow-hidden bg-slate-950 shadow-2xl">
                 <div className="p-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-xs font-mono">
                   <div className="flex items-center gap-2">
                     <BarChart3 className="w-4 h-4 text-[#D4AF37]" />
@@ -2942,14 +3055,17 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
                   <div className="flex items-center gap-2 flex-wrap">
                     <CheckCircle2 className="w-4 h-4 text-[#00C261] shrink-0" />
                     <span className="text-base sm:text-lg font-black text-white font-mono">
-                      {cameraAnalysisResult.pair} • {cameraAnalysisResult.timeframe} • {cameraAnalysisResult.session}
+                      {cameraAnalysisResult.pair} • {cameraAnalysisResult.timeframe} • {cameraAnalysisResult.detectedTrend || cameraAnalysisResult.session}
                     </span>
                     <span className="text-xs font-mono px-2.5 py-0.5 rounded bg-slate-800 text-cyan-300 border border-slate-700">
+                      {cameraAnalysisResult.visionSource === 'gemini-4-hydrogen' ? 'Gemini Vision AI' : 'Quant Live Sync'}
+                    </span>
+                    <span className="text-xs font-mono px-2.5 py-0.5 rounded bg-slate-800 text-[#D4AF37] border border-slate-700">
                       Broker: {cameraAnalysisResult.broker.toUpperCase()}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-400">
-                    High Confidence Algorithmic EA Execution Slip • Institutional Quantitative Confluence Engine
+                  <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
+                    {cameraAnalysisResult.aiSummary || 'Auto-synced Gemini Vision chart detection and quantitative EP / SL / TP execution slip.'}
                   </p>
                 </div>
 
@@ -3042,10 +3158,10 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
                   </div>
                   <div className="flex items-center gap-4 text-xs">
                     <span className="text-slate-300">
-                      Risk: <strong className="text-red-400">${cameraAnalysisResult.actualRiskUsd} (260 KES)</strong>
+                      Risk: <strong className="text-red-400">${Number(cameraAnalysisResult.actualRiskUsd).toFixed(2)} ({Math.round(Number(cameraAnalysisResult.actualRiskUsd) * 130)} KES)</strong>
                     </span>
                     <span className="text-slate-300">
-                      Reward: <strong className="text-emerald-400">+${cameraAnalysisResult.potentialGainUsd} (~650 KES)</strong>
+                      Reward: <strong className="text-emerald-400">+${Number(cameraAnalysisResult.potentialGainUsd).toFixed(2)} (~{Math.round(Number(cameraAnalysisResult.potentialGainUsd) * 130)} KES)</strong>
                     </span>
                   </div>
                 </div>
@@ -3082,7 +3198,9 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
                       <Sparkles className="w-3.5 h-3.5 text-[#00C261]" />
                       <span>Mathematical Confluence Signals</span>
                     </span>
-                    <span className="text-[10px] font-mono text-[#00C261] font-bold">100% INGESTED</span>
+                    <span className="text-[10px] font-mono text-[#00C261] font-bold">
+                      {cameraAnalysisResult.ocrExtracted?.status || 'AUTO-SYNCED'}
+                    </span>
                   </div>
 
                   <div className="space-y-1.5 text-xs text-slate-300">
@@ -3097,23 +3215,37 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
               </div>
 
               {/* Action Buttons */}
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                 <button
                   onClick={() => handleLogToJournal(cameraAnalysisResult)}
                   className="w-full sm:w-auto px-6 py-3.5 rounded-2xl btn-gold text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl hover:scale-105 active:scale-95 transition"
                 >
-                  <span>Log Scanned Setup to Trade Journal (Pillar 8)</span>
+                  <span>Log Scanned Setup to Trade Journal</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => setScannerView('manual')}
-                  className="w-full sm:w-auto px-5 py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 text-xs font-mono font-bold flex items-center justify-center gap-2 transition whitespace-nowrap"
-                >
-                  <SlidersHorizontal className="w-4 h-4 text-[#D4AF37]" />
-                  <span>Open Manual EA Confluence</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      globalLiveStream.setPairTimeframe(cameraAnalysisResult.pair, cameraAnalysisResult.timeframe);
+                      globalLiveStream.setSelectedPair(cameraAnalysisResult.pair, cameraAnalysisResult.timeframe);
+                      setScannerView('radar');
+                    }}
+                    className="flex-1 sm:flex-initial px-4 py-3.5 rounded-2xl bg-emerald-950/60 hover:bg-emerald-900/70 text-[#00C261] border border-[#00C261]/50 text-xs font-mono font-bold flex items-center justify-center gap-2 transition whitespace-nowrap"
+                  >
+                    <CandlestickChart className="w-4 h-4" />
+                    <span>Open Auto-Synced Live Chart</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScannerView('manual')}
+                    className="flex-1 sm:flex-initial px-4 py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 text-xs font-mono font-bold flex items-center justify-center gap-2 transition whitespace-nowrap"
+                  >
+                    <SlidersHorizontal className="w-4 h-4 text-[#D4AF37]" />
+                    <span>Manual EA</span>
+                  </button>
+                </div>
               </div>
             </div>
           ) : (
@@ -3701,6 +3833,12 @@ Broker: ${broker.toUpperCase()}`;
                 setCurrentPrice(customP);
               }
               setScannerView('favorable_chart');
+              window.setTimeout(() => {
+                const tvPanel = document.getElementById('scanner-tradingview-panel');
+                if (tvPanel) {
+                  tvPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+              }, 140);
             }}
           />
         </div>

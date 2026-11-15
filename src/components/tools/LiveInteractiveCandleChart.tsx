@@ -370,15 +370,28 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   const riskBandTop = Math.min(yEntry, ySl);
   const riskBandHeight = Math.max(2, Math.abs(ySl - yEntry));
   const lastCandleX = indexToX(Math.max(0, visibleCandles.length - 1));
-  const projRetestY =
+  const rawRetestY =
     advisoryEntryPrice && advisoryEntryPrice > 0
       ? priceToY(advisoryEntryPrice)
       : priceToY(livePrice);
+  // Clamp retest/pullback point strictly inside protected [EP, SL] risk corridor so visual trajectory never pierces SL
+  const projRetestY = isBuy
+    ? Math.min(rawRetestY, Math.max(yEntry, ySl - 6))
+    : Math.max(rawRetestY, Math.min(yEntry, ySl + 6));
   const projX1 = lastCandleX + 6;
   const projX2 = Math.min(svgWidth - padRight - 28, lastCandleX + 20);
   const projX3 = Math.min(svgWidth - padRight - 14, lastCandleX + 34);
   const projX4 = Math.min(svgWidth - padRight - 4, lastCandleX + 48);
   const trajectoryPolyPoints = `${projX1.toFixed(1)},${priceToY(livePrice).toFixed(1)} ${projX2.toFixed(1)},${projRetestY.toFixed(1)} ${projX3.toFixed(1)},${yTp1.toFixed(1)} ${projX4.toFixed(1)},${yTp2.toFixed(1)}`;
+
+  // Mathematical geometry verification for BUY (SL < EP < TP1 < TP2) & SELL (TP2 < TP1 < EP < SL)
+  const slDistPips = Number((Math.abs(entryPrice - stopLoss) * pipMultiplier).toFixed(1));
+  const tp1DistPips = Number((Math.abs(tp1 - entryPrice) * pipMultiplier).toFixed(1));
+  const tp2DistPips = Number((Math.abs(tp2 - entryPrice) * pipMultiplier).toFixed(1));
+  const geomRr = slDistPips > 0 ? Number((tp2DistPips / slDistPips).toFixed(2)) : 0;
+  const isGeometryValid = isBuy
+    ? stopLoss < entryPrice && entryPrice < tp1 && tp1 < tp2
+    : tp2 < tp1 && tp1 < entryPrice && entryPrice < stopLoss;
 
   return (
     <div className="rounded-2xl bg-[#060B16] border border-[#D4AF37]/40 p-4 space-y-3.5 font-mono tabular-nums shadow-inner">
@@ -613,9 +626,9 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
             );
           })}
 
-          {/* Projected Multi-Point Candlestick Trajectory (Live -> Pullback/Entry -> TP1 -> TP2) */}
+          {/* Projected Multi-Point Candlestick Trajectory (Live -> Pullback/Entry -> TP1 -> TP2 + Directional Arrowhead) */}
           {!tpTargetAlreadyHit && (
-            <g opacity="0.92">
+            <g opacity="0.95">
               <polyline
                 fill="none"
                 points={trajectoryPolyPoints}
@@ -623,8 +636,26 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
                 strokeWidth="2.1"
                 strokeDasharray="4 3"
               />
-              <circle cx={projX3} cy={yTp1} r="2.6" fill="#22D3EE" />
-              <circle cx={projX4} cy={yTp2} r="3.8" fill={isBuy ? '#00C261' : '#EF4444'} />
+              {/* Pullback / EP Anchor Ring */}
+              <circle
+                cx={projX2}
+                cy={projRetestY}
+                r="2.8"
+                fill="#040811"
+                stroke="#F8FAFC"
+                strokeWidth="1.3"
+              />
+              {/* TP1 Milestone Node */}
+              <circle cx={projX3} cy={yTp1} r="2.7" fill="#22D3EE" />
+              {/* Directional Arrowhead at TP2 Target (Pointing UP for BUY, DOWN for SELL) */}
+              <polygon
+                points={
+                  isBuy
+                    ? `${projX4},${yTp2 - 5} ${projX4 - 4.2},${yTp2 + 3.5} ${projX4 + 4.2},${yTp2 + 3.5}`
+                    : `${projX4},${yTp2 + 5} ${projX4 - 4.2},${yTp2 - 3.5} ${projX4 + 4.2},${yTp2 - 3.5}`
+                }
+                fill={isBuy ? '#00C261' : '#EF4444'}
+              />
             </g>
           )}
 
@@ -734,6 +765,60 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
               SL LEVEL CROSSED BY CANDLE
             </span>
           )}
+        </div>
+      </div>
+
+      {/* Mathematical Direction & SL/EP/TP Proof Bar */}
+      <div
+        className={`px-3 py-2 rounded-xl border text-[11px] flex flex-wrap items-center justify-between gap-2 ${
+          isGeometryValid
+            ? isBuy
+              ? 'bg-emerald-950/35 border-emerald-500/35 text-emerald-200'
+              : 'bg-red-950/35 border-red-500/35 text-red-200'
+            : 'bg-amber-950/50 border-amber-500/50 text-amber-200'
+        }`}
+      >
+        <div className="flex items-center gap-2 flex-wrap">
+          <span
+            className={`px-1.5 py-0.5 rounded font-black text-[10px] ${
+              isBuy ? 'bg-[#00C261] text-black' : 'bg-red-600 text-white'
+            }`}
+          >
+            {isBuy ? 'BUY PROOF ▲' : 'SELL PROOF ▼'}
+          </span>
+          {isBuy ? (
+            <span>
+              SL <strong className="text-red-300">{stopLoss.toFixed(decimals)}</strong>
+              {' < '}
+              EP <strong className="text-white">{entryPrice.toFixed(decimals)}</strong>
+              {' < '}
+              TP1 <strong className="text-cyan-300">{tp1.toFixed(decimals)}</strong>
+              {' < '}
+              TP2 <strong className="text-[#00C261]">{tp2.toFixed(decimals)}</strong>
+            </span>
+          ) : (
+            <span>
+              TP2 <strong className="text-[#00C261]">{tp2.toFixed(decimals)}</strong>
+              {' < '}
+              TP1 <strong className="text-cyan-300">{tp1.toFixed(decimals)}</strong>
+              {' < '}
+              EP <strong className="text-white">{entryPrice.toFixed(decimals)}</strong>
+              {' < '}
+              SL <strong className="text-red-300">{stopLoss.toFixed(decimals)}</strong>
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3 text-[10px] font-bold text-slate-300">
+          <span>
+            Risk: <strong className="text-red-400">-{slDistPips}p</strong>
+          </span>
+          <span>
+            TP1: <strong className="text-cyan-300">+{tp1DistPips}p</strong>
+          </span>
+          <span>
+            TP2: <strong className="text-[#00C261]">+{tp2DistPips}p</strong>
+          </span>
+          <span className="text-[#D4AF37]">R:R 1:{geomRr}</span>
         </div>
       </div>
 

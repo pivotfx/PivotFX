@@ -1,32 +1,28 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { PillarLesson, PillarData, CurrencyPair, Timeframe } from '../../types';
 import {
   computeRealChartTradeParams,
   INITIAL_MARKETS_DATA,
   globalLiveStream,
-  positionRiskStore
+  GlobalStreamState,
+  positionRiskStore,
+  getTradingViewExternalUrl,
 } from '../../utils/liveMarketEngine';
 import {
   CheckCircle2,
   ShieldCheck,
   Target,
   AlertTriangle,
-  Compass,
-  Zap,
-  TrendingUp,
-  TrendingDown,
-  Layers,
-  ArrowRight,
-  BookOpen,
   Cpu,
   Copy,
   Check,
   HelpCircle,
   ExternalLink,
-  Flame,
-  Award,
+  BookOpen,
   RefreshCw,
-  SlidersHorizontal
+  SlidersHorizontal,
+  LineChart,
+  GraduationCap,
 } from 'lucide-react';
 
 interface LessonExpoundedMasteryProps {
@@ -34,11 +30,25 @@ interface LessonExpoundedMasteryProps {
   pillar: PillarData;
 }
 
+interface LessonQuizItem {
+  question: string;
+  options: string[];
+  correctIndex: number;
+  explanation: string;
+}
+
 export const LessonExpoundedMastery: React.FC<LessonExpoundedMasteryProps> = ({
   lesson,
   pillar,
 }) => {
   const [copiedTicket, setCopiedTicket] = useState<boolean>(false);
+  const [streamState, setStreamState] = useState<GlobalStreamState>(() => globalLiveStream.getState());
+  const [quizAnswers, setQuizAnswers] = useState<Record<number, number>>({});
+
+  useEffect(() => {
+    const unsub = globalLiveStream.subscribe((next) => setStreamState(next));
+    return () => unsub();
+  }, []);
 
   // Store student checklist status in localStorage
   const storageKey = `pivotfx_checklist_${pillar.id}_${lesson.id}`;
@@ -54,8 +64,8 @@ export const LessonExpoundedMastery: React.FC<LessonExpoundedMasteryProps> = ({
   useEffect(() => {
     try {
       localStorage.setItem(storageKey, JSON.stringify(checkedItems));
-    } catch (e) {
-      console.error(e);
+    } catch {
+      // Ignore storage quota errors
     }
   }, [checkedItems, storageKey]);
 
@@ -67,182 +77,246 @@ export const LessonExpoundedMastery: React.FC<LessonExpoundedMasteryProps> = ({
     }
   };
 
-  // Derive deep lesson-specific content, contemporary real-world case studies, and execution tickets
-  const getExpoundedDetails = () => {
+  // Determine lesson-specific pair, Zero-to-Hero analogy, traps, and 2-question mastery quiz
+  const expounded = useMemo(() => {
     const num = lesson.number;
     const titleLower = lesson.title.toLowerCase();
+    const conceptLower = lesson.concept.toLowerCase();
+    const combined = `${titleLower} ${conceptLower} ${(lesson.realWorldExample?.pair || '').toLowerCase()}`;
 
     let pair: CurrencyPair = 'EUR/USD';
     let displayPair = lesson.realWorldExample?.pair || 'EUR/USD (Fiber)';
     let timeframe: Timeframe = 'M15';
     let session = 'London Open (10:00 AM EAT)';
-    let bias: 'BUY' | 'SELL' = 'BUY';
-    let entry = 1.12670;
-    let pnlUsd = '+15.60';
-    let pnlKes = '+2,028 KES';
-    let retailTrap = 'Chasing market green candles after a breakout, entering with 0.10 lot on a $100 account, and placing Stop Loss on the wrong side of the current bid/ask quote.';
-    let institutionalEdge = 'Waiting for liquidity sweeps of session extremes, syncing Stop Loss & Take Profit to your live MT4 chart candlestick, and risking strictly $2.00 via 0.01 micro lot.';
-    let brokerNote = 'FXPesa (CMA Regulated) · Instant M-Pesa · 1.1 pip spread';
+    let zeroAnalogy =
+      'Think of currency exchange at the airport or bank: when one currency strengthens while the other weakens, every 0.0001 movement is 1 pip of measurable profit or risk.';
+    let zeroCoreTakeaway =
+      'Match your Stop Loss and Take Profit directly to the current live candle price, never risk more than your fixed % capital guard, and trade in the direction of higher-timeframe flow.';
+    let retailTrap =
+      'Chasing big green candles after price is already stretched from the 20 EMA, sizing oversized lots without checking pip value, and placing Stop Loss on the wrong side of Bid/Ask.';
+    let institutionalEdge =
+      'Wait for price to return to the 20/50 EMA value zone or FVG imbalance, size dynamically to cap max loss, and anchor SL behind protected swing structure.';
+    let brokerNote = 'FXPesa (CMA Regulated) · Instant M-Pesa · Live Spread Shield';
 
-    if (num === '03' || titleLower.includes('structure') || titleLower.includes('trend')) {
-      pair = 'GBP/USD';
-      displayPair = 'GBP/USD (Cable)';
-      timeframe = 'M15';
-      session = 'London Open (10:00 - 12:00 EAT)';
-      bias = 'BUY';
-      entry = 1.34998;
-      pnlUsd = '+19.20';
-      pnlKes = '+2,496 KES';
-      retailTrap = 'Using stale Stop Loss/Take Profit numbers (like 1.2885) when the live GBP/USD chart has moved to 1.34998 — causing MT4 to immediately reject the order with [Invalid S/L or T/P].';
-      institutionalEdge = 'Anchoring Entry directly to the live chart quote (1.34998), verifying Break of Structure (BOS) above the 20 EMA, and placing Stop Loss 16 pips below structure with strict $2.00 risk.';
-      brokerNote = 'FXPesa / Exness · CMA Zero Negative Balance Guarantee';
-    } else if (num === '04' || titleLower.includes('broker') || titleLower.includes('cma') || titleLower.includes('leverage')) {
+    if (combined.includes('gold') || combined.includes('xau') || num === '04') {
       pair = 'XAU/USD';
       displayPair = 'XAU/USD (Gold Spot)';
       timeframe = 'M15';
-      session = 'New York AM (15:30 - 17:30 EAT)';
-      bias = 'BUY';
-      entry = 3955.00;
-      pnlUsd = '+24.00';
-      pnlKes = '+3,120 KES';
-      retailTrap = 'Opening an unregulated offshore account with 1:2000 leverage, pasting old 2732/2760 Gold prices when the live Gold chart is trading around 3955.00 (or 4041.495 futures), and getting rejected or stopped out.';
-      institutionalEdge = 'Trading via CMA-regulated FXPesa with negative balance protection, calculating SL/TP dynamically from your live Gold candlestick price, and enforcing 0.01 micro lot so max loss stays capped at $2.00 (260 KES).';
-      brokerNote = 'FXPesa Kenya (CMA License #107) · 1:400 Cap · Zero Debt Liability';
-    } else if (num === '01' || titleLower.includes('forex') || titleLower.includes('what is')) {
-      pair = 'EUR/USD';
-      displayPair = 'EUR/USD (Fiber)';
+      session = 'New York Overlap (15:30 - 18:00 EAT)';
+      zeroAnalogy =
+        'Gold moves 3x to 5x faster than EUR/USD. Just like driving fast on a highway, you reduce your position size (lot size) and widen your safety margin (ATR Stop Loss) so normal speed bumps do not knock you out.';
+      zeroCoreTakeaway =
+        'On Gold, use CMA-regulated brokers with negative balance protection, respect ATR volatility width, and always keep lot size aligned to your fixed USD loss limit.';
+      retailTrap =
+        'Using tight 5-pip EUR/USD stops on XAU/USD or copying static old price screenshots when spot Gold is actively shifting every second.';
+      institutionalEdge =
+        'Calculate Gold SL from live 14-period ATR + protected BOS swing levels, sync TradingView OANDA:XAUUSD prices in real time, and scale 50% profit at TP1.';
+      brokerNote = 'FXPesa Kenya (CMA Regulated) · OANDA:XAUUSD Feed Parity';
+    } else if (combined.includes('btc') || combined.includes('eth') || combined.includes('crypto')) {
+      pair = combined.includes('eth') ? 'ETH/USD' : 'BTC/USD';
+      displayPair = pair === 'ETH/USD' ? 'ETH/USD (Ethereum)' : 'BTC/USD (Bitcoin)';
       timeframe = 'M15';
-      session = 'London Session (10:00 AM EAT)';
-      bias = 'BUY';
-      entry = 1.12670;
-      pnlUsd = '+15.90';
-      pnlKes = '+2,067 KES';
-      retailTrap = 'Confusing Bid vs Ask prices, placing a BUY order with a Stop Loss above the live chart price (1.12670), and sizing 0.10 lots without knowing each pip costs $1.00 USD.';
-      institutionalEdge = 'Mastered the mechanics: 1 pip on 0.01 EUR/USD = $0.10 USD (13 KES). With live chart entry @ 1.12670 and a 16-pip SL at 1.12510, risk is strictly $1.60 (208 KES), leaving 98% of capital untouched.';
-      brokerNote = 'FXPesa / Exness · Spread 1.1 pips · Instant M-Pesa Deposit';
-    } else if (num === '02' || titleLower.includes('participant') || titleLower.includes('bank') || titleLower.includes('liquidity')) {
+      session = '24/7 Active Crypto Order Flow';
+      zeroAnalogy =
+        'Crypto trades 24 hours a day including weekends. Because spikes happen suddenly around liquidity pools, disciplined traders wait for a Break of Structure (BOS) before committing capital.';
+      zeroCoreTakeaway =
+        'Sync Binance live OHLC candles cleanly, verify ADX trend displacement (>= 14.5) and MACD impulse, and avoid buying into Bearish BOS breakdowns.';
+      retailTrap =
+        'FOMO-buying sudden weekend green wicks only to get wicked out inside thin order-book sweeps.';
+      institutionalEdge =
+        'Verify H1 structure + M15 BOS before entering pullbacks and secure 50% gains at TP1 + Move SL to Breakeven.';
+      brokerNote = 'Binance Spot Parity · Zero Weekend Market Closure';
+    } else if (
+      num === '03' ||
+      combined.includes('bos') ||
+      combined.includes('choch') ||
+      combined.includes('structure') ||
+      combined.includes('fvg') ||
+      combined.includes('liquidity') ||
+      combined.includes('ict')
+    ) {
+      pair = 'GBP/USD';
+      displayPair = 'GBP/USD (Cable)';
+      timeframe = 'M15';
+      session = 'London Open (10:00 - 12:30 EAT)';
+      zeroAnalogy =
+        'Market structure works like a staircase: in an Uptrend, price steps up (Higher Highs and Higher Lows). When price breaks a prior step downward (BOS/CHoCH), stop buying and wait to align with the new downward staircase.';
+      zeroCoreTakeaway =
+        'BOS confirms trend continuation; CHoCH warns of a structural reversal. Always check H1 trend + active BOS before opening any order.';
+      retailTrap =
+        'Trying to catch a falling knife by placing BUY orders right after a Bearish Break of Structure simply because the price "looks cheap".';
+      institutionalEdge =
+        'Demand MTF alignment (H1 + M15) plus 10-Factor confirmation, entering pullbacks into Fair Value Gaps or 20 EMA value zones.';
+      brokerNote = 'Smart Money Structure · 8-Point Pre-Flight Verified';
+    } else if (combined.includes('jpy') || num === '02' || combined.includes('bank') || combined.includes('session')) {
       pair = 'USD/JPY';
       displayPair = 'USD/JPY (Ninja)';
       timeframe = 'M15';
-      session = 'Asian Session (03:00 - 08:00 EAT)';
-      bias = 'SELL';
-      entry = 158.250;
-      pnlUsd = '+18.20';
-      pnlKes = '+2,366 KES';
-      retailTrap = 'Trying to pick tops against central bank liquidity injections or copying static signal screenshots from hours earlier without checking the current USD/JPY candlestick (158.250).';
-      institutionalEdge = 'Tracking commercial bank order flow and waiting for post-sweep displacement around 158.250 before setting a 16-pip Stop Loss above the sweep high.';
-      brokerNote = 'FXPesa · 1.2 pip spread on USDJPY · ECN Order Matching';
-    } else if (num === '05' || titleLower.includes('tradingview') || titleLower.includes('setup') || titleLower.includes('chart')) {
-      pair = 'GBP/USD';
-      displayPair = 'GBP/USD (M10 / M15)';
-      timeframe = 'M10';
-      session = 'Pre-London Prep (09:30 AM EAT)';
-      bias = 'BUY';
-      entry = 1.34998;
-      pnlUsd = '+18.00';
-      pnlKes = '+2,340 KES';
-      retailTrap = 'Installing 12 overlapping neon indicators causing cognitive overload and misreading the active candlestick price when switching between TradingView and MT4.';
-      institutionalEdge = 'Using a clean TradingView layout (#0F172A) with 20 EMA, 50 EMA, Session Breaks (Alt+S), and Nairobi UTC+3 sync so your chart quote matches MT4.';
-      brokerNote = 'TradingView Live Feed Sync · MT4/MT5 Direct Hotkeys';
-    } else if (num === '06' || titleLower.includes('mt4') || titleLower.includes('mt5') || titleLower.includes('order')) {
+      session = 'Tokyo / London Crossover (09:00 - 11:30 EAT)';
+      zeroAnalogy =
+        'Commercial banks and institutions need massive liquidity pools (clusters of retail stop-loss orders) to fill huge positions. They often spike past obvious highs/lows first before moving in the real direction.';
+      zeroCoreTakeaway =
+        'Wait for the liquidity sweep spike to close back inside structure, then ride the institutional expansion with defined risk.';
+      retailTrap =
+        'Placing Stop Losses right on obvious round numbers or tight double tops where liquidity algorithms deliberately sweep them.';
+      institutionalEdge =
+        'Park Stop Loss safely outside the sweep extreme + ATR buffer and enter only on confirmed candle displacement.';
+      brokerNote = 'Tokyo & London Liquidity Windows (Nairobi EAT Synced)';
+    } else if (
+      combined.includes('risk') ||
+      combined.includes('lot') ||
+      combined.includes('margin') ||
+      combined.includes('drawdown') ||
+      combined.includes('expectancy') ||
+      combined.includes('psychology')
+    ) {
+      pair = 'USD/CAD';
+      displayPair = 'USD/CAD (Loonie)';
+      timeframe = 'M15';
+      session = 'New York Session (15:30 - 18:30 EAT)';
+      zeroAnalogy =
+        'Position sizing is the seatbelt of trading: even the world’s best driver hits bad weather occasionally. Capping each trade at 1%–2% equity means 5 consecutive losses still leave over 90% of your account intact.';
+      zeroCoreTakeaway =
+        'Formula: Lot Size = Max USD Risk / (SL Pips × Pip Value). Never adjust Stop Loss wider into a losing trade.';
+      retailTrap =
+        'Risking 25% of an account on a single "sure" setup or doubling lot sizes after a loss (revenge martingale).';
+      institutionalEdge =
+        'Lock fixed USD/KES risk per trade via the Dynamic Position Sizer, book 50% at TP1 (+Breakeven SL), and let winners run to TP2.';
+      brokerNote = 'Risk-First Prop Desk Protocol · Mandatory SL Cap';
+    } else if (num === '05' || num === '06' || combined.includes('tradingview') || combined.includes('mt4') || combined.includes('mt5')) {
       pair = 'EUR/USD';
       displayPair = 'EUR/USD (Fiber)';
       timeframe = 'M15';
-      session = 'London Open (10:00 AM EAT)';
-      bias = 'BUY';
-      entry = 1.12670;
-      pnlUsd = '+16.50';
-      pnlKes = '+2,145 KES';
-      retailTrap = 'Typing Stop Loss or Take Profit values that violate broker stop-level distances or sit on the wrong side of Bid/Ask during spread expansion — triggering MT4 [Invalid S/L or T/P].';
-      institutionalEdge = 'Pressing F9 to check the live Bid/Ask quote, verifying BUY rules (SL < Entry < TP) or SELL rules (TP < Entry < SL) with at least 12–16 pips clearance, and locking Volume at 0.01 micro lot.';
-      brokerNote = 'MT4/MT5 Hotkey F9 · Ctrl+T Terminal · Gilgil Preset';
+      session = 'London / NY Synced Window';
+      zeroAnalogy =
+        'Your chart platform (TradingView) is your GPS navigation map, and your broker terminal (MT4/MT5) is the steering wheel. Both must point at the exact same live road before you press Buy or Sell.';
+      zeroCoreTakeaway =
+        'Verify canonical symbol parity (FX:EURUSD / OANDA:XAUUSD / BINANCE:BTCUSDT), check BUY geometry (SL < EP < TP) or SELL geometry (TP < EP < SL), and double-check Bid/Ask spread.';
+      retailTrap =
+        'Pasting stale levels from an hour-old screenshot, triggering [Invalid S/L or T/P] or entering immediately when spread spikes at rollover (00:00 EAT).';
+      institutionalEdge =
+        'Click TradingView ↗ right inside PivotFx to inspect live price action side-by-side and copy pre-validated F9 order tickets.';
+      brokerNote = 'TradingView + MT4/MT5 Symbol Parity · Hotkey F9 Execution';
+    } else {
+      pair = 'EUR/USD';
+      displayPair = lesson.realWorldExample?.pair || 'EUR/USD (Fiber)';
+      timeframe = 'M15';
+      session = 'London Session (10:00 AM EAT)';
     }
 
-    const liveMatch = globalLiveStream.getState().markets.find((m) => m.pair === pair);
+    const liveMatch =
+      streamState.markets.find((m) => m.pair === pair) ||
+      INITIAL_MARKETS_DATA.find((m) => m.pair === pair);
     const liveRiskCfg = positionRiskStore.getConfig();
     const computed = computeRealChartTradeParams({
       targetPair: pair,
       targetTf: timeframe,
       targetBroker: 'fxpesa',
-      price: liveMatch?.price || entry,
+      price: liveMatch?.price ?? 1.1636,
       ema20: liveMatch?.ema20,
       ema50: liveMatch?.ema50,
       rsi: liveMatch?.rsi,
       atrPips: liveMatch?.atrPips,
+      candles: liveMatch?.candles,
       h1TrendDirection: liveMatch?.h1TrendDirection,
       bosAnalysis: liveMatch?.bosAnalysis,
-      biasOverride: liveMatch ? undefined : bias,
       riskConfig: liveRiskCfg,
     });
+
+    const quizzes: LessonQuizItem[] = [
+      {
+        question: `When viewing a live ${pair} chart before opening an order, what is the FIRST rule before choosing BUY or SELL?`,
+        options: [
+          'Buy immediately whenever the last candle is green.',
+          'Verify higher-timeframe (1H) trajectory and ensure there is no opposing Break of Structure (BOS/CHoCH).',
+          'Remove the Stop Loss so spreads cannot hit it.',
+        ],
+        correctIndex: 1,
+        explanation:
+          'Institutional execution always checks 1H structure and BOS/CHoCH first so you never buy into a bearish reversal or sell into a bullish impulse.',
+      },
+      {
+        question: `On your broker ticket for a ${computed.direction} setup on ${pair} at ${computed.entryPrice}, how must Stop Loss & TP1 be managed?`,
+        options: [
+          'Place SL past the protected swing + ATR buffer, size lots to cap USD loss, and scale 50% + move SL to Breakeven at TP1.',
+          'Use the maximum possible lot size regardless of Stop Loss distance.',
+          'Widen the Stop Loss further if price moves against your entry.',
+        ],
+        correctIndex: 0,
+        explanation:
+          'Sizing lots to SL distance caps maximum drawdown, while moving SL to Breakeven after TP1 removes downside risk on the runner.',
+      },
+    ];
 
     return {
       pair,
       displayPair,
       timeframe,
       session,
-      orderType: computed.orderType,
-      direction: computed.direction,
-      entry: computed.entryPrice,
-      sl: computed.stopLoss,
-      tp1: computed.tp1,
-      tp2: computed.tp2,
-      slPips: computed.slPips,
-      tpPips: computed.tpPips,
-      riskReward: computed.riskReward,
-      mt4SafetyProof: computed.mt4SafetyProof,
-      pnlUsd,
-      pnlKes,
+      zeroAnalogy,
+      zeroCoreTakeaway,
       retailTrap,
       institutionalEdge,
       brokerNote,
+      liveMatch,
+      computed,
+      quizzes,
     };
-  };
+  }, [lesson, streamState.markets]);
 
-  const details = getExpoundedDetails();
-
-  // Interactive Lesson Live Chart & MT4 Order Calculator State
-  const [practicePrice, setPracticePrice] = useState<number>(details.entry);
-  const [practiceDir, setPracticeDir] = useState<'BUY' | 'SELL'>(details.direction);
-  const [practiceTf, setPracticeTf] = useState<Timeframe>(details.timeframe);
+  // Interactive Practice Calculator synced with live market quote unless user edits
+  const [practicePrice, setPracticePrice] = useState<number>(expounded.computed.entryPrice);
+  const [userEditedPrice, setUserEditedPrice] = useState<boolean>(false);
+  const [practiceDir, setPracticeDir] = useState<'BUY' | 'SELL'>(expounded.computed.direction);
+  const [practiceTf, setPracticeTf] = useState<Timeframe>(expounded.timeframe);
   const [recalculatedBanner, setRecalculatedBanner] = useState<string | null>(null);
 
   useEffect(() => {
-    setPracticePrice(details.entry);
-    setPracticeDir(details.direction);
-    setPracticeTf(details.timeframe);
+    setPracticePrice(expounded.computed.entryPrice);
+    setUserEditedPrice(false);
+    setPracticeDir(expounded.computed.direction);
+    setPracticeTf(expounded.timeframe);
     setRecalculatedBanner(null);
+    setQuizAnswers({});
   }, [lesson.id]);
 
-  const liveMatchForPractice = globalLiveStream.getState().markets.find((m) => m.pair === details.pair);
+  // Keep practicePrice auto-synced with live tick stream unless manually overridden
+  useEffect(() => {
+    if (!userEditedPrice && expounded.liveMatch?.price) {
+      setPracticePrice(expounded.liveMatch.price);
+    }
+  }, [expounded.liveMatch?.price, userEditedPrice]);
+
   const practiceComputed = computeRealChartTradeParams({
-    targetPair: details.pair,
+    targetPair: expounded.pair,
     targetTf: practiceTf,
     targetBroker: 'fxpesa',
-    price: practicePrice > 0 ? practicePrice : details.entry,
-    ema20: liveMatchForPractice?.ema20,
-    ema50: liveMatchForPractice?.ema50,
-    rsi: liveMatchForPractice?.rsi,
-    atrPips: liveMatchForPractice?.atrPips,
-    h1TrendDirection: liveMatchForPractice?.h1TrendDirection,
-    bosAnalysis: liveMatchForPractice?.bosAnalysis,
+    price: practicePrice > 0 ? practicePrice : expounded.computed.entryPrice,
+    ema20: expounded.liveMatch?.ema20,
+    ema50: expounded.liveMatch?.ema50,
+    rsi: expounded.liveMatch?.rsi,
+    atrPips: expounded.liveMatch?.atrPips,
+    candles: expounded.liveMatch?.candles,
+    h1TrendDirection: expounded.liveMatch?.h1TrendDirection,
+    bosAnalysis: expounded.liveMatch?.bosAnalysis,
     biasOverride: practiceDir,
     riskConfig: positionRiskStore.getConfig(),
   });
 
   const handleCopyTicket = () => {
-    const ticketText = `[PIVOTFX INSTITUTIONAL ORDER TICKET]
+    const ticketText = `[PIVOTFX ZERO-TO-HERO INSTITUTIONAL ORDER TICKET]
 Pillar: ${pillar.title} (Lesson ${lesson.number}: ${lesson.title})
-Symbol: ${details.pair} (${practiceTf})
-Session: ${details.session}
+Symbol: ${expounded.pair} (${practiceTf} · ${practiceComputed.tvSymbol})
+Session: ${expounded.session}
+Strategy: ${practiceComputed.recommendedStrategy}
 Order Type: ${practiceComputed.orderType}
 Entry Price: ${practiceComputed.entryPrice}
 Stop Loss: ${practiceComputed.stopLoss} (-${practiceComputed.slPips} pips / $${practiceComputed.actualRiskUsd.toFixed(2)} Max Risk)
-Take Profit 1: ${practiceComputed.tp1} (Close 50% & Move to Breakeven)
+Take Profit 1: ${practiceComputed.tp1} (Close 50% & Move SL to Breakeven)
 Take Profit 2: ${practiceComputed.tp2} (+${practiceComputed.tpPips} pips Final Target)
-Volume: 0.01 Micro Lot (Strict Gilgil Shield)
+Volume: ${practiceComputed.lotSize.toFixed(2)} Lots (Dynamic Risk Guard: $${practiceComputed.actualRiskUsd.toFixed(2)} / ${Math.round(practiceComputed.actualRiskUsd * 130)} KES)
 Risk:Reward = ${practiceComputed.riskReward}
-Validation: ${practiceComputed.mt4SafetyProof}
-CMA Protection: Zero Negative Balance Debt Risk`;
+Validation: ${practiceComputed.mt4SafetyProof}`;
 
     navigator.clipboard.writeText(ticketText);
     setCopiedTicket(true);
@@ -251,34 +325,58 @@ CMA Protection: Zero Negative Balance Debt Risk`;
 
   return (
     <div className="space-y-6 pt-2">
-      {/* SECTION 1: DEEP EXPOUNDED TOPIC MASTERCLASS */}
+      {/* STEP 1: ZERO-TO-HERO FOUNDATION & CORE MECHANICS */}
       <div className="p-6 rounded-2xl bg-slate-950 border border-[#D4AF37]/40 space-y-4 shadow-xl">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
           <div className="flex items-center gap-2.5">
-            <BookOpen className="w-4 h-4 text-[#D4AF37]" />
-            <h4 className="text-xs sm:text-sm font-mono font-bold uppercase tracking-wider text-[#D4AF37]">
-              Lesson {lesson.number} Deep Technical Masterclass & Execution Guide
-            </h4>
+            <GraduationCap className="w-5 h-5 text-[#D4AF37]" />
+            <div>
+              <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-300 font-bold block">
+                Step 1 · Zero-to-Hero Plain-English Foundation
+              </span>
+              <h4 className="text-xs sm:text-sm font-mono font-bold uppercase tracking-wider text-[#D4AF37]">
+                Lesson {lesson.number}: {lesson.title}
+              </h4>
+            </div>
           </div>
-          <span className="text-xs font-mono text-emerald-400 font-bold">
+          <span className="px-2.5 py-1 rounded-lg bg-[#00C261]/15 border border-[#00C261]/40 text-[11px] font-mono text-[#00C261] font-bold">
             Live Calibrated Edition
           </span>
         </div>
 
+        {/* Start From Zero Plain Analogy Box */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="p-4 rounded-xl bg-[#0B1222] border border-cyan-500/35 space-y-1.5">
+            <span className="text-[11px] font-mono font-bold uppercase text-cyan-300 block">
+              Start From Zero (Simple Mental Picture)
+            </span>
+            <p className="text-xs sm:text-sm text-slate-200 leading-relaxed">
+              {expounded.zeroAnalogy}
+            </p>
+          </div>
+          <div className="p-4 rounded-xl bg-[#0B1222] border border-[#D4AF37]/35 space-y-1.5">
+            <span className="text-[11px] font-mono font-bold uppercase text-[#D4AF37] block">
+              Hero Execution Standard (Why Pros Win Here)
+            </span>
+            <p className="text-xs sm:text-sm text-slate-200 leading-relaxed">
+              {expounded.zeroCoreTakeaway}
+            </p>
+          </div>
+        </div>
+
         {/* In-depth Concept Exploration */}
-        <div className="space-y-3 text-xs sm:text-sm text-slate-200 leading-relaxed">
-          <p className="font-semibold text-white">
-            {lesson.concept}
-          </p>
-          <p className="text-slate-300">
-            {lesson.summary} Every institutional setup requires matching your Stop Loss and Take Profit directly to the live candlestick price visible on your chart rather than relying on outdated screenshots.
-          </p>
+        <div className="space-y-2 text-xs sm:text-sm text-slate-200 leading-relaxed pt-1">
+          <p className="font-semibold text-white">{lesson.concept}</p>
+          <p className="text-slate-300">{lesson.summary}</p>
         </div>
 
         {/* Structural Mechanics Matrix */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
           {lesson.bulletPoints.map((bp, idx) => (
-            <div key={idx} className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-[#D4AF37]/50 transition-colors space-y-1">
+            <div
+              key={idx}
+              className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-[#D4AF37]/50 transition-colors space-y-1"
+            >
               <div className="flex items-center gap-2">
                 <span className="w-5 h-5 rounded-md bg-[#D4AF37]/20 text-[#D4AF37] text-[10px] font-mono font-bold flex items-center justify-center shrink-0">
                   {idx + 1}
@@ -288,40 +386,103 @@ CMA Protection: Zero Negative Balance Debt Risk`;
                 </span>
               </div>
               <p className="text-xs text-slate-300 pl-7 leading-relaxed">
-                {bp.includes(':') ? bp.split(':')[1] : bp}
+                {bp.includes(':') ? bp.split(':').slice(1).join(':') : bp}
               </p>
             </div>
           ))}
         </div>
       </div>
 
-      {/* SECTION 2: LIVE REAL-WORLD MARKET CASE STUDY & INTERACTIVE MT4 S/L VALIDATOR */}
+      {/* STEP 2: LIVE MARKET LAB & REAL-TIME SYNCED ORDER SIMULATOR */}
       <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-5">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
           <div className="space-y-1">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-mono text-xs font-bold text-black px-2.5 py-0.5 rounded-md bg-[#D4AF37]">
-                {details.displayPair}
+                {expounded.displayPair}
               </span>
-              <span className="text-xs font-mono text-cyan-400 font-bold">
-                {practiceTf} Chart
-              </span>
-              <span className="text-xs font-mono text-slate-400">
-                · {details.session}
-              </span>
+              <span className="text-xs font-mono text-cyan-400 font-bold">{practiceTf} Chart</span>
+              <span className="text-xs font-mono text-slate-400">· {expounded.session}</span>
+              {expounded.liveMatch && (
+                <span className="text-[11px] font-mono text-[#00C261] font-bold">
+                  · Live Spot: {expounded.liveMatch.price}
+                </span>
+              )}
             </div>
             <h5 className="text-sm font-bold text-white font-mono">
-              Live Real-World Market Case Study & Interactive MT4 Order Calculator
+              Step 2 · Live Market Practice Lab &amp; Validated Broker Ticket
             </h5>
           </div>
 
-          <button
-            onClick={handleCopyTicket}
-            className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/50 text-xs font-mono font-bold flex items-center gap-1.5 transition active:scale-95 whitespace-nowrap shrink-0"
-          >
-            {copiedTicket ? <Check className="w-3.5 h-3.5 text-[#00C261]" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copiedTicket ? 'Copied Order Ticket!' : 'Copy MT4/MT5 Ticket'}</span>
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => globalLiveStream.requestOpenScannerView('favorable_chart', expounded.pair)}
+              className="px-3 py-1.5 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/70 text-cyan-300 border border-cyan-500/50 text-xs font-mono font-bold flex items-center gap-1.5 transition whitespace-nowrap"
+            >
+              <LineChart className="w-3.5 h-3.5" />
+              <span>Open Live Scanner</span>
+            </button>
+
+            <a
+              href={getTradingViewExternalUrl(expounded.pair, practiceTf)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white border border-slate-700 text-xs font-mono font-bold flex items-center gap-1.5 transition whitespace-nowrap"
+            >
+              <span>TradingView</span>
+              <ExternalLink className="w-3.5 h-3.5 text-[#D4AF37]" />
+            </a>
+
+            <button
+              type="button"
+              onClick={handleCopyTicket}
+              className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/50 text-xs font-mono font-bold flex items-center gap-1.5 transition active:scale-95 whitespace-nowrap"
+            >
+              {copiedTicket ? (
+                <Check className="w-3.5 h-3.5 text-[#00C261]" />
+              ) : (
+                <Copy className="w-3.5 h-3.5" />
+              )}
+              <span>{copiedTicket ? 'Ticket Copied' : 'Copy Ticket'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Real-Time Quant Context Strip */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs font-mono tabular-nums">
+          <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800">
+            <span className="text-[10px] text-slate-400 block">1H / Active Structure</span>
+            <strong className="text-white">
+              {practiceComputed.h1TrendDirection} / {practiceComputed.trendDirection}
+            </strong>
+          </div>
+          <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800">
+            <span className="text-[10px] text-slate-400 block">BOS / CHoCH Guard</span>
+            <strong className="text-cyan-300">
+              {(expounded.liveMatch?.bosAnalysis?.bosDirection || 'RANGING').replace(/_/g, ' ')}
+            </strong>
+          </div>
+          <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800">
+            <span className="text-[10px] text-slate-400 block">ADX(14) &amp; MACD</span>
+            <strong className="text-[#D4AF37]">
+              ADX {(practiceComputed.adxStrength ?? 20).toFixed(1)} · {practiceComputed.macdBias}
+            </strong>
+          </div>
+          <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800">
+            <span className="text-[10px] text-slate-400 block">Readiness Gate</span>
+            <strong
+              className={
+                practiceComputed.executionReadiness === 'READY_ENTER'
+                  ? 'text-[#00C261]'
+                  : practiceComputed.executionReadiness === 'WAIT_PULLBACK'
+                  ? 'text-[#D4AF37]'
+                  : 'text-red-400'
+              }
+            >
+              {practiceComputed.executionReadiness}
+            </strong>
+          </div>
         </div>
 
         {/* Interactive Chart Candlestick Sync Bar inside Lesson */}
@@ -329,19 +490,28 @@ CMA Protection: Zero Negative Balance Debt Risk`;
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-[#D4AF37] font-bold flex items-center gap-1.5">
               <SlidersHorizontal className="w-3.5 h-3.5" />
-              <span>Practice With Your Live Chart Quote ({practiceComputed.tvSymbol} · {practiceComputed.recommendedStrategy})</span>
+              <span>
+                Test Live Quote ({practiceComputed.tvSymbol} · {practiceComputed.recommendedStrategy})
+              </span>
             </span>
-            <span className="text-[11px] text-emerald-400 font-bold">{practiceComputed.mt4SafetyProof}</span>
+            <span className="text-[11px] text-emerald-400 font-bold">
+              {practiceComputed.mt4SafetyProof}
+            </span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
             <div>
-              <label className="text-[11px] text-slate-400 block mb-1">Live Candlestick Price ({details.pair})</label>
+              <label className="text-[11px] text-slate-400 block mb-1">
+                Live Candlestick Price ({expounded.pair})
+              </label>
               <input
                 type="number"
                 step="any"
                 value={practicePrice}
-                onChange={(e) => setPracticePrice(parseFloat(e.target.value) || 0)}
+                onChange={(e) => {
+                  setUserEditedPrice(true);
+                  setPracticePrice(parseFloat(e.target.value) || 0);
+                }}
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold text-xs focus:border-[#D4AF37] outline-none tabular-nums"
               />
             </div>
@@ -388,26 +558,26 @@ CMA Protection: Zero Negative Balance Debt Risk`;
                 type="button"
                 onClick={() => {
                   const defaultRate =
-                    globalLiveStream.getState().markets.find((x) => x.pair === details.pair)?.price ||
-                    INITIAL_MARKETS_DATA.find((x) => x.pair === details.pair)?.price ||
-                    details.entry;
-                  const target = practicePrice > 0 ? practicePrice : defaultRate;
-                  setPracticePrice(target);
-                  setRecalculatedBanner(`Recalculated ${practiceComputed.orderType} (${practiceComputed.recommendedStrategy}) anchored to ${target} (${practiceTf})`);
+                    globalLiveStream.getState().markets.find((x) => x.pair === expounded.pair)?.price ||
+                    INITIAL_MARKETS_DATA.find((x) => x.pair === expounded.pair)?.price ||
+                    expounded.computed.entryPrice;
+                  setUserEditedPrice(false);
+                  setPracticePrice(defaultRate);
+                  setRecalculatedBanner(
+                    `Synced ${practiceComputed.orderType} (${practiceComputed.recommendedStrategy}) cleanly to live quote ${defaultRate} (${practiceTf})`
+                  );
                   setTimeout(() => setRecalculatedBanner(null), 3000);
                 }}
                 className="w-full py-2 px-3 rounded-xl btn-gold text-black font-black text-xs uppercase flex items-center justify-center gap-1.5 transition active:scale-95 whitespace-nowrap"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span>Analyse / Recalculate</span>
+                <span>Sync Live Quote</span>
               </button>
             </div>
           </div>
 
           {recalculatedBanner && (
-            <div className="text-[11px] text-[#00C261] font-bold pt-1">
-              ✓ {recalculatedBanner}
-            </div>
+            <div className="text-[11px] text-[#00C261] font-bold pt-1">✓ {recalculatedBanner}</div>
           )}
         </div>
 
@@ -416,13 +586,15 @@ CMA Protection: Zero Negative Balance Debt Risk`;
           <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
             <span className="text-[10px] text-slate-400 block uppercase font-bold">1. Order Type</span>
             <span className="text-xs sm:text-sm font-black text-white">{practiceComputed.orderType}</span>
-            <span className="text-[10px] text-slate-400 block">Instant Execution</span>
+            <span className="text-[10px] text-slate-400 block">Execution Ready</span>
           </div>
 
           <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
             <span className="text-[10px] text-slate-400 block uppercase font-bold">2. Entry Price</span>
-            <span className="text-xs sm:text-sm font-black text-[#D4AF37]">@{practiceComputed.entryPrice}</span>
-            <span className="text-[10px] text-slate-400 block">Live Candle Match</span>
+            <span className="text-xs sm:text-sm font-black text-[#D4AF37]">
+              @{practiceComputed.entryPrice}
+            </span>
+            <span className="text-[10px] text-slate-400 block">Live Candle Sync</span>
           </div>
 
           <div className="p-3 rounded-xl bg-red-950/30 border border-red-500/40">
@@ -430,159 +602,246 @@ CMA Protection: Zero Negative Balance Debt Risk`;
               3. Stop Loss (-{practiceComputed.slPips}p)
             </span>
             <span className="text-xs sm:text-sm font-black text-red-300">{practiceComputed.stopLoss}</span>
-            <span className="text-[10px] text-red-400 block">Risk: ${practiceComputed.actualRiskUsd.toFixed(2)} (260 KES)</span>
+            <span className="text-[10px] text-red-400 block">
+              Risk: ${practiceComputed.actualRiskUsd.toFixed(2)} ({Math.round(practiceComputed.actualRiskUsd * 130)} KES)
+            </span>
           </div>
 
           <div className="p-3 rounded-xl bg-cyan-950/30 border border-cyan-500/40">
             <span className="text-[10px] text-cyan-400 block uppercase font-bold">
-              4. TP1 (50% Close & BE)
+              4. TP1 (50% &amp; BE)
             </span>
             <span className="text-xs sm:text-sm font-black text-cyan-300">{practiceComputed.tp1}</span>
-            <span className="text-[10px] text-cyan-400 block">Scale Out & Breakeven</span>
+            <span className="text-[10px] text-cyan-400 block">Move SL to Entry</span>
           </div>
 
           <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/40">
             <span className="text-[10px] text-emerald-400 block uppercase font-bold">
-              5. Final TP (+{practiceComputed.tpPips}p)
+              5. Final TP2 (+{practiceComputed.tpPips}p)
             </span>
             <span className="text-xs sm:text-sm font-black text-emerald-300">{practiceComputed.tp2}</span>
             <span className="text-[10px] text-emerald-400 block">R:R = {practiceComputed.riskReward}</span>
           </div>
         </div>
 
-        {/* Step-by-Step Execution Journey Narrative */}
-        <div className="space-y-2 p-4 rounded-xl bg-slate-900/70 border border-slate-800 text-xs text-slate-300 leading-relaxed font-mono">
-          <div className="text-[#D4AF37] font-bold text-xs uppercase flex items-center gap-1.5 pb-1 border-b border-slate-800">
-            <Target className="w-3.5 h-3.5" />
-            <span>Practical Trade Execution Walkthrough:</span>
-          </div>
-          <div>
-            <strong className="text-white">Step 1 — Market Context: </strong>
-            <span>{lesson.realWorldExample.context}</span>
-          </div>
-          <div>
-            <strong className="text-white">Step 2 — Trigger & Placement: </strong>
-            <span>{lesson.realWorldExample.setup}</span>
-          </div>
-          <div>
-            <strong className="text-white">Step 3 — Trade Outcome & Profit Realized: </strong>
-            <span className="text-emerald-300 font-bold">{lesson.realWorldExample.outcome}</span>
-            <span className="text-emerald-400 font-bold ml-2">({details.pnlUsd} USD / {details.pnlKes})</span>
-          </div>
-          <div className="pt-2 text-amber-200">
-            <strong className="text-[#D4AF37]">Institutional Takeaway: </strong>
-            <span>{lesson.realWorldExample.keyTakeaway}</span>
-          </div>
-        </div>
-
-        {/* Gilgil $2 Guarantee Bar & CMA Protection */}
-        <div className="p-3.5 rounded-xl bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-mono">
+        {/* Dynamic Risk Shield Bar */}
+        <div className="p-3.5 rounded-xl bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-mono tabular-nums">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-[#D4AF37] shrink-0" />
             <span className="text-white font-bold">
-              Position Sizing: <span className="text-[#D4AF37]">0.01 Micro Lot</span> (Gilgil $2 / 260 KES Hard Loss Cap)
+              Formula Sizing: <span className="text-[#D4AF37]">{practiceComputed.lotSize.toFixed(2)} Lots</span>{' '}
+              (Max Loss ${practiceComputed.actualRiskUsd.toFixed(2)} /{' '}
+              {Math.round(practiceComputed.actualRiskUsd * 130)} KES)
             </span>
           </div>
           <div className="flex items-center gap-2 text-slate-300">
-            <span className="text-emerald-400 font-bold">CMA Safety:</span>
-            <span>Zero Negative Balance Debt Risk</span>
+            <span className="text-emerald-400 font-bold">CMA Shield:</span>
+            <span>Negative Balance Protected</span>
+          </div>
+        </div>
+
+        {/* Live Candle Backtest & Execution Reasoning */}
+        {(practiceComputed.liveBacktest || practiceComputed.executionBrief) && (
+          <div className="p-4 rounded-xl bg-slate-900/90 border border-cyan-500/35 space-y-2.5 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-mono font-bold text-cyan-300 uppercase">
+                Live Candle Edge &amp; Execution Rationale ({expounded.pair} · {practiceTf})
+              </span>
+              {practiceComputed.liveBacktest && practiceComputed.liveBacktest.sampleTrades > 0 && (
+                <span className="font-mono font-bold text-[#00C261] tabular-nums">
+                  {practiceComputed.liveBacktest.tp1WinRatePct}% TP1 Rate ·{' '}
+                  {practiceComputed.liveBacktest.netExpectancyR >= 0 ? '+' : ''}
+                  {practiceComputed.liveBacktest.netExpectancyR.toFixed(2)}R/trade (PF{' '}
+                  {practiceComputed.liveBacktest.profitFactor.toFixed(2)})
+                </span>
+              )}
+            </div>
+            {practiceComputed.executionBrief && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-slate-300 leading-relaxed">
+                <p>
+                  <strong className="text-white">Why {practiceComputed.direction}: </strong>
+                  {practiceComputed.executionBrief.whyDirection}
+                </p>
+                <p>
+                  <strong className="text-white">SL &amp; TP1 Breakeven: </strong>
+                  {practiceComputed.executionBrief.tp1BreakevenPlan}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* STEP 3: HERO EXECUTION CASE STUDY, CHECKLIST & RETAIL VS PRO MATRIX */}
+      <div className="p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
+        <div className="text-[#D4AF37] font-mono font-bold text-xs uppercase flex items-center gap-1.5 pb-2 border-b border-slate-800">
+          <Target className="w-4 h-4" />
+          <span>Step 3 · Practical Case Study Walkthrough</span>
+        </div>
+        <div className="space-y-2 text-xs text-slate-300 leading-relaxed font-mono">
+          <div>
+            <strong className="text-white">Market Context ({lesson.realWorldExample.pair}): </strong>
+            <span>{lesson.realWorldExample.context}</span>
+          </div>
+          <div>
+            <strong className="text-white">Trigger &amp; Placement: </strong>
+            <span>{lesson.realWorldExample.setup}</span>
+          </div>
+          <div>
+            <strong className="text-white">Outcome: </strong>
+            <span className="text-emerald-300 font-bold">{lesson.realWorldExample.outcome}</span>
+          </div>
+          <div className="pt-1 text-amber-200">
+            <strong className="text-[#D4AF37]">Hero Takeaway: </strong>
+            <span>{lesson.realWorldExample.keyTakeaway}</span>
           </div>
         </div>
       </div>
 
-      {/* SECTION 3: INTERACTIVE ACTIONABLE CHECKLIST FOR THIS LESSON */}
       {lesson.actionableChecklist && lesson.actionableChecklist.length > 0 && (
         <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-[#00C261]" />
               <h5 className="text-xs sm:text-sm font-mono font-bold text-white uppercase tracking-wider">
-                Step-by-Step Actionable Execution Checklist
+                Interactive Execution Checklist
               </h5>
             </div>
-            <span className="text-[10px] font-mono text-[#D4AF37]">
-              {checkedItems.length} / {lesson.actionableChecklist.length} Checked
+            <span className="text-[11px] font-mono text-[#D4AF37] tabular-nums">
+              {checkedItems.length} / {lesson.actionableChecklist.length} Verified
             </span>
           </div>
 
-          <p className="text-xs text-slate-400 font-mono">
-            Check off each step below as you practice on your TradingView or MT4/MT5 demo workspace:
-          </p>
-
-          <div className="space-y-2.5">
+          <div className="space-y-2">
             {lesson.actionableChecklist.map((item, idx) => {
               const isChecked = checkedItems.includes(idx);
               return (
-                <div
+                <button
                   key={idx}
+                  type="button"
                   onClick={() => toggleCheck(idx)}
-                  className={`p-3.5 rounded-xl border transition cursor-pointer flex items-start gap-3 group font-mono text-xs ${
+                  className={`w-full text-left p-3.5 rounded-xl border transition flex items-start gap-3 font-mono text-xs ${
                     isChecked
                       ? 'bg-emerald-950/30 border-emerald-500/60 text-emerald-200'
                       : 'bg-slate-900/80 border-slate-800 hover:border-slate-700 text-slate-300'
                   }`}
                 >
-                  <div
+                  <span
                     className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mt-0.5 transition ${
                       isChecked
                         ? 'bg-emerald-500 border-emerald-400 text-black'
-                        : 'border-slate-600 group-hover:border-[#D4AF37]'
+                        : 'border-slate-600'
                     }`}
                   >
                     {isChecked && <Check className="w-3.5 h-3.5 stroke-[3]" />}
-                  </div>
+                  </span>
                   <span className={`leading-relaxed ${isChecked ? 'line-through text-slate-400' : ''}`}>
                     {item}
                   </span>
-                </div>
+                </button>
               );
             })}
           </div>
         </div>
       )}
 
-      {/* SECTION 4: RETAIL TRAP VS INSTITUTIONAL PRO EDGE COMPARISON MATRIX */}
+      {/* Retail Pitfall vs Institutional Protocol */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Retail Pitfall Trap */}
-        <div className="p-5 rounded-2xl bg-red-950/20 border border-red-500/40 space-y-2.5">
+        <div className="p-5 rounded-2xl bg-red-950/20 border border-red-500/40 space-y-2">
           <div className="flex items-center gap-2 text-red-400 font-mono font-bold text-xs uppercase border-b border-red-500/20 pb-2">
             <AlertTriangle className="w-4 h-4 shrink-0" />
-            <span>Retail Amateur Trap (Why 90% Lose on This Topic):</span>
+            <span>Common Retail Mistake</span>
           </div>
-          <p className="text-xs text-slate-300 leading-relaxed font-mono">
-            {details.retailTrap}
-          </p>
-          <div className="text-[10px] font-mono text-red-400 pt-1 font-bold">
-            Result: Blown accounts, margin calls, emotional revenge trading.
-          </div>
+          <p className="text-xs text-slate-300 leading-relaxed font-mono">{expounded.retailTrap}</p>
         </div>
 
-        {/* Institutional Edge Protocol */}
-        <div className="p-5 rounded-2xl bg-emerald-950/20 border border-emerald-500/40 space-y-2.5">
+        <div className="p-5 rounded-2xl bg-emerald-950/20 border border-emerald-500/40 space-y-2">
           <div className="flex items-center gap-2 text-emerald-400 font-mono font-bold text-xs uppercase border-b border-emerald-500/20 pb-2">
             <ShieldCheck className="w-4 h-4 shrink-0" />
-            <span>PivotFX Institutional Protocol (Funded Prop Edge):</span>
+            <span>Institutional Hero Standard</span>
           </div>
-          <p className="text-xs text-slate-300 leading-relaxed font-mono">
-            {details.institutionalEdge}
-          </p>
-          <div className="text-[10px] font-mono text-emerald-400 pt-1 font-bold">
-            Result: Complete capital preservation, psychological peace, consistent compounding.
-          </div>
+          <p className="text-xs text-slate-300 leading-relaxed font-mono">{expounded.institutionalEdge}</p>
         </div>
       </div>
 
-      {/* SECTION 5: PRO MT4/TRADINGVIEW TOOLBELT SHORTCUTS */}
-      <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-mono">
-        <div className="flex items-center gap-2">
-          <Cpu className="w-4 h-4 text-[#D4AF37]" />
-          <span className="text-slate-300">
-            Pro Hotkeys: Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-white font-bold">F9</kbd> for Order Ticket, <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-white font-bold">Ctrl + T</kbd> for Terminal, <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-white font-bold">Alt + S</kbd> for Session Breaks.
+      {/* STEP 4: QUICK 2-QUESTION MASTERY SELF-TEST */}
+      <div className="p-6 rounded-2xl bg-slate-950 border border-cyan-500/35 space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-2">
+            <HelpCircle className="w-4 h-4 text-cyan-300" />
+            <h5 className="text-xs sm:text-sm font-mono font-bold text-white uppercase tracking-wider">
+              Step 4 · Quick Lesson Mastery Check
+            </h5>
+          </div>
+          <span className="text-[11px] font-mono text-cyan-300 tabular-nums">
+            {
+              expounded.quizzes.filter((q, idx) => quizAnswers[idx] === q.correctIndex).length
+            }{' '}
+            / {expounded.quizzes.length} Correct
           </span>
         </div>
-        <span className="text-[10px] text-slate-500 shrink-0">
-          Broker: {details.brokerNote}
-        </span>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {expounded.quizzes.map((q, qIdx) => {
+            const chosen = quizAnswers[qIdx];
+            const isAnswered = chosen !== undefined;
+            const isCorrect = chosen === q.correctIndex;
+            return (
+              <div key={qIdx} className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-3">
+                <p className="text-xs font-bold text-white leading-relaxed">
+                  Q{qIdx + 1}. {q.question}
+                </p>
+                <div className="space-y-1.5">
+                  {q.options.map((opt, optIdx) => {
+                    const selected = chosen === optIdx;
+                    const right = optIdx === q.correctIndex;
+                    return (
+                      <button
+                        key={optIdx}
+                        type="button"
+                        onClick={() => setQuizAnswers((prev) => ({ ...prev, [qIdx]: optIdx }))}
+                        className={`w-full text-left px-3 py-2 rounded-lg border text-xs transition ${
+                          !isAnswered
+                            ? 'bg-slate-950 border-slate-800 text-slate-300 hover:border-[#D4AF37]/60'
+                            : right
+                            ? 'bg-emerald-950/50 border-[#00C261] text-emerald-200 font-semibold'
+                            : selected
+                            ? 'bg-red-950/50 border-red-500 text-red-200'
+                            : 'bg-slate-950 border-slate-800 text-slate-500'
+                        }`}
+                      >
+                        {opt}
+                      </button>
+                    );
+                  })}
+                </div>
+                {isAnswered && (
+                  <p
+                    className={`text-[11px] font-mono leading-relaxed ${
+                      isCorrect ? 'text-[#00C261]' : 'text-amber-300'
+                    }`}
+                  >
+                    {isCorrect ? 'Correct: ' : 'Note: '}
+                    {q.explanation}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Pro Toolbelt Shortcuts */}
+      <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-mono">
+        <div className="flex items-center gap-2">
+          <Cpu className="w-4 h-4 text-[#D4AF37] shrink-0" />
+          <span className="text-slate-300">
+            Hotkeys: <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-white font-bold">F9</kbd> Ticket,{' '}
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-white font-bold">Ctrl+T</kbd> Terminal,{' '}
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-white font-bold">Alt+S</kbd> Session Breaks.
+          </span>
+        </div>
+        <span className="text-[11px] text-slate-400 shrink-0">{expounded.brokerNote}</span>
       </div>
     </div>
   );

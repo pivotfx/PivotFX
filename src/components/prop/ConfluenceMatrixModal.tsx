@@ -55,7 +55,7 @@ export const ConfluenceMatrixModal: React.FC<ConfluenceMatrixModalProps> = ({
         {/* Legend */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 my-4 p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 text-xs">
           <div className="flex items-center space-x-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
             <span className="text-slate-300 font-medium">M5: Precision Entry Timing</span>
           </div>
           <div className="flex items-center space-x-2">
