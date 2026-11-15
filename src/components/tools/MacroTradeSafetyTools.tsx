@@ -422,8 +422,8 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
             atrPips: focusedMarket.atrPips,
             swingLow: focusedSwings.swingLow,
             swingHigh: focusedSwings.swingHigh,
+            change24hPct: focusedCard.change24hPct,
             biasOverride: inspectedSide === 'AUTO' ? undefined : inspectedSide,
-            previousDirection: aiBestSide,
             previousTrendDirection: focusedMarket.trendDirection,
             h1TrendDirection: focusedMarket.h1TrendDirection,
             riskConfig
@@ -605,6 +605,8 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                   change24hPct={focusedMarket.change24hPct}
                   lotSize={computed.lotSize}
                   riskUsd={computed.actualRiskUsd}
+                  executionReadiness={computed.executionReadiness}
+                  executionReadinessReason={computed.executionReadinessReason}
                   isLockedToCustom={Boolean(lockedPairs[focusedMarket.pair])}
                   onCandlePriceChange={(newP) => globalLiveStream.setCustomCandlePrice(focusedMarket.pair, newP)}
                   onResetToLiveStream={() => globalLiveStream.unlockPairToLiveStream(focusedMarket.pair)}
@@ -742,12 +744,14 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                 targetTf: rawMkt?.recommendedTf || 'M15',
                 targetBroker: selectedBroker,
                 price: card.livePrice,
+                keyLevel: rawMkt?.keyLevel,
                 ema20: card.ema20,
                 ema50: card.ema50,
                 rsi: card.rsi,
                 atrPips: rawMkt?.atrPips,
                 swingLow: cardSwings.swingLow,
                 swingHigh: cardSwings.swingHigh,
+                change24hPct: card.change24hPct,
                 h1TrendDirection: rawMkt?.h1TrendDirection,
                 riskConfig
               });

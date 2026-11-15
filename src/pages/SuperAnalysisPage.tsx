@@ -34,6 +34,7 @@ import confetti from 'canvas-confetti';
 import { PillarHeaderBar } from '../components/common/PillarHeaderBar';
 import { LiveInteractiveCandleChart } from '../components/tools/LiveInteractiveCandleChart';
 import { DynamicPositionSizeCalculator } from '../components/tools/DynamicPositionSizeCalculator';
+import { DeepScanVerificationPanel } from '../components/tools/DeepScanVerificationPanel';
 import {
   INITIAL_MARKETS_DATA,
   globalLiveStream,
@@ -42,11 +43,13 @@ import {
   evaluateCandleSeriesAndTick,
   evaluatePairKenyaTiming,
   computeRealChartTradeParams,
+  computeCandleSwingLevels,
   getPairSpecs,
   getCurrentMacroContext,
   ComputedTradeParams,
   MarketScanData,
   RiskManagementConfig,
+  DeepVerifyResult,
   positionRiskStore
 } from '../utils/liveMarketEngine';
 
@@ -79,6 +82,12 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
   );
   const [superAiNotes, setSuperAiNotes] = useState(
     () => globalLiveStream.getState().superAiNotes
+  );
+  const [deepAudits, setDeepAudits] = useState<Partial<Record<CurrencyPair, DeepVerifyResult>>>(
+    () => globalLiveStream.getState().deepAudits
+  );
+  const [isDeepVerifyingPair, setIsDeepVerifyingPair] = useState<Partial<Record<CurrencyPair, boolean>>>(
+    () => globalLiveStream.getState().isDeepVerifyingPair
   );
 
   const [broker, setBroker] = useState<BrokerId>('fxpesa');
@@ -157,6 +166,8 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
       setLastSyncedAt(streamState.syncedAt);
       setSuperAiAuto(streamState.superAiAutoEnabled);
       setSuperAiNotes(streamState.superAiNotes);
+      setDeepAudits(streamState.deepAudits);
+      setIsDeepVerifyingPair(streamState.isDeepVerifyingPair);
 
       if (!lockedRef.current) {
         const match =
@@ -179,6 +190,10 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
             if (!prevTicket) return prevTicket;
             const forcedSide =
               inspectedSideRef.current !== 'AUTO' ? inspectedSideRef.current : undefined;
+            const useH1 =
+              tfRef.current === 'H1' || tfRef.current === 'H4' || tfRef.current === 'D1';
+            const matchCandles = useH1 ? (match.h1Candles || match.candles) : match.candles;
+            const matchSwings = computeCandleSwingLevels(matchCandles);
             return computeRealChartTradeParams({
               targetPair: match.pair,
               targetTf: tfRef.current,
@@ -189,10 +204,14 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
               ema50: match.ema50,
               rsi: match.rsi,
               atrPips: match.atrPips,
+              swingLow: matchSwings.swingLow,
+              swingHigh: matchSwings.swingHigh,
+              change24hPct: match.change24hPct,
               macro: liveMacro,
               h1TrendDirection: match.h1TrendDirection,
+              bosAnalysis: match.bosAnalysis,
               biasOverride: forcedSide,
-              previousDirection: prevTicket.direction,
+              previousDirection: forcedSide,
               previousTrendDirection: match.trendDirection,
               riskConfig: riskConfigRef.current
             });
@@ -238,12 +257,15 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
       setIsCustomCandleLocked(true);
       const { decimals } = getPairSpecs(pair);
       const liveMatch = liveMarkets.find((m) => m.pair === pair);
+      const useH1 = timeframe === 'H1' || timeframe === 'H4' || timeframe === 'D1';
       const reEval = evaluateCandleSeriesAndTick({
         pair,
         timeframe,
         livePrice: num,
-        baseCandles: liveMatch?.candles,
-        change24hPct: liveMatch?.change24hPct
+        baseCandles: useH1 ? (liveMatch?.h1Candles || liveMatch?.candles) : liveMatch?.candles,
+        candlesAreRealOhlc: liveMatch?.candlesAreRealOhlc,
+        change24hPct: liveMatch?.change24hPct,
+        h1TrendDirection: liveMatch?.h1TrendDirection
       });
       setEma20(reEval.ema20.toFixed(decimals));
       setEma50(reEval.ema50.toFixed(decimals));
@@ -376,6 +398,11 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
     const currentMacro = getCurrentMacroContext(pctMap);
     const activeMarketMatch = liveMarkets.find((m) => m.pair === pair);
     const manualSideOverride = inspectedSide !== 'AUTO' ? inspectedSide : undefined;
+    const useH1 = timeframe === 'H1' || timeframe === 'H4' || timeframe === 'D1';
+    const analyzeCandles = useH1
+      ? (activeMarketMatch?.h1Candles || activeMarketMatch?.candles)
+      : activeMarketMatch?.candles;
+    const analyzeSwings = computeCandleSwingLevels(analyzeCandles);
 
     const ticket = computeRealChartTradeParams({
       targetPair: pair,
@@ -387,14 +414,19 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
       ema50: numEma50,
       rsi: numRsi,
       atrPips: activeMarketMatch?.atrPips,
+      swingLow: analyzeSwings.swingLow,
+      swingHigh: analyzeSwings.swingHigh,
+      change24hPct: activeMarketMatch?.change24hPct,
       macro: currentMacro,
       h1TrendDirection: activeMarketMatch?.h1TrendDirection,
+      bosAnalysis: activeMarketMatch?.bosAnalysis,
       biasOverride: manualSideOverride,
-      previousDirection: computedTicket?.direction || (activeMarketMatch?.bias === 'STRONG_SELL' ? 'SELL' : 'BUY'),
+      previousDirection: manualSideOverride,
       previousTrendDirection: activeMarketMatch?.trendDirection,
       riskConfig,
     });
     setComputedTicket(ticket);
+    void globalLiveStream.verifyMarketDeepScan(pair, timeframe, broker, manualSideOverride);
 
     let score = Math.round(ticket.confidence);
     let verdict: AnalysisResult['verdict'] =
@@ -406,11 +438,30 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
     let recommendation = `Prime ${ticket.orderType} setup anchored to live price ${numPrice.toFixed(decimals)}. Use the exact MT4/MT5 S/L & Multi-Horizon T/P levels below.`;
     const reasons: string[] = [];
 
-    if (inspectedSide === 'AUTO' && numRsi >= 76 && isOverextended) {
+    if (inspectedSide === 'AUTO' && (ticket.executionReadiness === 'NO_TRADE_CLOSED' || ticket.executionReadiness === 'NO_TRADE_CHOP')) {
+      score = Math.min(score, 45);
+      verdict = 'RISKY_EXTENDED';
+      title =
+        ticket.executionReadiness === 'NO_TRADE_CLOSED'
+          ? `STAND ASIDE: Market Window Closed (${pair})`
+          : `NO TRADE CHOP: Conflicted Structure on ${pair}`;
+      recommendation = `${ticket.executionReadinessReason} Keep capital protected until a clean pullback/session window aligns.`;
+      reasons.push(`Execution Gate [${ticket.executionReadiness}]: ${ticket.executionReadinessReason}`);
+      reasons.push(ticket.mt4SafetyProof);
+      reasons.push(ticket.trendProjectionText);
+    } else if (inspectedSide === 'AUTO' && ticket.executionReadiness === 'WAIT_PULLBACK') {
+      score = Math.min(score, 58);
+      verdict = 'RISKY_EXTENDED';
+      title = `WAIT PULLBACK: Extended From 20 EMA (${ticket.orderType} Plan Ready)`;
+      recommendation = `Price is ${distanceEma20Pips.toFixed(1)} pips from 20 EMA — stage Limit near ${(ticket.advisoryEntryPrice ?? ticket.entryPrice).toFixed(decimals)} at ${ticket.lotSize.toFixed(2)} lots ($${ticket.actualRiskUsd.toFixed(2)} risk).`;
+      reasons.push(`Execution Gate [WAIT_PULLBACK]: ${ticket.executionReadinessReason}`);
+      reasons.push(ticket.mt4SafetyProof);
+      reasons.push(ticket.trendProjectionText);
+    } else if (inspectedSide === 'AUTO' && numRsi >= 76 && isOverextended) {
       score = Math.min(score, 44);
       verdict = 'RISKY_EXTENDED';
       title = `CAUTION: Extended Above 20 EMA (${ticket.orderType} Plan Locked)`;
-      recommendation = `Price is ${distanceEma20Pips.toFixed(1)} pips from 20 EMA — wait for minor pullback or keep strict 0.01 micro lot on ${ticket.orderType}.`;
+      recommendation = `Price is ${distanceEma20Pips.toFixed(1)} pips from 20 EMA — wait for minor pullback or keep strict ${ticket.lotSize.toFixed(2)} lot on ${ticket.orderType}.`;
       reasons.push(`Price (${numPrice.toFixed(decimals)}) is stretched ${distanceEma20Pips.toFixed(1)} pips from EMA 20 (${numEma20.toFixed(decimals)}) while RSI is ${numRsi.toFixed(1)}.`);
       reasons.push(ticket.mt4SafetyProof);
       reasons.push(ticket.trendProjectionText);
@@ -418,7 +469,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
       score = Math.min(score, 46);
       verdict = 'RISKY_EXTENDED';
       title = `CAUTION: Deep Dump Extension (${ticket.orderType} Plan Locked)`;
-      recommendation = `RSI pinned at ${numRsi.toFixed(1)} — let candle stabilize near 20 EMA before entering ${ticket.orderType}.`;
+      recommendation = `RSI pinned at ${numRsi.toFixed(1)} — let candle stabilize near 20 EMA before entering ${ticket.orderType} (${ticket.lotSize.toFixed(2)} lot).`;
       reasons.push(`RSI is at ${numRsi.toFixed(1)} (${distanceEma20Pips.toFixed(1)} pips from EMA 20).`);
       reasons.push(ticket.mt4SafetyProof);
       reasons.push(ticket.trendProjectionText);
@@ -430,6 +481,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
           : isEmaBearish
           ? 'HIGH PROBABILITY SHORT: H1/M15 Bearish Stack & Macro Alignment'
           : 'TACTICAL SHORT PLAN: Structured Resistive Pullback';
+      reasons.push(`Execution Gate [${ticket.executionReadiness}]: ${ticket.executionReadinessReason}`);
       reasons.push(ticket.mt4SafetyProof);
       reasons.push(ticket.trendProjectionText);
       reasons.push(`EMA 20 (${numEma20.toFixed(decimals)}) vs EMA 50 (${numEma50.toFixed(decimals)}) · RSI ${numRsi.toFixed(1)} on ${timeframe}.`);
@@ -442,6 +494,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
           : isEmaBullish
           ? 'HIGH PROBABILITY LONG: H1/M15 Bullish Stack & Macro Alignment'
           : 'TACTICAL LONG PLAN: Structured Support Pullback';
+      reasons.push(`Execution Gate [${ticket.executionReadiness}]: ${ticket.executionReadinessReason}`);
       reasons.push(ticket.mt4SafetyProof);
       reasons.push(ticket.trendProjectionText);
       reasons.push(`EMA 20 (${numEma20.toFixed(decimals)}) vs EMA 50 (${numEma50.toFixed(decimals)}) · RSI ${numRsi.toFixed(1)} on ${timeframe}.`);
@@ -514,6 +567,11 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
   });
   const displayMacro = getCurrentMacroContext(pctMapForDisplay);
   const activePairMarket = liveMarkets.find((m) => m.pair === pair);
+  const displayUseH1 = timeframe === 'H1' || timeframe === 'H4' || timeframe === 'D1';
+  const displayCandles = displayUseH1
+    ? (activePairMarket?.h1Candles || activePairMarket?.candles)
+    : activePairMarket?.candles;
+  const displaySwings = computeCandleSwingLevels(displayCandles);
   const displayedTicket = computedTicket
     ? computeRealChartTradeParams({
         targetPair: pair,
@@ -525,10 +583,14 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
         ema50: parseFloat(ema50) || computedTicket.entryPrice,
         rsi: parseFloat(rsi) || 50,
         atrPips: activePairMarket?.atrPips,
+        swingLow: displaySwings.swingLow,
+        swingHigh: displaySwings.swingHigh,
+        change24hPct: activePairMarket?.change24hPct,
         macro: displayMacro,
         h1TrendDirection: activePairMarket?.h1TrendDirection,
+        bosAnalysis: activePairMarket?.bosAnalysis,
         biasOverride: inspectedSide === 'AUTO' ? undefined : inspectedSide,
-        previousDirection: computedTicket.direction,
+        previousDirection: inspectedSide === 'AUTO' ? undefined : inspectedSide,
         previousTrendDirection: activePairMarket?.trendDirection,
         riskConfig,
       })
@@ -681,6 +743,11 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
         const parsedE50 = parseFloat(ema50) || activeMarketItem.ema50;
         const parsedRsi = parseFloat(rsi) || activeMarketItem.rsi;
         const activeTiming = evaluatePairKenyaTiming(pair);
+        const previewUseH1 = timeframe === 'H1' || timeframe === 'H4' || timeframe === 'D1';
+        const previewCandles = previewUseH1
+          ? (activeMarketItem.h1Candles || activeMarketItem.candles || [])
+          : (activeMarketItem.candles || []);
+        const previewSwings = computeCandleSwingLevels(previewCandles);
         const previewTicket = computeRealChartTradeParams({
           targetPair: pair,
           targetTf: timeframe,
@@ -691,9 +758,14 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
           ema50: parsedE50,
           rsi: parsedRsi,
           atrPips: activeMarketItem.atrPips,
+          swingLow: previewSwings.swingLow,
+          swingHigh: previewSwings.swingHigh,
+          change24hPct: activeMarketItem.change24hPct,
+          macro: displayMacro,
           h1TrendDirection: activeMarketItem.h1TrendDirection,
+          bosAnalysis: activeMarketItem.bosAnalysis,
           biasOverride: inspectedSide === 'AUTO' ? undefined : inspectedSide,
-          previousDirection: activeMarketItem.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+          previousDirection: inspectedSide === 'AUTO' ? undefined : inspectedSide,
           previousTrendDirection: activeMarketItem.trendDirection,
           riskConfig,
         });
@@ -739,7 +811,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
             <LiveInteractiveCandleChart
               pair={pair}
               timeframe={timeframe}
-              candles={activeMarketItem.candles || []}
+              candles={previewCandles}
               livePrice={parsedLiveP}
               ema20={parsedE20}
               ema50={parsedE50}
@@ -752,6 +824,9 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
               change24hPct={activeMarketItem.change24hPct}
               lotSize={previewTicket.lotSize}
               riskUsd={previewTicket.actualRiskUsd}
+              executionReadiness={previewTicket.executionReadiness}
+              executionReadinessReason={previewTicket.executionReadinessReason}
+              bosAnalysis={previewTicket.bosAnalysis}
               isLockedToCustom={isCustomCandleLocked}
               onCandlePriceChange={(newP) => {
                 const { decimals } = getPairSpecs(pair);
@@ -791,6 +866,22 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                 Refresh AI Note
               </button>
             </div>
+
+            <DeepScanVerificationPanel
+              pair={pair}
+              timeframe={timeframe}
+              computed={displayedTicket || previewTicket}
+              deepAudit={deepAudits[pair]}
+              isVerifying={Boolean(isDeepVerifyingPair[pair])}
+              onRunDeepVerify={() =>
+                void globalLiveStream.verifyMarketDeepScan(
+                  pair,
+                  timeframe,
+                  broker,
+                  inspectedSide === 'AUTO' ? undefined : inspectedSide
+                )
+              }
+            />
           </div>
         );
       })()}

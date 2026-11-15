@@ -7,6 +7,7 @@ import { ActiveMarketOrderPanel } from './ActiveMarketOrderPanel';
 import { EntryConfirmationController } from './EntryConfirmationController';
 import { TradeLogAndNotificationsView } from './TradeLogAndNotificationsView';
 import { DynamicPositionSizeCalculator } from './DynamicPositionSizeCalculator';
+import { DeepScanVerificationPanel } from './DeepScanVerificationPanel';
 import {
   MarketScanData,
   ScannerWorkspaceTab,
@@ -23,6 +24,7 @@ import {
   evaluateOrderEntryMoment,
   evaluateOrderTrendSustainability,
   RiskManagementConfig,
+  DeepVerifyResult,
   positionRiskStore
 } from '../../utils/liveMarketEngine';
 import {
@@ -150,6 +152,12 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
   const [feedSyncedAt, setFeedSyncedAt] = useState<string>(initialStreamState.syncedAt);
   const [superAiAuto, setSuperAiAuto] = useState<boolean>(initialStreamState.superAiAutoEnabled);
   const [superAiNotes, setSuperAiNotes] = useState(initialStreamState.superAiNotes);
+  const [deepAudits, setDeepAudits] = useState<Partial<Record<CurrencyPair, DeepVerifyResult>>>(
+    initialStreamState.deepAudits
+  );
+  const [isDeepVerifyingPair, setIsDeepVerifyingPair] = useState<Partial<Record<CurrencyPair, boolean>>>(
+    initialStreamState.isDeepVerifyingPair
+  );
   const [syncingQuotes, setSyncingQuotes] = useState<boolean>(false);
   const [userLockedCandlePrice, setUserLockedCandlePrice] = useState<boolean>(false);
   const [riskConfig, setRiskConfig] = useState<RiskManagementConfig>(() => positionRiskStore.getConfig());
@@ -254,6 +262,8 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
       setFeedSyncedAt(streamState.syncedAt);
       setSuperAiAuto(streamState.superAiAutoEnabled);
       setSuperAiNotes(streamState.superAiNotes);
+      setDeepAudits(streamState.deepAudits);
+      setIsDeepVerifyingPair(streamState.isDeepVerifyingPair);
       setBroker(streamState.activeBroker);
 
       const activeTarget = streamState.selectedPair || selectedPairRef.current;
@@ -335,12 +345,15 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
     const sourceList = customMarkets || liveMarkets;
     const m = sourceList.find((x) => x.pair === newPair) || INITIAL_MARKETS_DATA.find((x) => x.pair === newPair);
     if (m) {
+      const useH1 = activeTf === 'H1' || activeTf === 'H4' || activeTf === 'D1';
       const reEvaluated = evaluateCandleSeriesAndTick({
         pair: newPair,
         timeframe: activeTf,
         livePrice: m.price,
-        baseCandles: m.candles,
-        change24hPct: m.change24hPct
+        baseCandles: useH1 ? (m.h1Candles || m.candles) : m.candles,
+        candlesAreRealOhlc: m.candlesAreRealOhlc,
+        change24hPct: m.change24hPct,
+        h1TrendDirection: m.h1TrendDirection
       });
       setCurrentPrice(m.price);
       setKeyLevel(reEvaluated.keyLevel);
@@ -353,6 +366,9 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
     }
 
     globalLiveStream.setSelectedPair(newPair);
+    if (newTimeframe) {
+      globalLiveStream.setPairTimeframe(newPair, newTimeframe);
+    }
     void globalLiveStream.fetchSuperAiNoteForPair(newPair, activeTf, true);
 
     // Fetch live OHLC bars in background for exact latest candlestick quote
@@ -375,18 +391,22 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
 
     setUserLockedCandlePrice(true);
     const matchingMarket = liveMarkets.find((m) => m.pair === pair);
+    const useH1 = timeframe === 'H1' || timeframe === 'H4' || timeframe === 'D1';
     const reEval = evaluateCandleSeriesAndTick({
       pair,
       timeframe,
       livePrice: num,
-      baseCandles: matchingMarket?.candles,
-      change24hPct: matchingMarket?.change24hPct
+      baseCandles: useH1 ? (matchingMarket?.h1Candles || matchingMarket?.candles) : matchingMarket?.candles,
+      candlesAreRealOhlc: matchingMarket?.candlesAreRealOhlc,
+      change24hPct: matchingMarket?.change24hPct,
+      h1TrendDirection: matchingMarket?.h1TrendDirection
     });
     setEma20(reEval.ema20);
     setEma50(reEval.ema50);
     setRsi(reEval.rsi);
     setKeyLevel(reEval.keyLevel);
     setPatternType(reEval.patternType);
+    globalLiveStream.setCustomCandlePrice(pair, num, timeframe);
   };
 
   // 1-Click Market Selection & Auto Deep AI Scan
@@ -415,7 +435,7 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
 
     window.speechSynthesis.cancel();
     const actionWord = card.direction === 'BUY' ? 'Buy' : 'Sell';
-    const textToSpeak = `PivotFX Institutional Signal. ${actionWord} ${card.pair} by market at ${card.entryPrice}. Stop Loss at ${card.stopLoss}, risking ${card.slPips} pips. Maximum loss is strictly capped at two dollars on zero point zero one micro lot under the Gilgil shield. Take Profit 1 at ${card.tp1}, close fifty percent and move to breakeven. Final Take Profit 2 at ${card.tp2}. Risk reward ratio 1 to ${card.riskReward}.`;
+    const textToSpeak = `PivotFX Institutional Signal. ${actionWord} ${card.pair} by market at ${card.entryPrice}. Stop Loss at ${card.stopLoss}, risking ${card.slPips} pips. Maximum risk is strictly capped at ${card.actualRiskUsd.toFixed(2)} dollars on ${card.lotSize.toFixed(2)} lots under your risk shield. Take Profit 1 at ${card.tp1}, close fifty percent and move to breakeven. Final Take Profit 2 at ${card.tp2}. Risk reward ratio 1 to ${card.riskReward}.`;
 
     const utterance = new SpeechSynthesisUtterance(textToSpeak);
     utterance.rate = 0.95;
@@ -681,8 +701,10 @@ InpMagicNumber=777129
         atrPips: matchedCamMkt?.atrPips,
         swingLow: camSwings.swingLow,
         swingHigh: camSwings.swingHigh,
+        change24hPct: matchedCamMkt?.change24hPct,
         macro: camMacro,
         h1TrendDirection: matchedCamMkt?.h1TrendDirection,
+        bosAnalysis: matchedCamMkt?.bosAnalysis,
         riskConfig
       });
 
@@ -846,11 +868,17 @@ InpMagicNumber=777129
         atrPips: targetAtrPips ?? matchedMktForSwing?.atrPips,
         swingLow: swings.swingLow,
         swingHigh: swings.swingHigh,
+        change24hPct: matchedMktForSwing?.change24hPct,
         macro: currentMacro,
         h1TrendDirection: matchedMktForSwing?.h1TrendDirection,
+        bosAnalysis: matchedMktForSwing?.bosAnalysis,
         biasOverride: manualDirection,
         riskConfig
       });
+
+      if (mode === 'deep_ai') {
+        void globalLiveStream.verifyMarketDeepScan(activePair, activeTf, broker, manualDirection);
+      }
 
       const isBuy = computed.direction === 'BUY';
       const pipMultiplier = activePair.includes('JPY') ? 100 : activePair.includes('XAU') ? 10 : activePair.includes('BTC') ? 1 : 10000;
@@ -909,7 +937,7 @@ InpMagicNumber=777129
             '1. Open MT4/MT5 connected to FXPesa Kenya server.',
             `2. Select symbol: ${computed.brokerSymbol} (Timeframe: ${activeTf}).`,
             `3. Order Type: ${computed.orderType}.`,
-            '4. Volume: 0.01 micro lot (strict $2.00 / 260 KES Gilgil protection).',
+            `4. Volume: ${computed.lotSize.toFixed(2)} lots ($${computed.actualRiskUsd.toFixed(2)} max risk · ${riskConfig.riskPct}% risk cap).`,
             `5. Input Stop Loss: ${slPrice.toFixed(decimals)}, Take Profit: ${tpPrice.toFixed(decimals)}.`,
             '6. CMA safety: Zero negative balance debt risk.'
           ]
@@ -924,7 +952,7 @@ InpMagicNumber=777129
             '1. Open HFM MT4/MT5 terminal.',
             `2. Choose symbol: ${computed.brokerSymbol} (Timeframe: ${activeTf}).`,
             `3. Order Type: ${computed.orderType}.`,
-            '4. Set Volume to 0.01 micro lot. Do NOT use excess leverage.',
+            `4. Set Volume to ${computed.lotSize.toFixed(2)} lots ($${computed.actualRiskUsd.toFixed(2)} cap). Do NOT use excess leverage.`,
             `5. Stop Loss: ${slPrice.toFixed(decimals)}, Target: ${tpPrice.toFixed(decimals)}.`
           ]
         },
@@ -938,7 +966,7 @@ InpMagicNumber=777129
             '1. Open Exness MT4/MT5 or Exness Terminal web.',
             `2. Select micro symbol: ${computed.brokerSymbol} (Timeframe: ${activeTf}).`,
             '3. Raw spread is tight with 0 stop-level limits.',
-            '4. Volume: 0.01 Micro Lot. Benefit from instant algorithmic execution.',
+            `4. Volume: ${computed.lotSize.toFixed(2)} lots ($${computed.actualRiskUsd.toFixed(2)} risk). Benefit from instant algorithmic execution.`,
             `5. Stop Loss: ${slPrice.toFixed(decimals)}, Target 1: ${tp1Price.toFixed(decimals)}, Final TP: ${tpPrice.toFixed(decimals)}.`,
             '6. Withdrawals to M-Pesa are automated 24/7 in < 3 minutes.'
           ]
@@ -953,7 +981,7 @@ InpMagicNumber=777129
             '1. Open FBS MT4/MT5 Cent or Standard platform.',
             `2. Symbol: ${computed.brokerSymbol} (Timeframe: ${activeTf}).`,
             `3. Order Type: ${computed.orderType}.`,
-            '4. Strict 0.01 lot volume. Avoid margin overtrading trap.',
+            `4. Strict ${computed.lotSize.toFixed(2)} lot volume ($${computed.actualRiskUsd.toFixed(2)} max risk). Avoid margin overtrading trap.`,
             `5. Set Stop Loss: ${slPrice.toFixed(decimals)}, Target: ${tpPrice.toFixed(decimals)}.`
           ]
         }
@@ -981,7 +1009,9 @@ InpMagicNumber=777129
         tp1Price: Number(tp1Price.toFixed(decimals)),
         tp2Price: Number(tpPrice.toFixed(decimals)),
         riskReward: computed.riskReward,
-        suggestedLot: 0.01,
+        suggestedLot: computed.lotSize,
+        actualRiskUsd: computed.actualRiskUsd,
+        executionReadiness: computed.executionReadiness,
         reasoning: reasons,
         howToPlaceSteps: currentBrokerSpec.instructions,
         brokerDashboard: {
@@ -1040,8 +1070,10 @@ InpMagicNumber=777129
       atrPips: m.atrPips,
       swingLow: chatSwings.swingLow,
       swingHigh: chatSwings.swingHigh,
+      change24hPct: m.change24hPct,
       macro: chatMacro,
       h1TrendDirection: m.h1TrendDirection,
+      bosAnalysis: m.bosAnalysis,
       riskConfig
     });
 
@@ -1074,7 +1106,12 @@ InpMagicNumber=777129
       id: `ai-${Date.now()}`,
       sender: 'ai',
       text: `**${mode === 'deep_ai' ? 'DEEP AI INSTITUTIONAL' : 'REAL CONFLUENCE'} AUDIT FOR ${m.pair} (${m.symbol}) [${timeframe}]:**\n• **Gate Status:** ${computed.executionReadiness} — ${computed.executionReadinessReason}\n• **Order Type:** ${orderType}\n• **Entry Price:** ${computed.entryPrice}\n• **Stop Loss:** ${computed.stopLoss} (-${slDistancePips} pips)\n• **Take Profit 1:** ${computed.tp1} (50% scale-out & move SL to Breakeven)\n• **Take Profit 2:** ${computed.tp2} (+${tpDistancePips} pips final target)\n• **Risk:Reward:** ${computed.riskReward}\n• **Max Risk:** $${computed.actualRiskUsd.toFixed(2)} on ${computed.lotSize.toFixed(2)} lots\n• **MT4 Ticket:** Symbol ${cleanSymbol} on ${broker.toUpperCase()} (~${computed.brokerSpread}p spread)`,
-      verdict: computed.executionReadiness === 'READY_ENTER' ? 'GREEN_LIGHT' : 'CAUTION',
+      verdict:
+        computed.executionReadiness === 'READY_ENTER'
+          ? 'GREEN_LIGHT'
+          : computed.executionReadiness === 'NO_TRADE_CLOSED'
+          ? 'DO_NOT_TRADE'
+          : 'CAUTION',
       lotCap: `${computed.lotSize.toFixed(2)} Lots ($${computed.actualRiskUsd.toFixed(2)} Max Risk)`,
       timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
       tradeCard: {
@@ -1106,6 +1143,9 @@ InpMagicNumber=777129
     setAdvisorMessages((prev) => [...prev, aiMsg]);
     playAudioBeep(mode === 'deep_ai' ? 980 : 880, 0.12);
     void globalLiveStream.fetchSuperAiNoteForPair(m.pair, timeframe, true);
+    if (mode === 'deep_ai') {
+      void globalLiveStream.verifyMarketDeepScan(m.pair, timeframe, broker);
+    }
   };
 
   // Instant AI Market Advisor Engine
@@ -1219,8 +1259,10 @@ InpMagicNumber=777129
           atrPips: matchedMarket?.atrPips,
           swingLow: swingsAdvisor.swingLow,
           swingHigh: swingsAdvisor.swingHigh,
+          change24hPct: matchedMarket?.change24hPct,
           macro: advisorMacro,
           h1TrendDirection: matchedMarket?.h1TrendDirection,
+          bosAnalysis: matchedMarket?.bosAnalysis,
           riskConfig
         });
 
@@ -1679,6 +1721,11 @@ InpMagicNumber=777129
           ========================================================================= */}
       {scannerView === 'favorable_chart' && (() => {
         const activeMarketObj = liveMarkets.find((m) => m.pair === pair) || INITIAL_MARKETS_DATA[0];
+        const useH1Chart = timeframe === 'H1' || timeframe === 'H4' || timeframe === 'D1';
+        const chartCandles = useH1Chart
+          ? (activeMarketObj.h1Candles || activeMarketObj.candles || [])
+          : (activeMarketObj.candles || []);
+        const favorableSwings = computeCandleSwingLevels(chartCandles);
         const pctMap: Partial<Record<CurrencyPair, number>> = {};
         liveMarkets.forEach((m) => {
           pctMap[m.pair] = m.change24hPct;
@@ -1694,11 +1741,15 @@ InpMagicNumber=777129
           ema50: ema50,
           rsi: rsi,
           atrPips: activeMarketObj.atrPips,
+          swingLow: favorableSwings.swingLow,
+          swingHigh: favorableSwings.swingHigh,
+          change24hPct: activeMarketObj.change24hPct,
           macro: liveMacro,
           biasOverride: biasOverride === 'AUTO' ? undefined : biasOverride,
-          previousDirection: activeMarketObj.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+          previousDirection: biasOverride === 'AUTO' ? undefined : biasOverride,
           previousTrendDirection: activeMarketObj.trendDirection,
           h1TrendDirection: activeMarketObj.h1TrendDirection,
+          bosAnalysis: activeMarketObj.bosAnalysis,
           riskConfig
         });
 
@@ -1853,7 +1904,7 @@ InpMagicNumber=777129
               <LiveInteractiveCandleChart
                 pair={pair}
                 timeframe={timeframe}
-                candles={activeMarketObj.candles || []}
+                candles={chartCandles}
                 livePrice={currentPrice}
                 ema20={ema20}
                 ema50={ema50}
@@ -1866,6 +1917,9 @@ InpMagicNumber=777129
                 change24hPct={activeMarketObj.change24hPct}
                 lotSize={favorableComputed.lotSize}
                 riskUsd={favorableComputed.actualRiskUsd}
+                executionReadiness={favorableComputed.executionReadiness}
+                executionReadinessReason={favorableComputed.executionReadinessReason}
+                bosAnalysis={favorableComputed.bosAnalysis}
                 isLockedToCustom={userLockedCandlePrice}
                 onCandlePriceChange={(newPrice) => {
                   handleLiveCandlePriceEdit(String(newPrice));
@@ -1876,6 +1930,22 @@ InpMagicNumber=777129
                   globalLiveStream.unlockPairToLiveStream(pair);
                   handleSyncLiveQuotes();
                 }}
+              />
+
+              <DeepScanVerificationPanel
+                pair={pair}
+                timeframe={timeframe}
+                computed={favorableComputed}
+                deepAudit={deepAudits[pair]}
+                isVerifying={Boolean(isDeepVerifyingPair[pair])}
+                onRunDeepVerify={() =>
+                  void globalLiveStream.verifyMarketDeepScan(
+                    pair,
+                    timeframe,
+                    broker,
+                    biasOverride === 'AUTO' ? undefined : biasOverride
+                  )
+                }
               />
 
               <DynamicPositionSizeCalculator pair={pair} computed={favorableComputed} />
@@ -3116,6 +3186,11 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
               {/* Dynamic Live Parameter Preview */}
               {(() => {
                 const activeManualMkt = liveMarkets.find((m) => m.pair === pair);
+                const manualSwings = computeCandleSwingLevels(activeManualMkt?.candles);
+                const manualPctMap: Partial<Record<CurrencyPair, number>> = {};
+                liveMarkets.forEach((m) => {
+                  manualPctMap[m.pair] = m.change24hPct;
+                });
                 const preview = computeRealChartTradeParams({
                   targetPair: pair,
                   targetTf: timeframe,
@@ -3126,18 +3201,42 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
                   ema50,
                   rsi,
                   atrPips: activeManualMkt?.atrPips,
+                  swingLow: manualSwings.swingLow,
+                  swingHigh: manualSwings.swingHigh,
+                  change24hPct: activeManualMkt?.change24hPct,
+                  macro: getCurrentMacroContext(manualPctMap),
                   biasOverride: biasOverride === 'AUTO' ? undefined : biasOverride,
-                  previousDirection: activeManualMkt ? (activeManualMkt.bias === 'STRONG_SELL' ? 'SELL' : 'BUY') : undefined,
-                  previousTrendDirection: activeManualMkt?.trendDirection
+                  previousDirection: biasOverride === 'AUTO' ? undefined : biasOverride,
+                  previousTrendDirection: activeManualMkt?.trendDirection,
+                  h1TrendDirection: activeManualMkt?.h1TrendDirection,
+                  bosAnalysis: activeManualMkt?.bosAnalysis,
+                  riskConfig
                 });
                 return (
-                  <div className="p-2.5 rounded-xl bg-black/60 border border-slate-800 text-xs font-mono flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 tabular-nums">
-                    <div className="text-slate-300">
-                      Live Entry: <strong className="text-white">@{preview.entryPrice}</strong> · Order: <strong className="text-[#D4AF37]">{preview.orderType}</strong> ({preview.trendDirection}) · SL: <strong className="text-red-300">{preview.stopLoss}</strong> (-{preview.slPips}p) · TP2: <strong className="text-emerald-300">{preview.tp2}</strong> (+{preview.tpPips}p · <strong className="text-[#00C261]">+${preview.netProfitUsd.toFixed(2)}</strong>)
+                  <div className="space-y-3">
+                    <div className="p-2.5 rounded-xl bg-black/60 border border-slate-800 text-xs font-mono flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 tabular-nums">
+                      <div className="text-slate-300">
+                        Live Entry: <strong className="text-white">@{preview.entryPrice}</strong> · Order: <strong className="text-[#D4AF37]">{preview.orderType}</strong> ({preview.trendDirection}) · SL: <strong className="text-red-300">{preview.stopLoss}</strong> (-{preview.slPips}p) · TP2: <strong className="text-emerald-300">{preview.tp2}</strong> (+{preview.tpPips}p · <strong className="text-[#00C261]">+${preview.netProfitUsd.toFixed(2)}</strong>)
+                      </div>
+                      <span className="text-[11px] text-emerald-400 font-bold shrink-0">
+                        {preview.mt4SafetyProof}
+                      </span>
                     </div>
-                    <span className="text-[11px] text-emerald-400 font-bold shrink-0">
-                      {preview.mt4SafetyProof}
-                    </span>
+                    <DeepScanVerificationPanel
+                      pair={pair}
+                      timeframe={timeframe}
+                      computed={preview}
+                      deepAudit={deepAudits[pair]}
+                      isVerifying={Boolean(isDeepVerifyingPair[pair])}
+                      onRunDeepVerify={() =>
+                        void globalLiveStream.verifyMarketDeepScan(
+                          pair,
+                          timeframe,
+                          broker,
+                          biasOverride === 'AUTO' ? undefined : biasOverride
+                        )
+                      }
+                    />
                   </div>
                 );
               })()}
@@ -3522,10 +3621,12 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
                   </div>
                 )}
 
-                {/* Gilgil $2 Shield Guarantee */}
+                {/* Dynamic Risk Sizing Cap */}
                 <div className="p-2.5 rounded-xl bg-[#D4AF37]/10 border border-[#D4AF37]/30 text-[11px] font-mono text-amber-200 flex items-center justify-between">
-                  <span>Gilgil $2 Sizing Cap:</span>
-                  <strong className="text-white">0.01 Micro Lot (Risk: $2.00 / 260 KES)</strong>
+                  <span>Position Size &amp; Risk Cap ({riskConfig.riskPct}%):</span>
+                  <strong className="text-white">
+                    {(manualResult.suggestedLot || 0.01).toFixed(2)} Lots (Risk: ${(manualResult.actualRiskUsd ?? 2).toFixed(2)} / {Math.round((manualResult.actualRiskUsd ?? 2) * 130)} KES)
+                  </strong>
                 </div>
 
                 {/* Action Buttons */}
@@ -3543,7 +3644,7 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
                       const eaCode = `// PIVOTFX EA CONFIG - ${manualResult.pair}
 Symbol: ${manualResult.brokerDashboard?.symbol || manualResult.pair}
 OrderType: ${manualResult.orderType}
-Volume: 0.01 Micro Lot ($2 Max Risk)
+Volume: ${(manualResult.suggestedLot || 0.01).toFixed(2)} Lots ($${(manualResult.actualRiskUsd ?? 2).toFixed(2)} Max Risk)
 Entry: ${manualResult.price}
 SL: ${manualResult.stopLoss}
 TP1: ${manualResult.tp1Price || manualResult.takeProfit}
@@ -3791,6 +3892,11 @@ Broker: ${broker.toUpperCase()}`;
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 bg-slate-950/60">
                   {liveMarkets.map((m) => {
+                    const rowSwings = computeCandleSwingLevels(m.candles);
+                    const rowPctMap: Partial<Record<CurrencyPair, number>> = {};
+                    liveMarkets.forEach((lm) => {
+                      rowPctMap[lm.pair] = lm.change24hPct;
+                    });
                     const computedRow = computeRealChartTradeParams({
                       targetPair: m.pair,
                       targetTf: m.recommendedTf,
@@ -3800,10 +3906,15 @@ Broker: ${broker.toUpperCase()}`;
                       ema20: m.ema20,
                       ema50: m.ema50,
                       rsi: m.rsi,
-                      biasOverride: m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
-                      previousDirection: m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+                      atrPips: m.atrPips,
+                      swingLow: rowSwings.swingLow,
+                      swingHigh: rowSwings.swingHigh,
+                      change24hPct: m.change24hPct,
+                      macro: getCurrentMacroContext(rowPctMap),
                       previousTrendDirection: m.trendDirection,
-                      h1TrendDirection: m.h1TrendDirection
+                      h1TrendDirection: m.h1TrendDirection,
+                      bosAnalysis: m.bosAnalysis,
+                      riskConfig
                     });
                     const isBuy = computedRow.direction === 'BUY';
                     const brokerSpec = m.spreadByBroker[broker];
@@ -3914,6 +4025,7 @@ Broker: ${broker.toUpperCase()}`;
             liveMarkets.forEach((m) => {
               activePctMap[m.pair] = m.change24hPct;
             });
+            const chatActiveSwings = computeCandleSwingLevels(activeChatMarket.candles);
             const chatComputed = computeRealChartTradeParams({
               targetPair: pair,
               targetTf: timeframe,
@@ -3924,11 +4036,16 @@ Broker: ${broker.toUpperCase()}`;
               ema50: activeChatMarket.ema50,
               rsi: activeChatMarket.rsi,
               atrPips: activeChatMarket.atrPips,
+              swingLow: chatActiveSwings.swingLow,
+              swingHigh: chatActiveSwings.swingHigh,
+              change24hPct: activeChatMarket.change24hPct,
               macro: getCurrentMacroContext(activePctMap),
               biasOverride: biasOverride === 'AUTO' ? undefined : biasOverride,
-              previousDirection: activeChatMarket.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+              previousDirection: biasOverride === 'AUTO' ? undefined : biasOverride,
               previousTrendDirection: activeChatMarket.trendDirection,
-              h1TrendDirection: activeChatMarket.h1TrendDirection
+              h1TrendDirection: activeChatMarket.h1TrendDirection,
+              bosAnalysis: activeChatMarket.bosAnalysis,
+              riskConfig
             });
 
             return (
@@ -4010,16 +4127,15 @@ Broker: ${broker.toUpperCase()}`;
               if (syncedCard) {
                 const liveMatch = liveMarkets.find((x) => x.pair === syncedCard!.pair);
                 const msgSideOverride = advisorSideByMsgId[m.id] || 'AUTO';
-                const effectiveDir =
-                  msgSideOverride === 'AUTO'
-                    ? liveMatch && syncedCard.pair === pair
-                      ? liveMatch.bias === 'STRONG_SELL'
-                        ? 'SELL'
-                        : 'BUY'
-                      : syncedCard.direction
-                    : msgSideOverride;
+                const effectiveBiasOverride =
+                  msgSideOverride === 'AUTO' ? undefined : msgSideOverride;
                 if (liveMatch || msgSideOverride !== 'AUTO') {
                   const pVal = liveMatch ? liveMatch.price : syncedCard.entryPrice;
+                  const recomputeSwings = computeCandleSwingLevels(liveMatch?.candles);
+                  const recomputePctMap: Partial<Record<CurrencyPair, number>> = {};
+                  liveMarkets.forEach((lm) => {
+                    recomputePctMap[lm.pair] = lm.change24hPct;
+                  });
                   const recomputed = computeRealChartTradeParams({
                     targetPair: syncedCard.pair,
                     targetTf: syncedCard.timeframe || timeframe,
@@ -4030,10 +4146,16 @@ Broker: ${broker.toUpperCase()}`;
                     ema50: liveMatch?.ema50 ?? pVal,
                     rsi: liveMatch?.rsi ?? 52,
                     atrPips: liveMatch?.atrPips,
-                    biasOverride: effectiveDir,
-                    previousDirection: syncedCard.direction,
+                    swingLow: recomputeSwings.swingLow,
+                    swingHigh: recomputeSwings.swingHigh,
+                    change24hPct: liveMatch?.change24hPct,
+                    macro: getCurrentMacroContext(recomputePctMap),
+                    biasOverride: effectiveBiasOverride,
+                    previousDirection: effectiveBiasOverride,
                     previousTrendDirection: liveMatch?.trendDirection,
-                    h1TrendDirection: liveMatch?.h1TrendDirection
+                    h1TrendDirection: liveMatch?.h1TrendDirection,
+                    bosAnalysis: liveMatch?.bosAnalysis,
+                    riskConfig
                   });
                   syncedCard = {
                     ...syncedCard,
@@ -4048,6 +4170,7 @@ Broker: ${broker.toUpperCase()}`;
                     tpPips: recomputed.tpPips,
                     tp3Pips: recomputed.tp3Pips,
                     riskReward: recomputed.riskReward,
+                    lotSize: recomputed.lotSize,
                     actualRiskUsd: recomputed.actualRiskUsd,
                     potentialGainUsd: recomputed.netProfitUsd,
                     netProfit48hUsd: recomputed.netProfit48hUsd,

@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { PillarHeaderBar } from '../components/common/PillarHeaderBar';
+import { TradingViewEmbedWidget } from '../components/tools/TradingViewEmbedWidget';
+import { globalLiveStream, getTradingViewSymbol } from '../utils/liveMarketEngine';
 
 interface TradingViewPageProps {
   onNavigate: (tab: PageTab) => void;
@@ -69,12 +71,15 @@ export const TradingViewPage: React.FC<TradingViewPageProps> = ({
   const [newLevelLabel, setNewLevelLabel] = useState('');
   const [newLevelType, setNewLevelType] = useState<'support' | 'resistance'>('support');
 
-  // Pair options
-  const pairOptions: SelectOption[] = Object.keys(PAIRS_PRESETS).map((p) => ({
-    value: p,
-    label: p,
-    sublabel: `Symbol: FX:${p.replace('/', '')} • ~${PAIRS_PRESETS[p as CurrencyPair].defaultPrice}`,
-  }));
+  // Pair options mapped to canonical TradingView institutional exchanges
+  const pairOptions: SelectOption[] = Object.keys(PAIRS_PRESETS).map((p) => {
+    const typedPair = p as CurrencyPair;
+    return {
+      value: p,
+      label: p,
+      sublabel: `${getTradingViewSymbol(typedPair)} · ~${PAIRS_PRESETS[typedPair].defaultPrice}`,
+    };
+  });
 
   const timeframeOptions: SelectOption[] = [
     { value: 'M1', label: '1 Minute (M1)' },
@@ -138,28 +143,13 @@ export const TradingViewPage: React.FC<TradingViewPageProps> = ({
   };
 
   const handleScanDirectly = () => {
-    const currentPrice = PAIRS_PRESETS[pair]?.defaultPrice || 1.12670;
-    onSendToScanner(pair, timeframe, currentPrice, 46.5);
+    const liveMatch = globalLiveStream.getState().markets.find((m) => m.pair === pair);
+    const currentPrice = liveMatch?.price || PAIRS_PRESETS[pair]?.defaultPrice || 1.16360;
+    const currentRsi = liveMatch?.rsi || 52.0;
+    onSendToScanner(pair, timeframe, currentPrice, currentRsi);
     onNavigate('ai-scanner');
     onAwardXp(25, 'Transferred Chart to AI Scanner');
   };
-
-  // Convert pair to TradingView embed symbol
-  const tvSymbol = pair === 'XAU/USD' ? 'OANDA:XAUUSD' : pair === 'BTC/USD' ? 'BITSTAMP:BTCUSD' : `FX:${pair.replace('/', '')}`;
-  const tvTimeframeCode =
-    timeframe === 'M1'
-      ? '1'
-      : timeframe === 'M5'
-      ? '5'
-      : timeframe === 'M10'
-      ? '10'
-      : timeframe === 'M15'
-      ? '15'
-      : timeframe === 'H1'
-      ? '60'
-      : timeframe === 'H4'
-      ? '240'
-      : 'D';
 
   const towerStepsExplain = [
     { title: 'Phase 1: Parabolic Rush (Tower Ascent)', desc: '3 consecutive green candles sprint higher. Retail traders feel intense FOMO and buy at the peak.' },
@@ -275,39 +265,31 @@ export const TradingViewPage: React.FC<TradingViewPageProps> = ({
         </div>
       </div>
 
-      {/* Main Chart Canvas & Overlay Container */}
-      <div className="relative w-full rounded-3xl overflow-hidden border border-slate-800 bg-[#0B0F17] shadow-2xl">
-        {/* Custom Strategy Alert Banner overlaid on top of chart */}
-        {showPivotOverlay && (
-          <div className="absolute top-4 left-4 right-4 z-20 flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-[#111827]/90 backdrop-blur-md border border-slate-700/80 text-xs">
-            <div className="flex items-center gap-3 flex-wrap">
-              <span className="font-bold text-red-400">
-                RED: Tower Top Loss Traps (Avoid Buying Extended)
-              </span>
-              <span className="hidden sm:inline text-slate-600">·</span>
-              <span className="font-bold text-[#00C261]">
-                GREEN: Disciplined 20 EMA Breakdown Entries (e.g. 1.35100)
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-mono text-slate-400">Timeframe: {timeframe}</span>
-            </div>
+      {/* Main Auto-Synced TradingView Chart + Companion Execution Card */}
+      {showPivotOverlay && (
+        <div className="p-3 rounded-2xl bg-[#111827] border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="font-bold text-red-400">
+              RED: Extended Tower Top Traps (Avoid Buying Extended)
+            </span>
+            <span className="hidden sm:inline text-slate-600">·</span>
+            <span className="font-bold text-[#00C261]">
+              GREEN: Disciplined BOS + 20 EMA Pullback Entries
+            </span>
           </div>
-        )}
-
-        {/* Live TradingView Widget Embed */}
-        <div className="w-full h-[520px]">
-          <iframe
-            title={`TradingView Chart ${pair}`}
-            src={`https://s.tradingview.com/widgetembed/?frameElementId=tradingview_chart&symbol=${encodeURIComponent(
-              tvSymbol
-            )}&interval=${tvTimeframeCode}&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=f1f3f6&studies=%5B%5D&theme=dark&style=1&timezone=Africa%2FNairobi&studies_overrides=%7B%7D&overrides=%7B%22mainSeriesProperties.candleStyle.upColor%22%3A%22%2300C261%22%2C%22mainSeriesProperties.candleStyle.downColor%22%3A%22%23ef4444%22%2C%22mainSeriesProperties.candleStyle.drawWick%22%3Atrue%2C%22mainSeriesProperties.candleStyle.drawBorder%22%3Atrue%2C%22mainSeriesProperties.candleStyle.borderColor%22%3A%22%2337a6ef%22%2C%22mainSeriesProperties.candleStyle.borderUpColor%22%3A%22%2300C261%22%2C%22mainSeriesProperties.candleStyle.borderDownColor%22%3A%22%23ef4444%22%2C%22mainSeriesProperties.candleStyle.wickUpColor%22%3A%22%2300C261%22%2C%22mainSeriesProperties.candleStyle.wickDownColor%22%3A%22%23ef4444%22%7D&enabled_features=%5B%5D&disabled_features=%5B%5D&locale=en&utm_source=pivotfxlab`}
-            className="w-full h-full border-0"
-            allowFullScreen
-          />
+          <span className="text-[11px] text-cyan-300 font-bold">
+            Active Study Stack: EMA 20/50 + RSI(14) + Live Sync Card
+          </span>
         </div>
-      </div>
+      )}
+
+      <TradingViewEmbedWidget
+        pair={pair}
+        timeframe={timeframe}
+        onPairChange={setPair}
+        onTimeframeChange={setTimeframe}
+        isCollapsible={false}
+      />
 
       {/* Two Secondary Interactive Modules:
           1. Animated Tower Formation Step-by-Step Replay

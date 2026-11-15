@@ -104,6 +104,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       atrPips: topMover.atrPips,
       swingLow: cardSwings.swingLow,
       swingHigh: cardSwings.swingHigh,
+      change24hPct: topMover.change24hPct,
       macro: macroContext,
       h1TrendDirection: topMover.h1TrendDirection,
       riskConfig: positionRiskStore.getConfig()
@@ -171,7 +172,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </h1>
 
               <p className="text-sm sm:text-base text-slate-300 max-w-xl leading-relaxed">
-                Transform personal capital into funded institutional accounts. Live multi-market scans, sustainable 8-factor confluence projections, Gilgil Shield $2.80 risk discipline, and real-time Nairobi session countdowns.
+                Transform personal capital into funded institutional accounts. Live multi-market scans, sustainable 9-factor BOS/CHoCH confluence projections, dynamic risk-calibrated sizing, and real-time Nairobi session countdowns.
               </p>
             </div>
 
@@ -200,7 +201,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           <div className="lg:col-span-5 relative min-h-[260px] lg:min-h-full bg-[#080C15] border-t lg:border-t-0 lg:border-l border-slate-800 overflow-hidden flex items-center justify-center">
             {/* Glowing Architectural Building Signage inside Prop Floor */}
             <div className="absolute top-4 left-4 z-20 flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-slate-950/90 backdrop-blur-md border border-[#D4AF37]/90 shadow-[0_0_24px_rgba(212,175,55,0.55)]">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#00C261] animate-pulse shadow-[0_0_8px_#00C261]" />
+              <span className="w-2.5 h-2.5 rounded-full bg-[#00C261] shadow-[0_0_8px_#00C261]" />
               <div className="flex flex-col">
                 <span className="font-mono text-[11px] font-black tracking-widest text-[#D4AF37] uppercase leading-none">
                   PIVOT FX PROP TRADING FLOOR
@@ -243,10 +244,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         {/* Top Notification Status Header */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
           <div className="flex items-center gap-2.5 flex-wrap">
-            <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00C261] opacity-75" />
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-[#00C261]" />
-            </span>
+            <span className="inline-flex rounded-full h-2.5 w-2.5 bg-[#00C261]" />
             <span className="text-xs font-black tracking-wider text-[#D4AF37] uppercase">
               LIVE SESSION DIRECTIVE · {macroContext.sessionWindowName}
             </span>
@@ -328,6 +326,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <span className="px-2.5 py-1 rounded-md bg-[#D4AF37]/15 text-[#D4AF37] font-black text-[10px] tracking-wider border border-[#D4AF37]/30">
                 #1 TRENDING MOVER
               </span>
+              <span
+                className={`px-2 py-0.5 rounded font-black text-[10px] tracking-wider ${
+                  topMoverTrade.computed.executionReadiness === 'READY_ENTER'
+                    ? 'bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40'
+                    : topMoverTrade.computed.executionReadiness === 'WAIT_PULLBACK'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                    : 'bg-red-500/20 text-red-300 border border-red-500/40'
+                }`}
+              >
+                {topMoverTrade.computed.executionReadiness === 'READY_ENTER'
+                  ? 'READY'
+                  : topMoverTrade.computed.executionReadiness === 'WAIT_PULLBACK'
+                  ? 'WAIT PULLBACK'
+                  : 'STAND ASIDE'}
+              </span>
               <span className="text-base font-black text-white">
                 {topMoverTrade.topMover.pair}
               </span>
@@ -358,6 +371,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </span>
               <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-[10px] text-slate-300 font-mono">
                 Lot: {topMoverTrade.computed.lotSize} (Risk: ${topMoverTrade.computed.actualRiskUsd})
+              </span>
+              <span className="px-2 py-0.5 rounded bg-slate-900 border border-cyan-500/40 text-[10px] text-cyan-300 font-mono">
+                {topMoverTrade.computed.recommendedStrategy} · {topMoverTrade.computed.tvSymbol}
               </span>
             </div>
 

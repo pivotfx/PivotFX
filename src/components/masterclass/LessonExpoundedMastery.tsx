@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { PillarLesson, PillarData, CurrencyPair, Timeframe } from '../../types';
-import { computeRealChartTradeParams, INITIAL_MARKETS_DATA } from '../../utils/liveMarketEngine';
+import {
+  computeRealChartTradeParams,
+  INITIAL_MARKETS_DATA,
+  globalLiveStream,
+  positionRiskStore
+} from '../../utils/liveMarketEngine';
 import {
   CheckCircle2,
   ShieldCheck,
@@ -153,12 +158,21 @@ export const LessonExpoundedMastery: React.FC<LessonExpoundedMasteryProps> = ({
       brokerNote = 'MT4/MT5 Hotkey F9 · Ctrl+T Terminal · Gilgil Preset';
     }
 
+    const liveMatch = globalLiveStream.getState().markets.find((m) => m.pair === pair);
+    const liveRiskCfg = positionRiskStore.getConfig();
     const computed = computeRealChartTradeParams({
       targetPair: pair,
       targetTf: timeframe,
       targetBroker: 'fxpesa',
-      price: entry,
-      biasOverride: bias,
+      price: liveMatch?.price || entry,
+      ema20: liveMatch?.ema20,
+      ema50: liveMatch?.ema50,
+      rsi: liveMatch?.rsi,
+      atrPips: liveMatch?.atrPips,
+      h1TrendDirection: liveMatch?.h1TrendDirection,
+      bosAnalysis: liveMatch?.bosAnalysis,
+      biasOverride: liveMatch ? undefined : bias,
+      riskConfig: liveRiskCfg,
     });
 
     return {
@@ -199,12 +213,20 @@ export const LessonExpoundedMastery: React.FC<LessonExpoundedMasteryProps> = ({
     setRecalculatedBanner(null);
   }, [lesson.id]);
 
+  const liveMatchForPractice = globalLiveStream.getState().markets.find((m) => m.pair === details.pair);
   const practiceComputed = computeRealChartTradeParams({
     targetPair: details.pair,
     targetTf: practiceTf,
     targetBroker: 'fxpesa',
     price: practicePrice > 0 ? practicePrice : details.entry,
+    ema20: liveMatchForPractice?.ema20,
+    ema50: liveMatchForPractice?.ema50,
+    rsi: liveMatchForPractice?.rsi,
+    atrPips: liveMatchForPractice?.atrPips,
+    h1TrendDirection: liveMatchForPractice?.h1TrendDirection,
+    bosAnalysis: liveMatchForPractice?.bosAnalysis,
     biasOverride: practiceDir,
+    riskConfig: positionRiskStore.getConfig(),
   });
 
   const handleCopyTicket = () => {
@@ -307,7 +329,7 @@ CMA Protection: Zero Negative Balance Debt Risk`;
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-[#D4AF37] font-bold flex items-center gap-1.5">
               <SlidersHorizontal className="w-3.5 h-3.5" />
-              <span>Practice With Your Live Chart Quote (Prevents [Invalid S/L or T/P])</span>
+              <span>Practice With Your Live Chart Quote ({practiceComputed.tvSymbol} · {practiceComputed.recommendedStrategy})</span>
             </span>
             <span className="text-[11px] text-emerald-400 font-bold">{practiceComputed.mt4SafetyProof}</span>
           </div>
@@ -365,10 +387,13 @@ CMA Protection: Zero Negative Balance Debt Risk`;
               <button
                 type="button"
                 onClick={() => {
-                  const defaultRate = INITIAL_MARKETS_DATA.find((x) => x.pair === details.pair)?.price || details.entry;
+                  const defaultRate =
+                    globalLiveStream.getState().markets.find((x) => x.pair === details.pair)?.price ||
+                    INITIAL_MARKETS_DATA.find((x) => x.pair === details.pair)?.price ||
+                    details.entry;
                   const target = practicePrice > 0 ? practicePrice : defaultRate;
                   setPracticePrice(target);
-                  setRecalculatedBanner(`Recalculated ${practiceComputed.orderType} ticket anchored to ${target} (${practiceTf})`);
+                  setRecalculatedBanner(`Recalculated ${practiceComputed.orderType} (${practiceComputed.recommendedStrategy}) anchored to ${target} (${practiceTf})`);
                   setTimeout(() => setRecalculatedBanner(null), 3000);
                 }}
                 className="w-full py-2 px-3 rounded-xl btn-gold text-black font-black text-xs uppercase flex items-center justify-center gap-1.5 transition active:scale-95 whitespace-nowrap"

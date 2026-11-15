@@ -25,6 +25,8 @@ import {
 } from 'lucide-react';
 import { CandlestickVisualizer, CandleData } from '../common/CandlestickVisualizer';
 import { TradingViewNavigationGuide } from './TradingViewNavigationGuide';
+import { TradingViewEmbedWidget } from './TradingViewEmbedWidget';
+import { CurrencyPair, Timeframe } from '../../types';
 
 interface ChartToolElement {
   id: string;
@@ -55,28 +57,29 @@ interface ChartToolElement {
 
 export const ChartMasteryInteractiveTools: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'live-chart' | 'tv-basics' | 'tv-school' | 'mt4-school'>('live-chart');
-  const [selectedPair, setSelectedPair] = useState<string>('EURUSD');
-  const [selectedTimeframe, setSelectedTimeframe] = useState<string>('15');
+  const [selectedPair, setSelectedPair] = useState<CurrencyPair>('EUR/USD');
+  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('M15');
   const [activeToolId, setActiveToolId] = useState<string>('trendline');
   const [mt4ActiveId, setMt4ActiveId] = useState<string>('crosshair');
 
-  const pairsList = [
-    { code: 'EURUSD', label: 'EUR/USD', type: 'Major Forex' },
-    { code: 'GBPUSD', label: 'GBP/USD', type: 'High Volatility' },
-    { code: 'USDJPY', label: 'USD/JPY', type: 'Asian Session' },
-    { code: 'OANDA:XAUUSD', label: 'XAU/USD (Gold)', type: 'Commodity' },
+  const pairsList: { code: CurrencyPair; label: string; type: string }[] = [
+    { code: 'EUR/USD', label: 'EUR/USD', type: 'Major Forex' },
+    { code: 'GBP/USD', label: 'GBP/USD', type: 'High Volatility' },
+    { code: 'USD/JPY', label: 'USD/JPY', type: 'Asian Session' },
+    { code: 'XAU/USD', label: 'XAU/USD (Gold)', type: 'Commodity' },
     { code: 'US30', label: 'US30 (Dow Jones)', type: 'Index' },
-    { code: 'BINANCE:BTCUSDT', label: 'BTC/USDT', type: 'Crypto' },
+    { code: 'BTC/USD', label: 'BTC/USD (Binance)', type: 'Crypto' },
+    { code: 'ETH/USD', label: 'ETH/USD (Binance)', type: 'Crypto' },
   ];
 
-  const timeframesList = [
-    { code: '1', label: '1m', desc: 'Scalping' },
-    { code: '5', label: '5m', desc: 'Execution' },
-    { code: '10', label: '10m', desc: 'M10 Precision' },
-    { code: '15', label: '15m', desc: 'Core Setup' },
-    { code: '60', label: '1h', desc: 'Intraday Bias' },
-    { code: '240', label: '4h', desc: 'Institutional Structure' },
-    { code: 'D', label: 'Daily', desc: 'Major Trend' },
+  const timeframesList: { code: Timeframe; label: string; desc: string }[] = [
+    { code: 'M1', label: '1m', desc: 'Scalping' },
+    { code: 'M5', label: '5m', desc: 'Execution' },
+    { code: 'M10', label: '10m', desc: 'M10 Precision' },
+    { code: 'M15', label: '15m', desc: 'Core Setup' },
+    { code: 'H1', label: '1h', desc: 'Intraday Bias' },
+    { code: 'H4', label: '4h', desc: 'Institutional Structure' },
+    { code: 'D1', label: 'Daily', desc: 'Major Trend' },
   ];
 
   // 10 Comprehensive TradingView Elements
@@ -603,35 +606,14 @@ export const ChartMasteryInteractiveTools: React.FC = () => {
             </div>
           </div>
 
-          {/* Real Embedded TradingView Widget */}
-          <div className="relative rounded-3xl overflow-hidden border border-slate-800 bg-[#060910] shadow-2xl">
-            {/* Live Chart Header Status */}
-            <div className="px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <span className="font-mono font-bold text-white">Live Institutional Feed</span>
-                <span className="text-slate-500">·</span>
-                <span className="text-[#D4AF37] font-mono font-semibold">
-                  {selectedPair.replace('OANDA:', '').replace('BINANCE:', '')} • {selectedTimeframe}m Timeframe
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
-                <span>Timezone: Africa/Nairobi (EAT)</span>
-              </div>
-            </div>
-
-            {/* Live TradingView Widget Iframe */}
-            <div className="w-full h-[560px]">
-              <iframe
-                title="TradingView Real-Time Chart"
-                src={`https://s.tradingview.com/widgetembed/?frameElementId=tradingview_chart&symbol=${encodeURIComponent(
-                  selectedPair
-                )}&interval=${selectedTimeframe}&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=f1f3f6&studies=%5B%5D&theme=dark&style=1&timezone=Africa%2FNairobi&studies_overrides=%7B%7D&overrides=%7B%22mainSeriesProperties.candleStyle.upColor%22%3A%22%2300C261%22%2C%22mainSeriesProperties.candleStyle.downColor%22%3A%22%23ef4444%22%2C%22mainSeriesProperties.candleStyle.drawWick%22%3Atrue%2C%22mainSeriesProperties.candleStyle.drawBorder%22%3Atrue%2C%22mainSeriesProperties.candleStyle.borderColor%22%3A%22%2337a6ef%22%2C%22mainSeriesProperties.candleStyle.borderUpColor%22%3A%22%2300C261%22%2C%22mainSeriesProperties.candleStyle.borderDownColor%22%3A%22%23ef4444%22%2C%22mainSeriesProperties.candleStyle.wickUpColor%22%3A%22%2300C261%22%2C%22mainSeriesProperties.candleStyle.wickDownColor%22%3A%22%23ef4444%22%7D&enabled_features=%5B%5D&disabled_features=%5B%5D&locale=en&utm_source=pivotfxlab`}
-                className="w-full h-full border-0"
-                allowFullScreen
-              />
-            </div>
-          </div>
+          {/* Auto-Synced TradingView Widget + Live Companion Card */}
+          <TradingViewEmbedWidget
+            pair={selectedPair}
+            timeframe={selectedTimeframe}
+            onPairChange={setSelectedPair}
+            onTimeframeChange={setSelectedTimeframe}
+            isCollapsible={false}
+          />
         </div>
       )}
 

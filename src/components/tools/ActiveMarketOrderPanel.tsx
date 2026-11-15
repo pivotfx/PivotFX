@@ -368,14 +368,17 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
           {/* Quick Load Any Pair Order Right From Broker Terminal */}
           <div className="flex items-center gap-2 flex-wrap shrink-0">
             <select
-              value={selectedLotSize}
-              onChange={(e) => setSelectedLotSize(parseFloat(e.target.value))}
+              value={String(selectedLotSize)}
+              onChange={(e) =>
+                setSelectedLotSize(e.target.value === 'AUTO' ? 'AUTO' : parseFloat(e.target.value))
+              }
               aria-label="Select Lot Size"
               className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold text-xs outline-none focus:border-[#D4AF37]"
             >
-              <option value={0.01}>0.01 Micro Lot ($2 Cap)</option>
-              <option value={0.02}>0.02 Micro Lot ($4 Cap)</option>
-              <option value={0.05}>0.05 Micro Lot ($10 Cap)</option>
+              <option value="AUTO">Auto Risk Plan ({riskConfig.riskPct}% Budget)</option>
+              <option value="0.01">0.01 Micro Lot ($2 Cap)</option>
+              <option value="0.02">0.02 Micro Lot ($4 Cap)</option>
+              <option value="0.05">0.05 Micro Lot ($10 Cap)</option>
             </select>
 
             {activeMarketForDefault && !activeOrders[activeMarketForDefault.pair] && (
@@ -849,6 +852,7 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
     biasOverride: direction,
     previousDirection: direction,
     h1TrendDirection: activeMarket.h1TrendDirection,
+    change24hPct: activeMarket.change24hPct,
     riskConfig
   });
 
@@ -864,7 +868,9 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
           <div className="flex items-center gap-2 text-xs font-black flex-wrap">
             <span
               className={`px-3 py-1 rounded-lg ${
-                computed.goAheadAssurance.includes('STRONG')
+                computed.executionReadiness === 'NO_TRADE_CLOSED' || computed.executionReadiness === 'NO_TRADE_CHOP'
+                  ? 'bg-red-500/90 text-white'
+                  : computed.goAheadAssurance.includes('STRONG')
                   ? 'bg-[#00C261] text-black'
                   : computed.goAheadAssurance.includes('GO-AHEAD')
                   ? 'bg-[#D4AF37] text-black'
@@ -944,6 +950,19 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Execution Readiness Gate Warning Banner */}
+      {!existingOrder &&
+        (computed.executionReadiness === 'NO_TRADE_CLOSED' || computed.executionReadiness === 'NO_TRADE_CHOP') && (
+          <div className="p-3 rounded-xl bg-red-950/50 border border-red-500/60 text-red-200 text-xs font-sans">
+            <strong className="font-mono text-red-300">
+              {computed.executionReadiness === 'NO_TRADE_CLOSED'
+                ? 'MARKET CLOSED — STAND ASIDE: '
+                : 'CHOP / CONFLICT GATE — DO NOT RUSH ORDER: '}
+            </strong>
+            {computed.executionReadinessReason}
+          </div>
+        )}
 
       {/* Extended Entry Zone Warning Banner (if price stretched away from 20 EMA) */}
       {!existingOrder && computed.isExtendedZone && computed.entryTimingWarning && (

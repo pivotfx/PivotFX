@@ -230,6 +230,8 @@ export interface ScannerAnalysisResult {
   tp2Price?: number;
   riskReward?: string;
   suggestedLot: number;
+  actualRiskUsd?: number;
+  executionReadiness?: 'READY_ENTER' | 'WAIT_PULLBACK' | 'NO_TRADE_CHOP' | 'NO_TRADE_CLOSED';
   reasoning: string[];
   howToPlaceSteps?: string[];
   brokerDashboard?: {

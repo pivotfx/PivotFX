@@ -27,6 +27,10 @@ import {
   INITIAL_MARKETS_DATA,
   fetchLiveMarketSnapshot,
   computeRealChartTradeParams,
+  computeCandleSwingLevels,
+  evaluateCandleSeriesAndTick,
+  getCurrentMacroContext,
+  positionRiskStore,
   getPairSpecs,
   ComputedTradeParams,
   MarketScanData,
@@ -165,7 +169,6 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
     const liveMatch = snap.markets.find((m) => m.pair === selectedPair);
     const parsedInput = parseFloat(chartCandlePrice);
     const dec = getPairSpecs(selectedPair).decimals;
-    const pipMult = getPairSpecs(selectedPair).pipMultiplier;
 
     const livePrice =
       !isNaN(parsedInput) && parsedInput > 0
@@ -178,29 +181,58 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
       setChartCandlePrice(livePrice.toFixed(dec));
     }
 
-    const isBull = liveMatch ? liveMatch.bias === 'STRONG_BUY' : true;
-    const ema20 = Number((isBull ? livePrice - 11 / pipMult : livePrice + 11 / pipMult).toFixed(dec));
-    const ema50 = Number((isBull ? livePrice - 26 / pipMult : livePrice + 26 / pipMult).toFixed(dec));
-    const rsi = liveMatch ? liveMatch.rsi : isBull ? 56.4 : 44.8;
+    const useH1 = selectedTimeframe === 'H1' || selectedTimeframe === 'H4' || selectedTimeframe === 'D1';
+    const baseCandles = useH1 ? (liveMatch?.h1Candles || liveMatch?.candles) : liveMatch?.candles;
+    const candleEval = evaluateCandleSeriesAndTick({
+      pair: selectedPair,
+      timeframe: selectedTimeframe,
+      livePrice,
+      baseCandles,
+      candlesAreRealOhlc: liveMatch?.candlesAreRealOhlc,
+      change24hPct: liveMatch?.change24hPct,
+      h1TrendDirection: liveMatch?.h1TrendDirection,
+    });
+    const swings = computeCandleSwingLevels(candleEval.candles);
+    const pctMap: Partial<Record<CurrencyPair, number>> = {};
+    snap.markets.forEach((m) => {
+      pctMap[m.pair] = m.change24hPct;
+    });
+    const macro = getCurrentMacroContext(pctMap);
+    const riskCfg = positionRiskStore.getConfig();
+
+    const ema20 = candleEval.ema20;
+    const ema50 = candleEval.ema50;
+    const rsi = candleEval.rsi;
 
     const ticket = computeRealChartTradeParams({
       targetPair: selectedPair,
       targetTf: selectedTimeframe,
       targetBroker: 'fxpesa',
       price: livePrice,
+      keyLevel: candleEval.keyLevel,
       ema20,
       ema50,
       rsi,
-      biasOverride: isBull ? 'BUY' : 'SELL',
+      atrPips: candleEval.atrPips,
+      swingLow: swings.swingLow,
+      swingHigh: swings.swingHigh,
+      change24hPct: liveMatch?.change24hPct,
+      macro,
+      h1TrendDirection: liveMatch?.h1TrendDirection,
+      opposingCandleWarning: candleEval.opposingCandleWarning,
+      riskConfig: riskCfg,
     });
 
     setTimeout(() => {
       const pattern =
-        ticket.direction === 'BUY'
-          ? 'Bullish 20/50 EMA Value Zone Reclaim'
-          : 'Bearish Tower Top Reversal + EMA 20 Rejection';
+        ticket.executionReadiness !== 'READY_ENTER'
+          ? `${ticket.executionReadiness}: ${candleEval.patternType}`
+          : candleEval.patternType ||
+            (ticket.direction === 'BUY'
+              ? 'Bullish 20/50 EMA Value Zone Reclaim'
+              : 'Bearish Tower Top Reversal + EMA 20 Rejection');
 
-      const reco = `EXECUTE ${ticket.direction} BY MARKET @ ${ticket.entryPrice.toFixed(dec)} | SL: ${ticket.stopLoss.toFixed(dec)} (${ticket.slPips}p) | TP1: ${ticket.tp1.toFixed(dec)} | Final TP: ${ticket.tp2.toFixed(dec)} — Gilgil 0.01 micro lot ($${ticket.actualRiskUsd.toFixed(2)} max risk).`;
+      const reco = `[${ticket.executionReadiness}] ${ticket.orderType} @ ${ticket.entryPrice.toFixed(dec)} | SL: ${ticket.stopLoss.toFixed(dec)} (${ticket.slPips}p) | TP1: ${ticket.tp1.toFixed(dec)} | TP2: ${ticket.tp2.toFixed(dec)} — ${ticket.lotSize.toFixed(2)} lot ($${ticket.actualRiskUsd.toFixed(2)} max risk · ${riskCfg.riskPct}% of $${riskCfg.accountBalanceUsd.toLocaleString()}). ${ticket.executionReadinessReason}`;
 
       if (scannerMode === 'camera') {
         if (canvasRef.current && videoRef.current && cameraActive) {

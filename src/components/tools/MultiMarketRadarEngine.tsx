@@ -18,12 +18,14 @@ import {
   EntryMomentVerdict,
   TrendSustainabilityVerdict,
   RiskManagementConfig,
+  DeepVerifyResult,
   positionRiskStore
 } from '../../utils/liveMarketEngine';
 import { EntryConfirmationController } from './EntryConfirmationController';
 import { LiveInteractiveCandleChart } from './LiveInteractiveCandleChart';
 import { ActiveMarketOrderPanel } from './ActiveMarketOrderPanel';
 import { DynamicPositionSizeCalculator } from './DynamicPositionSizeCalculator';
+import { DeepScanVerificationPanel } from './DeepScanVerificationPanel';
 import { ConfluenceMatrixModal } from '../prop/ConfluenceMatrixModal';
 import { PropDrawdownGuardModal } from '../prop/PropDrawdownGuardModal';
 import { NewsGuardModal } from '../prop/NewsGuardModal';
@@ -99,6 +101,12 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
   const [superAiNotes, setSuperAiNotes] = useState(
     () => globalLiveStream.getState().superAiNotes
   );
+  const [deepAudits, setDeepAudits] = useState<Partial<Record<CurrencyPair, DeepVerifyResult>>>(
+    () => globalLiveStream.getState().deepAudits
+  );
+  const [isDeepVerifyingPair, setIsDeepVerifyingPair] = useState<Partial<Record<CurrencyPair, boolean>>>(
+    () => globalLiveStream.getState().isDeepVerifyingPair
+  );
   const [dailyMacroDirective, setDailyMacroDirective] = useState<DailyMacroAiDirective>(
     () => globalLiveStream.getState().dailyMacroDirective
   );
@@ -158,6 +166,8 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
       setCustomTfs(streamState.customTimeframes);
       setSuperAiAuto(streamState.superAiAutoEnabled);
       setSuperAiNotes(streamState.superAiNotes);
+      setDeepAudits(streamState.deepAudits);
+      setIsDeepVerifyingPair(streamState.isDeepVerifyingPair);
       setDailyMacroDirective(streamState.dailyMacroDirective);
       setSelectedPair(streamState.selectedPair);
       setActiveOrders(streamState.activeOrders);
@@ -288,12 +298,26 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
     }
   };
 
-  // Independent Single-Card Super AI Reanalysis
+  // Independent Single-Card Super AI + Zero-Mistake Deep Structure Reanalysis
   const handleReanalyseFocusedCardAi = async (pairToAnalyse: CurrencyPair, tf: Timeframe) => {
     setIsReanalysingCardAi(true);
     try {
-      const note = await globalLiveStream.fetchSuperAiNoteForPair(pairToAnalyse, tf, true);
-      if (note) {
+      const sideMode = inspectedSideByPair[pairToAnalyse] || 'AUTO';
+      const [note, deepAudit] = await Promise.all([
+        globalLiveStream.fetchSuperAiNoteForPair(pairToAnalyse, tf, true),
+        globalLiveStream.verifyMarketDeepScan(
+          pairToAnalyse,
+          tf,
+          selectedBroker,
+          sideMode === 'AUTO' ? undefined : sideMode
+        )
+      ]);
+      if (deepAudit) {
+        setScanBanner(
+          `DEEP AUDIT ${pairToAnalyse} [${tf}] · ${deepAudit.deepAuditHeadline} (${deepAudit.passedCount}/${deepAudit.totalChecks} Checks)`
+        );
+        setTimeout(() => setScanBanner(null), 5500);
+      } else if (note) {
         setScanBanner(`SUPER AI REANALYSED ${pairToAnalyse} [${tf}] · ${note.headline}`);
         setTimeout(() => setScanBanner(null), 5000);
       }
@@ -611,9 +635,11 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
             atrPips: focusedMarket.atrPips,
             swingLow: focusedSwings.swingLow,
             swingHigh: focusedSwings.swingHigh,
+            change24hPct: focusedMarket.change24hPct,
             macro: macroContext,
             biasOverride: selectedSideMode === 'AUTO' ? undefined : selectedSideMode,
             h1TrendDirection: focusedMarket.h1TrendDirection,
+            bosAnalysis: focusedMarket.bosAnalysis,
             riskConfig
           });
           const oppositeSide: 'BUY' | 'SELL' = computed.direction === 'BUY' ? 'SELL' : 'BUY';
@@ -629,9 +655,11 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
             atrPips: focusedMarket.atrPips,
             swingLow: focusedSwings.swingLow,
             swingHigh: focusedSwings.swingHigh,
+            change24hPct: focusedMarket.change24hPct,
             macro: macroContext,
             biasOverride: oppositeSide,
             h1TrendDirection: focusedMarket.h1TrendDirection,
+            bosAnalysis: focusedMarket.bosAnalysis,
             riskConfig
           });
           const kenyaTiming = evaluatePairKenyaTiming(focusedMarket.pair);
@@ -881,6 +909,9 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                       <span className="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700 text-[#D4AF37] font-bold text-[10px]">
                         H1 MACRO LOCK: {computed.h1TrendDirection} · Anti-Whipsaw Active
                       </span>
+                      <span className="px-2 py-0.5 rounded-lg bg-slate-900 border border-cyan-500/40 text-cyan-300 font-bold text-[10px]">
+                        Strategy: {computed.recommendedStrategy} ({computed.tvSymbol})
+                      </span>
                     </div>
                     <p className="text-slate-200 font-bold leading-snug">
                       {computed.profitOutlookText}
@@ -933,11 +964,31 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                   change24hPct={focusedMarket.change24hPct}
                   lotSize={displayOrder ? displayOrder.lotSize : computed.lotSize}
                   riskUsd={computed.actualRiskUsd}
+                  executionReadiness={computed.executionReadiness}
+                  executionReadinessReason={computed.executionReadinessReason}
+                  bosAnalysis={computed.bosAnalysis}
                   isLockedToCustom={Boolean(lockedPairs[focusedMarket.pair])}
                   onCandlePriceChange={(newPrice) =>
                     globalLiveStream.setCustomCandlePrice(focusedMarket.pair, newPrice, activeTf)
                   }
                   onResetToLiveStream={() => globalLiveStream.unlockPairToLiveStream(focusedMarket.pair)}
+                />
+
+                {/* ZERO-MISTAKE DEEP AI & BOS/CHOCH STRUCTURE VERIFICATION */}
+                <DeepScanVerificationPanel
+                  pair={focusedMarket.pair}
+                  timeframe={activeTf}
+                  computed={computed}
+                  deepAudit={deepAudits[focusedMarket.pair]}
+                  isVerifying={Boolean(isDeepVerifyingPair[focusedMarket.pair])}
+                  onRunDeepVerify={() =>
+                    void globalLiveStream.verifyMarketDeepScan(
+                      focusedMarket.pair,
+                      activeTf,
+                      selectedBroker,
+                      selectedSideMode === 'AUTO' ? undefined : selectedSideMode
+                    )
+                  }
                 />
 
                 {/* DYNAMIC POSITION SIZE & SL/TP RISK CALCULATOR */}
@@ -976,7 +1027,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                             </span>
                           </span>
                           <span className="text-cyan-300 font-bold">
-                            {computed.alignedFactorsCount}/8 Factors Aligned
+                            {computed.alignedFactorsCount}/{computed.totalFactorsCount} Factors Aligned
                           </span>
                           <span className="text-slate-400">·</span>
                           <span className="text-emerald-400 font-bold flex items-center gap-1">
@@ -1476,8 +1527,10 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
               atrPips: topLeader.atrPips,
               swingLow: topSwings.swingLow,
               swingHigh: topSwings.swingHigh,
+              change24hPct: topLeader.change24hPct,
               macro: macroContext,
               h1TrendDirection: topLeader.h1TrendDirection,
+              bosAnalysis: topLeader.bosAnalysis,
               riskConfig
             });
             const topPctPos = topLeader.change24hPct >= 0;
@@ -1531,7 +1584,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                         : 'CHOP · STAND ASIDE'}
                     </span>
                     <span className="text-cyan-300 font-bold">
-                      TF: {customTfs[topLeader.pair] || topLeader.recommendedTf} · {topComputed.trendDirection}
+                      TF: {customTfs[topLeader.pair] || topLeader.recommendedTf} · {topComputed.recommendedStrategy}
                     </span>
                     <span className="text-[#00C261] font-black">{topComputed.confidence}% AI</span>
                   </div>
@@ -1706,8 +1759,10 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                 atrPips: m.atrPips,
                 swingLow: cardSwings.swingLow,
                 swingHigh: cardSwings.swingHigh,
+                change24hPct: m.change24hPct,
                 macro: macroContext,
                 h1TrendDirection: m.h1TrendDirection,
+                bosAnalysis: m.bosAnalysis,
                 riskConfig
               });
               const isBuy = computed.direction === 'BUY';
@@ -1788,7 +1843,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                     ) : (
                       <div className="flex items-center justify-between gap-1 text-[10px] bg-emerald-950/60 border border-[#00C261]/50 px-2.5 py-1 rounded-xl text-emerald-200">
                         <span className="font-bold flex items-center gap-1.5 text-[#00C261]">
-                          <span className="w-2 h-2 rounded-full bg-[#00C261] animate-pulse" />
+                          <span className="w-2 h-2 rounded-full bg-[#00C261]" />
                           <span>{m.pair.includes('BTC') || m.pair.includes('ETH') ? '24/7 CRYPTO LIVE' : 'SESSION BELL OPEN'}</span>
                         </span>
                         <span className="text-[#00C261] font-mono font-bold">Normal Spread ✓</span>
@@ -1826,6 +1881,11 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                       {lockedPairs[m.pair] && (
                         <span className="text-[10px] text-amber-300 font-bold">Custom</span>
                       )}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-1 text-[10px] text-cyan-300 truncate">
+                      <span className="truncate font-bold">{computed.recommendedStrategy}</span>
+                      <span className="text-slate-400 shrink-0">{computed.tvSymbol}</span>
                     </div>
 
                     {/* 4-Timeframe Alignment Matrix & Institutional Tier */}

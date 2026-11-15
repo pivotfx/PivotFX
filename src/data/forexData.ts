@@ -115,21 +115,21 @@ export const BROKERS: BrokerInfo[] = [
 ];
 
 export const PAIRS_PRESETS: Record<CurrencyPair, { defaultPrice: number; pipDecimals: number; pipValueKes: number }> = {
-  'EUR/USD': { defaultPrice: 1.12670, pipDecimals: 5, pipValueKes: 130 },
-  'GBP/USD': { defaultPrice: 1.34998, pipDecimals: 5, pipValueKes: 130 },
-  'USD/JPY': { defaultPrice: 158.250, pipDecimals: 3, pipValueKes: 110 },
-  'GBP/JPY': { defaultPrice: 213.635, pipDecimals: 3, pipValueKes: 110 },
-  'USD/CHF': { defaultPrice: 0.87850, pipDecimals: 5, pipValueKes: 130 },
-  'EUR/JPY': { defaultPrice: 172.850, pipDecimals: 3, pipValueKes: 110 },
-  'XAU/USD': { defaultPrice: 3955.00, pipDecimals: 2, pipValueKes: 130 },
-  'AUD/USD': { defaultPrice: 0.70151, pipDecimals: 5, pipValueKes: 130 },
-  'USD/CAD': { defaultPrice: 1.39350, pipDecimals: 5, pipValueKes: 120 },
-  'BTC/USD': { defaultPrice: 80491.43, pipDecimals: 2, pipValueKes: 130 },
-  'ETH/USD': { defaultPrice: 2845.50, pipDecimals: 2, pipValueKes: 130 },
-  'US30': { defaultPrice: 43850.0, pipDecimals: 1, pipValueKes: 130 },
-  'NAS100': { defaultPrice: 20950.0, pipDecimals: 1, pipValueKes: 130 },
-  'GER40': { defaultPrice: 19420.0, pipDecimals: 1, pipValueKes: 130 },
-  'USOIL': { defaultPrice: 71.45, pipDecimals: 2, pipValueKes: 130 },
+  'EUR/USD': { defaultPrice: 1.16360, pipDecimals: 5, pipValueKes: 130 },
+  'GBP/USD': { defaultPrice: 1.35140, pipDecimals: 5, pipValueKes: 130 },
+  'USD/JPY': { defaultPrice: 157.950, pipDecimals: 3, pipValueKes: 110 },
+  'GBP/JPY': { defaultPrice: 213.450, pipDecimals: 3, pipValueKes: 110 },
+  'USD/CHF': { defaultPrice: 0.87940, pipDecimals: 5, pipValueKes: 130 },
+  'EUR/JPY': { defaultPrice: 183.790, pipDecimals: 3, pipValueKes: 110 },
+  'XAU/USD': { defaultPrice: 3897.50, pipDecimals: 2, pipValueKes: 130 },
+  'AUD/USD': { defaultPrice: 0.69750, pipDecimals: 5, pipValueKes: 130 },
+  'USD/CAD': { defaultPrice: 1.39485, pipDecimals: 5, pipValueKes: 120 },
+  'BTC/USD': { defaultPrice: 69300.0, pipDecimals: 2, pipValueKes: 130 },
+  'ETH/USD': { defaultPrice: 1960.00, pipDecimals: 2, pipValueKes: 130 },
+  'US30': { defaultPrice: 52547.0, pipDecimals: 1, pipValueKes: 130 },
+  'NAS100': { defaultPrice: 28412.0, pipDecimals: 1, pipValueKes: 130 },
+  'GER40': { defaultPrice: 26760.0, pipDecimals: 1, pipValueKes: 130 },
+  'USOIL': { defaultPrice: 88.60, pipDecimals: 2, pipValueKes: 130 },
 };
 
 // Gilgil Historical Case Studies (Calibrated to Contemporary Market Benchmarks)
@@ -1203,15 +1203,34 @@ export const MASTER_STRATEGIES: MasterclassStrategy[] = [
     indicators: ['Position Size Calculator', 'Equity Guard'],
     rules: {
       entry: [
-        'Maximum lot size fixed strictly at 0.01 micro lot.',
-        'Calculate stop loss in pips: On EUR/USD, 20 pips stop = exactly $2.00 risk.',
-        'Never open more than ONE position at a time.',
-        'If you lose 2 trades in a day (-$4.00), activate the 1-Hour Kill Switch and stop trading.'
+        'Use the Dynamic Position Size Calculator: risk strictly 1%–2% of balance (or 0.01 micro lot on $20–$100 accounts).',
+        'Calculate stop loss beyond real BOS swing structure so noise does not stop you out early.',
+        'Never open overlapping correlated losses (e.g., Buy EUR/USD + Buy GBP/USD simultaneously without splitting risk).',
+        'If you hit two consecutive losses, enforce the 1-Hour Kill Switch and wait for a Deep Scan Structure Pass.'
       ],
-      stopLoss: 'Rigid $2.00 stop loss hardcoded into MT4/MT5 order.',
-      takeProfit: 'Target $4.00 to $6.00 profit (1:2 to 1:3 R:R).'
+      stopLoss: 'Dynamic ATR + Swing-Protected SL calibrated exactly to your $ risk cap.',
+      takeProfit: 'TP1 50% scale-out + Breakeven SL lock; runner to TP2/TP3 (minimum 1:2.0 R:R).'
     },
-    gilgilLore: 'The foundation of everything in PivotFX Lab. This protocol is why our community never blows accounts.'
+    gilgilLore: 'The capital foundation of PivotFX Lab — upgraded from static $2 lot caps to dynamic balance-aware risk management.'
+  },
+  {
+    id: 'strat-6',
+    name: 'BOS/CHoCH + 9-Factor Zero-Mistake Protocol',
+    tagline: 'Detects real-time Break of Structure & Change of Character before allowing any BUY or SELL order.',
+    winRate: 81,
+    timeframe: 'M15 / H1',
+    indicators: ['BOS/CHoCH Swing Tracker', 'EMA 20 & 50', 'RSI 14', 'H1 Macro Bias'],
+    rules: {
+      entry: [
+        'Run Deep AI Scan & Structure Audit before placing any trade on XAU/USD, EUR/USD, BTC/USD, or ETH/USD.',
+        'Verify higher-timeframe (H1) EMA 20/50 bias matches your M15 execution direction (never short into bullish BOS or buy into bearish BOS).',
+        'Confirm candle is in an Equilibrium / 20 EMA pullback zone (avoid chasing extended runaway wicks).',
+        'Match the canonical TradingView symbol (e.g. OANDA:XAUUSD, FX:EURUSD, BINANCE:BTCUSDT) so Entry Price, SL, and TP2 match 1:1.'
+      ],
+      stopLoss: 'Anchored beyond protected M15/H1 swing structure with ATR & spread clearance.',
+      takeProfit: 'TP1 at 1.65x risk (Breakeven Lock), TP2 at 2.85x+ risk (or custom USD Target Profit).'
+    },
+    gilgilLore: 'Engineered to eliminate counter-trend losses caused by stale quotes, CHoCH reversals, or extended entries on Gold and Majors.'
   }
 ];
 

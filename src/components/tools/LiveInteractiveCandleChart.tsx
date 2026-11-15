@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CurrencyPair, Timeframe } from '../../types';
-import { OhlcCandle, getPairSpecs } from '../../utils/liveMarketEngine';
+import { OhlcCandle, StructureBosAnalysis, getPairSpecs } from '../../utils/liveMarketEngine';
 import {
   CandlestickChart,
   TrendingUp,
@@ -8,7 +8,9 @@ import {
   RefreshCw,
   Plus,
   Minus,
-  Activity
+  Activity,
+  GitBranch,
+  AlertTriangle
 } from 'lucide-react';
 
 interface LiveInteractiveCandleChartProps {
@@ -27,6 +29,9 @@ interface LiveInteractiveCandleChartProps {
   change24hPct: number;
   lotSize?: number;
   riskUsd?: number;
+  executionReadiness?: 'READY_ENTER' | 'WAIT_PULLBACK' | 'NO_TRADE_CHOP' | 'NO_TRADE_CLOSED';
+  executionReadinessReason?: string;
+  bosAnalysis?: StructureBosAnalysis;
   isLockedToCustom?: boolean;
   onCandlePriceChange: (newPrice: number) => void;
   onResetToLiveStream: () => void;
@@ -48,6 +53,9 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   change24hPct,
   lotSize,
   riskUsd,
+  executionReadiness,
+  executionReadinessReason,
+  bosAnalysis,
   isLockedToCustom = false,
   onCandlePriceChange,
   onResetToLiveStream,
@@ -58,6 +66,7 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   const [showEma50, setShowEma50] = useState<boolean>(true);
   const [showValueZone, setShowValueZone] = useState<boolean>(true);
   const [showAdvisoryLine, setShowAdvisoryLine] = useState<boolean>(true);
+  const [showBosLine, setShowBosLine] = useState<boolean>(true);
 
   const rawVisible = candles.slice(-44);
   const rawLast = rawVisible[rawVisible.length - 1];
@@ -97,14 +106,22 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
     fullCloses[fullCloses.length - 1] = livePrice;
   }
 
-  // Compute EMA series for smooth curve rendering
+  // Compute SMA-seeded EMA series matching computeRealEma and anchor latest bar to live header EMA values
   const computeEmaArray = (vals: number[], period: number): number[] => {
     if (!vals.length) return [];
     const k = 2 / (period + 1);
+    const seedLen = Math.min(period, vals.length);
+    const initSma = vals.slice(0, seedLen).reduce((acc, v) => acc + v, 0) / seedLen;
     const out: number[] = [];
-    let prev = vals[0];
+    let runningSum = 0;
+    let prev = initSma;
     for (let i = 0; i < vals.length; i++) {
-      prev = i === 0 ? vals[0] : vals[i] * k + prev * (1 - k);
+      if (i < seedLen) {
+        runningSum += vals[i];
+        prev = runningSum / (i + 1);
+      } else {
+        prev = vals[i] * k + prev * (1 - k);
+      }
       out.push(prev);
     }
     return out;
@@ -112,6 +129,12 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
 
   const fullEma20 = computeEmaArray(fullCloses, 20);
   const fullEma50 = computeEmaArray(fullCloses, 50);
+  if (fullEma20.length > 0 && ema20 > 0) {
+    fullEma20[fullEma20.length - 1] = ema20;
+  }
+  if (fullEma50.length > 0 && ema50 > 0) {
+    fullEma50[fullEma50.length - 1] = ema50;
+  }
   const visEma20 = fullEma20.slice(-visibleCandles.length);
   const visEma50 = fullEma50.slice(-visibleCandles.length);
 
@@ -125,7 +148,8 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
     stopLoss,
     tp1,
     tp2,
-    ...(advisoryEntryPrice && advisoryEntryPrice > 0 ? [advisoryEntryPrice] : [])
+    ...(advisoryEntryPrice && advisoryEntryPrice > 0 ? [advisoryEntryPrice] : []),
+    ...(bosAnalysis?.bosTriggerLevel && bosAnalysis.bosTriggerLevel > 0 ? [bosAnalysis.bosTriggerLevel] : [])
   ].filter((v) => !isNaN(v) && v > 0);
 
   const rawMin = allPrices.length ? Math.min(...allPrices) : livePrice * 0.995;
@@ -143,6 +167,8 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   const padBottom = 26;
   const plotW = svgWidth - padLeft - padRight;
   const plotH = svgHeight - padTop - padBottom;
+  // Leave clean 54px forward-projection lane on the right side of candles for multi-point BUY/SELL trajectory arc
+  const candlePlotW = Math.max(120, plotW - 54);
 
   const priceToY = (p: number) => {
     const ratio = (maxP - p) / totalRange;
@@ -150,8 +176,8 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   };
 
   const indexToX = (idx: number) => {
-    if (visibleCandles.length <= 1) return padLeft + plotW / 2;
-    const step = plotW / visibleCandles.length;
+    if (visibleCandles.length <= 1) return padLeft + candlePlotW / 2;
+    const step = candlePlotW / visibleCandles.length;
     return padLeft + idx * step + step * 0.5;
   };
 
@@ -269,6 +295,32 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
           }
         ]
       : []),
+    ...(showBosLine &&
+    bosAnalysis &&
+    bosAnalysis.bosTriggerLevel > 0 &&
+    Math.abs(bosAnalysis.bosTriggerLevel - livePrice) > 0.5 / pipMultiplier
+      ? [
+          {
+            key: 'BOS',
+            label: `${bosAnalysis.chochDetected ? 'CHoCH' : 'BOS'} ${bosAnalysis.bosTriggerLevel.toFixed(decimals)}`,
+            val: bosAnalysis.bosTriggerLevel,
+            exactY: priceToY(bosAnalysis.bosTriggerLevel),
+            badgeY: priceToY(bosAnalysis.bosTriggerLevel),
+            color:
+              bosAnalysis.bosDirection === 'BEARISH_BOS' || bosAnalysis.bosDirection === 'BEARISH_CHOCH'
+                ? '#F97316'
+                : '#38BDF8',
+            bg:
+              bosAnalysis.bosDirection === 'BEARISH_BOS' || bosAnalysis.bosDirection === 'BEARISH_CHOCH'
+                ? '#431407'
+                : '#0C4A6E',
+            textColor:
+              bosAnalysis.bosDirection === 'BEARISH_BOS' || bosAnalysis.bosDirection === 'BEARISH_CHOCH'
+                ? '#FDBA74'
+                : '#7DD3FC'
+          }
+        ]
+      : []),
     {
       key: 'LIVE',
       label: `${Math.abs(entryPrice - livePrice) <= 0.5 / pipMultiplier ? 'EP ' : ''}${livePrice.toFixed(decimals)}`,
@@ -310,6 +362,7 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
 
   // Shaded Buy/Sell Profit & Risk Zone coordinates anchored around entryPrice
   const yEntry = priceToY(entryPrice);
+  const yTp1 = priceToY(tp1);
   const yTp2 = priceToY(tp2);
   const ySl = priceToY(stopLoss);
   const profitBandTop = Math.min(yEntry, yTp2);
@@ -317,6 +370,15 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   const riskBandTop = Math.min(yEntry, ySl);
   const riskBandHeight = Math.max(2, Math.abs(ySl - yEntry));
   const lastCandleX = indexToX(Math.max(0, visibleCandles.length - 1));
+  const projRetestY =
+    advisoryEntryPrice && advisoryEntryPrice > 0
+      ? priceToY(advisoryEntryPrice)
+      : priceToY(livePrice);
+  const projX1 = lastCandleX + 6;
+  const projX2 = Math.min(svgWidth - padRight - 28, lastCandleX + 20);
+  const projX3 = Math.min(svgWidth - padRight - 14, lastCandleX + 34);
+  const projX4 = Math.min(svgWidth - padRight - 4, lastCandleX + 48);
+  const trajectoryPolyPoints = `${projX1.toFixed(1)},${priceToY(livePrice).toFixed(1)} ${projX2.toFixed(1)},${projRetestY.toFixed(1)} ${projX3.toFixed(1)},${yTp1.toFixed(1)} ${projX4.toFixed(1)},${yTp2.toFixed(1)}`;
 
   return (
     <div className="rounded-2xl bg-[#060B16] border border-[#D4AF37]/40 p-4 space-y-3.5 font-mono tabular-nums shadow-inner">
@@ -407,6 +469,21 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
               }`}
             >
               1H Adv @ {advisoryEntryPrice.toFixed(decimals)}
+            </button>
+          )}
+          {bosAnalysis && (
+            <button
+              type="button"
+              onClick={() => setShowBosLine(!showBosLine)}
+              className={`px-2 py-0.5 rounded text-[10px] font-bold border transition inline-flex items-center gap-1 ${
+                showBosLine
+                  ? 'bg-sky-950/80 text-sky-300 border-sky-500/60'
+                  : 'bg-slate-900 text-slate-500 border-slate-800'
+              }`}
+              title={bosAnalysis.structureSummary}
+            >
+              <GitBranch className="w-3 h-3" />
+              <span>{bosAnalysis.bosDirection.replace(/_/g, ' ')}</span>
             </button>
           )}
         </div>
@@ -536,24 +613,18 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
             );
           })}
 
-          {/* Projected Trajectory Arrow from Last Candle toward TP2 */}
+          {/* Projected Multi-Point Candlestick Trajectory (Live -> Pullback/Entry -> TP1 -> TP2) */}
           {!tpTargetAlreadyHit && (
-            <g opacity="0.85">
-              <line
-                x1={lastCandleX + 6}
-                y1={priceToY(livePrice)}
-                x2={Math.min(svgWidth - padRight - 10, lastCandleX + 26)}
-                y2={yTp2}
+            <g opacity="0.92">
+              <polyline
+                fill="none"
+                points={trajectoryPolyPoints}
                 stroke={isBuy ? '#00C261' : '#EF4444'}
-                strokeWidth="1.8"
-                strokeDasharray="3 3"
+                strokeWidth="2.1"
+                strokeDasharray="4 3"
               />
-              <circle
-                cx={Math.min(svgWidth - padRight - 10, lastCandleX + 26)}
-                cy={yTp2}
-                r="3.2"
-                fill={isBuy ? '#00C261' : '#EF4444'}
-              />
+              <circle cx={projX3} cy={yTp1} r="2.6" fill="#22D3EE" />
+              <circle cx={projX4} cy={yTp2} r="3.8" fill={isBuy ? '#00C261' : '#EF4444'} />
             </g>
           )}
 
@@ -614,6 +685,41 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
           >
             {isBuy ? 'BUY STRUCTURE ▲' : 'SELL STRUCTURE ▼'}
           </span>
+          {executionReadiness && (
+            <span
+              title={executionReadinessReason || executionReadiness}
+              className={`px-2 py-0.5 rounded text-[10px] font-black shadow ${
+                executionReadiness === 'READY_ENTER'
+                  ? 'bg-emerald-950/95 text-[#00C261] border border-[#00C261]/60'
+                  : executionReadiness === 'WAIT_PULLBACK'
+                  ? 'bg-amber-500 text-black'
+                  : 'bg-red-600 text-white'
+              }`}
+            >
+              {executionReadiness === 'READY_ENTER'
+                ? 'GATE: READY ENTER'
+                : executionReadiness === 'WAIT_PULLBACK'
+                ? 'GATE: WAIT 20 EMA PULLBACK'
+                : executionReadiness === 'NO_TRADE_CLOSED'
+                ? 'GATE: MARKET CLOSED'
+                : 'GATE: CHOP / STAND ASIDE'}
+            </span>
+          )}
+          {bosAnalysis && (
+            <span
+              title={bosAnalysis.structureSummary}
+              className={`px-2 py-0.5 rounded text-[10px] font-black border shadow inline-flex items-center gap-1 ${
+                bosAnalysis.bosDirection === 'BULLISH_BOS' || bosAnalysis.bosDirection === 'BULLISH_CHOCH'
+                  ? 'bg-sky-950/95 text-sky-300 border-sky-400/60'
+                  : bosAnalysis.bosDirection === 'BEARISH_BOS' || bosAnalysis.bosDirection === 'BEARISH_CHOCH'
+                  ? 'bg-orange-950/95 text-orange-300 border-orange-400/60'
+                  : 'bg-slate-900/95 text-slate-300 border-slate-700'
+              }`}
+            >
+              <GitBranch className="w-3 h-3" />
+              <span>{bosAnalysis.bosDirection.replace(/_/g, ' ')}</span>
+            </span>
+          )}
           <span className="px-2 py-0.5 rounded bg-black/80 border border-slate-700 text-[10px] text-slate-300 flex items-center gap-1">
             <Activity className="w-3 h-3 text-[#00C261]" />
             <span>{isLockedToCustom ? 'Custom Candle Simulation' : '24/7 Live Feed Active'}</span>
@@ -630,6 +736,22 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
           )}
         </div>
       </div>
+
+      {/* Inline Execution / BOS Conflict Alert Strip when Trade Readiness is Blocked */}
+      {executionReadiness && executionReadiness !== 'READY_ENTER' && executionReadinessReason && (
+        <div
+          className={`px-3 py-2 rounded-xl border text-[11px] flex items-center gap-2 ${
+            executionReadiness === 'WAIT_PULLBACK'
+              ? 'bg-amber-950/50 border-amber-500/50 text-amber-200'
+              : 'bg-red-950/55 border-red-500/60 text-red-200'
+          }`}
+        >
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          <span className="leading-snug">
+            <strong>{executionReadiness.replace(/_/g, ' ')}:</strong> {executionReadinessReason}
+          </span>
+        </div>
+      )}
 
       {/* Interactive Candle Price Controls (Ultra-Fine Sub-Pip & Pip Ticks Update SL, TP, BUY/SELL & Cards Live) */}
       <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3 text-xs">
