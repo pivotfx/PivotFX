@@ -185,6 +185,7 @@ export function saveJournalTrade(trade: Omit<JournalTrade, 'id' | 'executedAt'>)
   const updated = [newTrade, ...current];
   if (typeof window !== 'undefined') {
     localStorage.setItem(JOURNAL_KEY, JSON.stringify(updated));
+    window.dispatchEvent(new CustomEvent('pivotfx:prop-trades-updated', { detail: newTrade }));
   }
   return newTrade;
 }
@@ -199,6 +200,7 @@ export function updateJournalTradeStatus(
   const updated = current.map((t) => (t.id === id ? { ...t, status, pnlUsd, pnlPips } : t));
   if (typeof window !== 'undefined') {
     localStorage.setItem(JOURNAL_KEY, JSON.stringify(updated));
+    window.dispatchEvent(new CustomEvent('pivotfx:prop-trades-updated'));
   }
   return updated;
 }
@@ -208,6 +210,7 @@ export function deleteJournalTrade(id: string): JournalTrade[] {
   const updated = current.filter((t) => t.id !== id);
   if (typeof window !== 'undefined') {
     localStorage.setItem(JOURNAL_KEY, JSON.stringify(updated));
+    window.dispatchEvent(new CustomEvent('pivotfx:prop-trades-updated'));
   }
   return updated;
 }

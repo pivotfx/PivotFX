@@ -59,6 +59,11 @@ export const CandlestickVisualizer: React.FC<CandlestickVisualizerProps> = ({
 
   if (!candles || candles.length === 0) return null;
 
+  // Dynamic decimal & pip precision based on instrument price scale
+  const sampleClose = candles[0]?.close ?? 1;
+  const priceDec = sampleClose >= 1000 ? 2 : sampleClose >= 50 ? 3 : 4;
+  const pipMult = sampleClose >= 1000 ? 10 : sampleClose >= 50 ? 100 : 10000;
+
   // Calculate coordinate boundaries
   const allPrices: number[] = [];
   candles.forEach((c) => {
@@ -309,7 +314,7 @@ export const CandlestickVisualizer: React.FC<CandlestickVisualizerProps> = ({
                 fontFamily="monospace"
                 fontWeight="bold"
               >
-                SUP {supportLevel.toFixed(4)}
+                SUP {supportLevel.toFixed(priceDec)}
               </text>
             </g>
           )}
@@ -344,7 +349,7 @@ export const CandlestickVisualizer: React.FC<CandlestickVisualizerProps> = ({
                 fontFamily="monospace"
                 fontWeight="bold"
               >
-                RES {resistanceLevel.toFixed(4)}
+                RES {resistanceLevel.toFixed(priceDec)}
               </text>
             </g>
           )}
@@ -417,7 +422,7 @@ export const CandlestickVisualizer: React.FC<CandlestickVisualizerProps> = ({
                 fontFamily="monospace"
                 fontWeight="bold"
               >
-                ENTRY {entryLevel.toFixed(4)}
+                ENTRY {entryLevel.toFixed(priceDec)}
               </text>
             </g>
           )}
@@ -452,7 +457,7 @@ export const CandlestickVisualizer: React.FC<CandlestickVisualizerProps> = ({
                 fontFamily="monospace"
                 fontWeight="bold"
               >
-                SL {slLevel.toFixed(4)}
+                SL {slLevel.toFixed(priceDec)}
               </text>
             </g>
           )}
@@ -487,7 +492,7 @@ export const CandlestickVisualizer: React.FC<CandlestickVisualizerProps> = ({
                 fontFamily="monospace"
                 fontWeight="bold"
               >
-                TP {tpLevel.toFixed(4)}
+                TP {tpLevel.toFixed(priceDec)}
               </text>
             </g>
           )}
@@ -589,18 +594,18 @@ export const CandlestickVisualizer: React.FC<CandlestickVisualizerProps> = ({
         </svg>
 
         {/* Price scale on right edge info pill */}
-        <div className="absolute top-2 right-2 flex flex-col items-end gap-1 pointer-events-none">
+        <div className="absolute top-2 right-2 flex flex-col items-end gap-1 pointer-events-none tabular-nums">
           <span className="text-[9px] font-mono font-bold text-slate-500 bg-slate-900/90 px-1.5 py-0.5 rounded border border-slate-800">
-            High: {chartMax.toFixed(4)}
+            High: {chartMax.toFixed(priceDec)}
           </span>
           <span className="text-[9px] font-mono font-bold text-slate-500 bg-slate-900/90 px-1.5 py-0.5 rounded border border-slate-800">
-            Low: {chartMin.toFixed(4)}
+            Low: {chartMin.toFixed(priceDec)}
           </span>
         </div>
       </div>
 
       {/* Active Candle Inspector / Explanation Bar */}
-      <div className="px-4 py-3 bg-[#0B101D] border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+      <div className="px-4 py-3 bg-[#0B101D] border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs tabular-nums">
         {activeCandle ? (
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-2">
@@ -622,10 +627,10 @@ export const CandlestickVisualizer: React.FC<CandlestickVisualizerProps> = ({
             </div>
 
             <div className="flex items-center gap-3 font-mono text-[11px] text-slate-300">
-              <span>O: <strong className="text-white">{activeCandle.open.toFixed(4)}</strong></span>
-              <span>H: <strong className="text-white">{activeCandle.high.toFixed(4)}</strong></span>
-              <span>L: <strong className="text-white">{activeCandle.low.toFixed(4)}</strong></span>
-              <span>C: <strong className="text-white">{activeCandle.close.toFixed(4)}</strong></span>
+              <span>O: <strong className="text-white">{activeCandle.open.toFixed(priceDec)}</strong></span>
+              <span>H: <strong className="text-white">{activeCandle.high.toFixed(priceDec)}</strong></span>
+              <span>L: <strong className="text-white">{activeCandle.low.toFixed(priceDec)}</strong></span>
+              <span>C: <strong className="text-white">{activeCandle.close.toFixed(priceDec)}</strong></span>
               <span>
                 Move:{' '}
                 <strong
@@ -633,7 +638,7 @@ export const CandlestickVisualizer: React.FC<CandlestickVisualizerProps> = ({
                     activeCandle.close >= activeCandle.open ? 'text-emerald-400' : 'text-red-400'
                   }
                 >
-                  {((activeCandle.close - activeCandle.open) * 10000).toFixed(1)} pips
+                  {((activeCandle.close - activeCandle.open) * pipMult).toFixed(1)} pips
                 </strong>
               </span>
             </div>

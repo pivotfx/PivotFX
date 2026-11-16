@@ -4,7 +4,6 @@ import { PILLARS_MASTERCLASS_DATA } from '../data/pillarsMasterclassData';
 import {
   MarketScanData,
   DailyMacroAiDirective,
-  ActiveMarketOrder,
   globalLiveStream,
   computeRealChartTradeParams,
   computeCandleSwingLevels,
@@ -23,18 +22,15 @@ import {
   Activity,
   Award,
   ArrowRight,
-  Clock,
   Globe,
   TrendingUp,
   TrendingDown,
-  Sparkles,
   Copy,
   Check,
   ClipboardList,
   Camera,
   Shield,
-  Zap,
-  Bell
+  Layers
 } from 'lucide-react';
 
 interface LandingPageProps {
@@ -51,9 +47,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   );
   const [dailyMacroDirective, setDailyMacroDirective] = useState<DailyMacroAiDirective>(
     () => globalLiveStream.getState().dailyMacroDirective
-  );
-  const [activeOrders, setActiveOrders] = useState<Partial<Record<CurrencyPair, ActiveMarketOrder>>>(
-    () => globalLiveStream.getState().activeOrders
   );
   const [syncedAt, setSyncedAt] = useState<string>(() => globalLiveStream.getState().syncedAt);
   const [heroImgFailed, setHeroImgFailed] = useState<boolean>(false);
@@ -73,7 +66,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     const unsubscribe = globalLiveStream.subscribe((streamState) => {
       setAllMarkets(streamState.markets);
       setDailyMacroDirective(streamState.dailyMacroDirective);
-      setActiveOrders(streamState.activeOrders);
       setSyncedAt(streamState.syncedAt);
     });
     return () => unsubscribe();
@@ -432,73 +424,199 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         }
       />
 
-      {/* 4. NINE INDEPENDENT CLICKABLE ACADEMY PILLARS (Primary Centerpiece) */}
+      {/* 3.5 LIVE 15-MARKET PULSE STRIP (Click any asset to inspect chart & AI ticket) */}
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-xs font-mono text-[#D4AF37] font-bold">
+            <Activity className="w-3.5 h-3.5 text-[#00C261]" />
+            <span>Live Multi-Market Ticker Matrix ({allMarkets.length} Assets · Ranked Top % to Least %)</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleOpenMarketRadar}
+            className="text-xs font-mono font-bold text-slate-300 hover:text-[#D4AF37] transition inline-flex items-center gap-1 whitespace-nowrap"
+          >
+            <span>Open Full Execution Radar</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 font-mono tabular-nums">
+          {allMarkets.slice(0, 10).map((mkt, i) => {
+            const isBuy = mkt.bias === 'STRONG_BUY';
+            const isSell = mkt.bias === 'STRONG_SELL';
+            const pctPos = mkt.change24hPct >= 0;
+            return (
+              <button
+                key={mkt.pair}
+                type="button"
+                onClick={() =>
+                  onOpenPairWorkspace ? onOpenPairWorkspace(mkt.pair) : handleOpenMarketRadar()
+                }
+                className="p-3 rounded-xl bg-[#0B101E] hover:bg-[#11192E] border border-slate-800 hover:border-[#D4AF37]/60 text-left transition space-y-1.5"
+              >
+                <div className="flex items-center justify-between gap-1 text-[10px]">
+                  <span className="text-slate-400">#{i + 1} · {mkt.recommendedTf}</span>
+                  <span
+                    className={`font-black ${
+                      isBuy ? 'text-[#00C261]' : isSell ? 'text-red-400' : 'text-amber-300'
+                    }`}
+                  >
+                    {isBuy ? 'BUY' : isSell ? 'SELL' : 'WAIT'}
+                  </span>
+                </div>
+                <div className="flex items-baseline justify-between gap-1">
+                  <strong className="text-xs sm:text-sm text-white font-black">{mkt.pair}</strong>
+                  <span className={`text-[11px] font-bold ${pctPos ? 'text-[#00C261]' : 'text-red-400'}`}>
+                    {pctPos ? `+${mkt.change24hPct.toFixed(2)}%` : `${mkt.change24hPct.toFixed(2)}%`}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-400">
+                  <span className="text-slate-200 font-semibold">@ {mkt.price}</span>
+                  <span>{mkt.confidence}% AI</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* 4. NINE INSTITUTIONAL ACADEMY PILLARS (Asymmetric Bento Showcase) */}
       <section className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-slate-800 pb-4">
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-[#D4AF37]" />
-              <span className="text-xs font-mono text-[#D4AF37] font-black uppercase tracking-wider">
-                9 Institutional Academy Pillars
-              </span>
+            <div className="flex items-center gap-2 text-xs font-mono text-[#D4AF37] font-bold">
+              <Layers className="w-4 h-4 shrink-0" />
+              <span>Nine Institutional Workstations</span>
             </div>
-            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white">
+            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight text-balance">
               Pillar Workstations &amp; Prop Curriculum
             </h2>
           </div>
           <p className="text-xs font-mono text-slate-400 max-w-md">
-            Click any pillar to enter its dedicated workstation, live tools, and institutional curriculum chamber.
+            Select any workstation to launch its live quantitative tools alongside structured institutional lessons.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {PILLARS_MASTERCLASS_DATA.map((pillar) => (
-            <button
-              key={pillar.id}
-              type="button"
-              onClick={() => onSelectPillar(pillar.id)}
-              className="group relative flex flex-col justify-between p-6 sm:p-7 rounded-2xl bg-[#0B101E] border border-slate-800 hover:border-[#D4AF37] transition-all duration-300 hover:shadow-[0_0_30px_rgba(212,175,55,0.18)] hover:-translate-y-1 text-left space-y-5"
-            >
-              {/* Header with Pillar number and Category Badge */}
-              <div className="flex items-center justify-between w-full">
-                <div className="flex items-center gap-2.5">
-                  <span className="px-2.5 py-1 rounded-md bg-slate-900 border border-slate-800 text-xs font-mono font-black text-[#D4AF37]">
-                    Pillar {pillar.number}
-                  </span>
-                  <span className="text-[11px] font-mono text-slate-400">
-                    {pillar.lessons.length} Lessons
-                  </span>
-                </div>
-                <div className="p-2 rounded-xl bg-slate-900/80 border border-slate-800/80 group-hover:border-[#D4AF37]/40 transition-colors">
-                  {getPillarIcon(pillar.number)}
-                </div>
+        {/* Tier A: Marquee Execution & Risk Workstations (Bento 2+1+1 Hierarchy) */}
+        {(() => {
+          const pillar04 = PILLARS_MASTERCLASS_DATA.find((p) => p.number === '04');
+          const pillar02 = PILLARS_MASTERCLASS_DATA.find((p) => p.number === '02');
+          const pillar05 = PILLARS_MASTERCLASS_DATA.find((p) => p.number === '05');
+          const coreSet = new Set(['04', '02', '05']);
+          const remainingPillars = PILLARS_MASTERCLASS_DATA.filter((p) => !coreSet.has(p.number));
+
+          return (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                {pillar04 && (
+                  <button
+                    type="button"
+                    onClick={() => onSelectPillar(pillar04.id)}
+                    className="lg:col-span-6 group p-6 sm:p-7 rounded-2xl bg-gradient-to-br from-[#0F172A] via-[#0B101E] to-[#0A1324] border border-[#D4AF37]/50 hover:border-[#D4AF37] transition flex flex-col justify-between text-left space-y-5"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-2 text-xs font-mono text-slate-400">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[#D4AF37] font-black">Pillar {pillar04.number}</span>
+                          <span aria-hidden="true">·</span>
+                          <span className="text-[#00C261] font-bold">Core Execution Engine</span>
+                          <span aria-hidden="true">·</span>
+                          <span>{allMarkets.length || 15} Live Markets</span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-slate-900 border border-slate-800 group-hover:border-[#D4AF37]/50 transition">
+                          {getPillarIcon(pillar04.number)}
+                        </div>
+                      </div>
+
+                      <h3 className="text-xl sm:text-2xl font-black text-white group-hover:text-[#D4AF37] transition-colors">
+                        {pillar04.title}
+                      </h3>
+                      <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                        {pillar04.oneLineHook} Includes Gemini multimodal chart photo OCR, 10-factor BOS/CHoCH matrix, live broker order tracking, and Position Coach.
+                      </p>
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between text-xs font-mono font-black text-[#D4AF37] group-hover:text-white">
+                      <span>Launch Radar &amp; Camera OCR</span>
+                      <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                    </div>
+                  </button>
+                )}
+
+                {[pillar02, pillar05].map(
+                  (pillar) =>
+                    pillar && (
+                      <button
+                        key={pillar.id}
+                        type="button"
+                        onClick={() => onSelectPillar(pillar.id)}
+                        className="lg:col-span-3 group p-6 rounded-2xl bg-[#0B101E] border border-slate-800 hover:border-[#D4AF37] transition flex flex-col justify-between text-left space-y-4"
+                      >
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between gap-2 text-xs font-mono text-slate-400">
+                            <span>Pillar {pillar.number} · {pillar.lessons.length} Lessons</span>
+                            <div className="p-2 rounded-xl bg-slate-900 border border-slate-800 group-hover:border-[#D4AF37]/40 transition">
+                              {getPillarIcon(pillar.number)}
+                            </div>
+                          </div>
+                          <h3 className="text-lg font-black text-white group-hover:text-[#D4AF37] transition-colors leading-snug">
+                            {pillar.title}
+                          </h3>
+                          <p className="text-xs text-slate-400 leading-relaxed line-clamp-3">
+                            {pillar.oneLineHook}
+                          </p>
+                        </div>
+
+                        <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs font-mono font-bold text-[#D4AF37] group-hover:text-white">
+                          <span>Enter Workstation</span>
+                          <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                        </div>
+                      </button>
+                    )
+                )}
               </div>
 
-              {/* Title & Description */}
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-2">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-[#D4AF37]/10 text-[#D4AF37] border border-[#D4AF37]/20">
-                    {pillar.badge}
-                  </span>
-                </div>
-                <h3 className="text-xl font-black text-white group-hover:text-[#D4AF37] transition-colors leading-snug">
-                  {pillar.title}
-                </h3>
-                <p className="text-xs text-slate-400 leading-relaxed line-clamp-3">
-                  {pillar.oneLineHook}
-                </p>
-              </div>
+              {/* Tier B: 6 Structured Academy & Risk Chambers */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {remainingPillars.map((pillar) => (
+                  <button
+                    key={pillar.id}
+                    type="button"
+                    onClick={() => onSelectPillar(pillar.id)}
+                    className="group p-6 rounded-2xl bg-[#0B101E] border border-slate-800 hover:border-[#D4AF37] transition flex flex-col justify-between text-left space-y-4"
+                  >
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between w-full text-xs font-mono text-slate-400">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-[#D4AF37] font-black">{pillar.number}.</span>
+                          <span className="truncate">{pillar.category}</span>
+                          <span aria-hidden="true">·</span>
+                          <span className="shrink-0">{pillar.lessons.length} Lessons</span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-slate-900/80 border border-slate-800/80 group-hover:border-[#D4AF37]/40 transition-colors shrink-0">
+                          {getPillarIcon(pillar.number)}
+                        </div>
+                      </div>
 
-              {/* Action Button */}
-              <div className="pt-4 border-t border-slate-800/80 w-full flex items-center justify-between text-xs font-mono font-black text-[#D4AF37] group-hover:text-white transition-colors">
-                <span>Enter Workstation</span>
-                <div className="flex items-center gap-1 group-hover:translate-x-1 transition-transform">
-                  <ArrowRight className="w-4 h-4" />
-                </div>
+                      <h3 className="text-lg font-black text-white group-hover:text-[#D4AF37] transition-colors leading-snug">
+                        {pillar.title}
+                      </h3>
+                      <p className="text-xs text-slate-400 leading-relaxed line-clamp-2">
+                        {pillar.oneLineHook}
+                      </p>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-800/80 w-full flex items-center justify-between text-xs font-mono font-bold text-[#D4AF37] group-hover:text-white transition-colors">
+                      <span>Enter Workstation</span>
+                      <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                    </div>
+                  </button>
+                ))}
               </div>
-            </button>
-          ))}
-        </div>
+            </div>
+          );
+        })()}
       </section>
     </div>
   );

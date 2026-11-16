@@ -62,6 +62,7 @@ interface SuperAnalysisRequest {
   timeframe?: string;
   broker?: string;
   price?: number;
+  livePrice?: number;
   ema20?: number;
   ema50?: number;
   rsi?: number;
@@ -201,6 +202,7 @@ interface PositionCoachRequest {
   broker?: string;
   entryPrice?: number;
   livePrice?: number;
+  currentPrice?: number;
   stopLoss?: number;
   tp1?: number;
   tp2?: number;
@@ -972,7 +974,6 @@ function buildDeterministicSuperNote(body: SuperAnalysisRequest) {
   const tf = body.timeframe || 'M15';
   const dir = body.direction === 'SELL' ? 'SELL' : 'BUY';
   const trendLabel = body.trendDirection || (dir === 'BUY' ? 'UPTREND' : 'DOWNTREND');
-  const price = Number(body.price || 1.3514);
   const isJpy = pair.includes('JPY');
   const isGold = pair.includes('XAU');
   const isBtc = pair.includes('BTC');
@@ -980,18 +981,37 @@ function buildDeterministicSuperNote(body: SuperAnalysisRequest) {
   const isIndex = pair === 'US30' || pair === 'NAS100' || pair === 'GER40';
   const isOil = pair.includes('OIL');
 
+  const defaultPairPrice = isGold
+    ? 2920
+    : isBtc
+    ? 84000
+    : isEth
+    ? 2100
+    : isJpy
+    ? 152
+    : isIndex
+    ? 42000
+    : isOil
+    ? 70
+    : 1.16;
+  const rawProvidedPrice = Number(body.price && body.price > 0 ? body.price : body.livePrice);
+  const price =
+    Number.isFinite(rawProvidedPrice) && rawProvidedPrice > 0
+      ? rawProvidedPrice
+      : defaultPairPrice;
+
   const pipSize = isJpy ? 0.01 : isGold ? 0.1 : isBtc ? 1.0 : isEth ? 0.5 : isIndex ? 1.0 : isOil ? 0.05 : 0.0001;
   const decimals = isJpy ? 3 : isGold ? 2 : isBtc ? 2 : isEth ? 2 : isIndex ? 1 : isOil ? 2 : 5;
   const riskPips = isJpy ? 22 : isGold ? 45 : isBtc ? 160 : isEth ? 40 : isIndex ? 50 : isOil ? 30 : 20;
   const sign = dir === 'BUY' ? 1 : -1;
 
-  const ema20 = Number(body.ema20 ?? (price - sign * pipSize * 4).toFixed(decimals));
-  const ema50 = Number(body.ema50 ?? (price - sign * pipSize * 9).toFixed(decimals));
+  const ema20 = Number((body.ema20 ?? price - sign * pipSize * 4).toFixed(decimals));
+  const ema50 = Number((body.ema50 ?? price - sign * pipSize * 9).toFixed(decimals));
   const rsi = Number(body.rsi ?? (dir === 'BUY' ? 56.4 : 43.6));
-  const sl = Number(body.stopLoss ?? (price - sign * pipSize * riskPips).toFixed(decimals));
-  const tp1 = Number(body.tp1 ?? (price + sign * pipSize * Math.round(riskPips * 1.4)).toFixed(decimals));
-  const tp2 = Number(body.tp2 ?? (price + sign * pipSize * Math.round(riskPips * 2.3)).toFixed(decimals));
-  const tp3 = Number(body.tp3 ?? (price + sign * pipSize * Math.round(riskPips * 3.5)).toFixed(decimals));
+  const sl = Number(Math.max(pipSize, body.stopLoss ?? price - sign * pipSize * riskPips).toFixed(decimals));
+  const tp1 = Number(Math.max(pipSize, body.tp1 ?? price + sign * pipSize * Math.round(riskPips * 1.4)).toFixed(decimals));
+  const tp2 = Number(Math.max(pipSize, body.tp2 ?? price + sign * pipSize * Math.round(riskPips * 2.3)).toFixed(decimals));
+  const tp3 = Number(Math.max(pipSize, body.tp3 ?? price + sign * pipSize * Math.round(riskPips * 3.5)).toFixed(decimals));
   const dxy = Number(body.dxyPressurePct || 0);
   const regime = body.riskRegime || 'BALANCED LIQUIDITY FLOW';
 
@@ -1156,7 +1176,8 @@ function buildDeterministicPositionCoach(body: PositionCoachRequest) {
   const pipMultiplier = isJpy ? 100 : isGold ? 10 : isBtc || isIndex ? 1 : isEth ? 2 : isOil ? 20 : 10000;
 
   const entry = Number(body.entryPrice || 1.39485);
-  const live = Number(body.livePrice || entry);
+  const rawLive = body.livePrice ?? body.currentPrice;
+  const live = Number(rawLive && Number(rawLive) > 0 ? rawLive : entry);
   const sl = Number(body.stopLoss || entry);
   const tp2 = Number(body.tp2 || entry);
   const ema20 = Number(body.ema20 || live);
@@ -1648,11 +1669,12 @@ async function startServer() {
     }
 
     try {
+      const resolvedLivePrice = body.livePrice ?? body.currentPrice ?? body.entryPrice;
       const prompt = [
         `Active Broker Position: ${body.pair || 'USD/CAD'} (${body.timeframe || 'M15'}) — ${body.direction || 'BUY'} on ${body.broker || 'FXPesa'}`,
-        `Entry=${body.entryPrice}, Live=${body.livePrice}, Current SL=${body.stopLoss}, TP1=${body.tp1}, TP2=${body.tp2}`,
-        `Floating P&L=${body.floatingPips} pips ($${body.netProfitUsd} / ${body.netProfitKes} KES)`,
-        `Structure: H1=${body.h1TrendDirection}, M15=${body.trendDirection}, EMA20=${body.ema20}, EMA50=${body.ema50}, RSI=${body.rsi}, ATR=${body.atrPips}p`,
+        `Entry=${body.entryPrice}, Live=${resolvedLivePrice}, Current SL=${body.stopLoss}, TP1=${body.tp1}, TP2=${body.tp2}, TP3=${body.tp3 ?? 'N/A'}`,
+        `Floating P&L=${body.floatingPips} pips ($${body.netProfitUsd} / ${body.netProfitKes ?? Math.round(Number(body.netProfitUsd || 0) * 130)} KES)`,
+        `Structure: H1=${body.h1TrendDirection}, M15=${body.trendDirection || 'N/A'}, KeyLevel=${body.keyLevel ?? 'N/A'}, EMA20=${body.ema20}, EMA50=${body.ema50}, RSI=${body.rsi}, ATR=${body.atrPips}p`,
         `Macro: DXY=${body.dxyPressurePct ?? 0}%, Regime=${body.riskRegime || 'BALANCED'}`,
         body.traderQuestion ? `Trader Question: ${body.traderQuestion}` : '',
         `Baseline recommendation: SL=${baseline.suggestedStopLoss}, TP=${baseline.suggestedTakeProfit}`,

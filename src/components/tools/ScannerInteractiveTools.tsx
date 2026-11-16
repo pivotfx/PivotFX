@@ -244,6 +244,21 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isDraggingChart, setIsDraggingChart] = useState(false);
+
+  const ingestChartImageFile = (file: File) => {
+    if (!file || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (dataUrl) {
+        setCapturedImage(dataUrl);
+        handleStopCamera();
+        void runInstitutionalVisionAnalysis(dataUrl);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Subscribe to global 24/7 every-second live stream
   const userLockedRef = useRef<boolean>(false);
@@ -310,6 +325,28 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
       window.removeEventListener('pivotfx:open-scanner-view', handleOpenScannerViewEvt);
     };
   }, []);
+
+  // Support Ctrl+V / Cmd+V screenshot paste anywhere while Camera Vision Scanner is open
+  useEffect(() => {
+    if (scannerView !== 'camera') return;
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            ingestChartImageFile(file);
+            break;
+          }
+        }
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  });
 
   const handleSyncLiveQuotes = async () => {
     setSyncingQuotes(true);
@@ -2785,9 +2822,26 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
       {/* ======================================================== */}
       {scannerView === 'camera' && (
         <div className="space-y-6">
-          {/* 1. Full-Width Panoramic 16:9 Camera Viewfinder */}
+          {/* 1. Full-Width Panoramic 16:9 Camera Viewfinder (Supports Live Lens, Dropzone, and Ctrl+V Paste) */}
           <div className="space-y-3">
-            <div className="relative w-full aspect-[16/9] min-h-[360px] sm:min-h-[480px] lg:min-h-[540px] rounded-3xl bg-black border border-slate-700 hover:border-[#D4AF37] overflow-hidden flex flex-col items-center justify-center">
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDraggingChart(true);
+              }}
+              onDragLeave={() => setIsDraggingChart(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDraggingChart(false);
+                const droppedFile = e.dataTransfer?.files?.[0];
+                if (droppedFile) ingestChartImageFile(droppedFile);
+              }}
+              className={`relative w-full aspect-[16/9] min-h-[360px] sm:min-h-[480px] lg:min-h-[540px] rounded-3xl bg-black overflow-hidden flex flex-col items-center justify-center transition ${
+                isDraggingChart
+                  ? 'border-2 border-dashed border-[#00C261] ring-4 ring-[#00C261]/25'
+                  : 'border border-slate-700 hover:border-[#D4AF37]'
+              }`}
+            >
               {/* Live WebRTC Video Stream */}
               {isStreaming ? (
                 <div className="relative w-full h-full">
@@ -2911,10 +2965,10 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
                   </div>
                   <div className="space-y-1">
                     <h5 className="text-lg sm:text-xl font-black text-white">
-                      Full-Screen MT4/MT5 Chart Vision Lens
+                      Full-Screen MT4/MT5 &amp; TradingView Vision Lens
                     </h5>
                     <p className="text-xs text-slate-300 leading-relaxed">
-                      Prompt your device camera in wide 16:9 panoramic dimension to frame laptop screens, multi-monitor charts, or uploaded screenshots with high OCR accuracy.
+                      Snap your laptop screen via 16:9 camera, upload a chart image, drag &amp; drop a file here, or press <strong className="text-[#D4AF37]">Ctrl+V / Cmd+V</strong> to paste any screenshot directly into Gemini Vision.
                     </p>
                   </div>
 
@@ -2933,10 +2987,10 @@ input double TakeProfit_2 = ${favorableComputed.tp2}; // Final Institutional Tar
                 <div className="absolute inset-0 bg-[#080C14]/90 backdrop-blur-md z-30 flex flex-col items-center justify-center space-y-3">
                   <RefreshCw className="w-10 h-10 text-[#D4AF37] animate-spin" />
                   <span className="text-sm font-mono font-bold text-[#D4AF37]">
-                    Analyzing Ingested Candlesticks & Confluence Matrix...
+                    Gemini Vision Detecting Market Pair, Timeframe &amp; Trend...
                   </span>
                   <span className="text-xs text-slate-400 font-mono">
-                    Verifying Gilgil $2 rule, MT4 order ticket, and broker spreads...
+                    Auto-syncing BOS structure, EP / SL / TP1 / TP2, and broker risk cap...
                   </span>
                 </div>
               )}

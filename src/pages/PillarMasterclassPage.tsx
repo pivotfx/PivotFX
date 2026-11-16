@@ -127,7 +127,7 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 text-xs font-mono font-bold transition group"
             >
               <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform text-[#D4AF37]" />
-              <span>← Back to Landing / All {PILLARS_MASTERCLASS_DATA.length} Pillars</span>
+              <span>Back to All {PILLARS_MASTERCLASS_DATA.length} Pillars</span>
             </button>
 
             {selectedLesson && (
@@ -138,7 +138,8 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
                 }}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#D4AF37]/15 hover:bg-[#D4AF37]/25 text-[#D4AF37] border border-[#D4AF37]/40 text-xs font-mono font-bold transition"
               >
-                <span>← Return to Lessons 01–{pillar.lessons.length}</span>
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Lessons 01–{pillar.lessons.length}</span>
               </button>
             )}
 
@@ -147,7 +148,8 @@ export const PillarMasterclassPage: React.FC<PillarMasterclassPageProps> = ({
                 onClick={() => setShowCurriculumChamber(false)}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#D4AF37]/15 hover:bg-[#D4AF37]/25 text-[#D4AF37] border border-[#D4AF37]/40 text-xs font-mono font-bold transition"
               >
-                <span>← Return to Pillar {pillar.number} Workstation</span>
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Pillar {pillar.number} Workstation</span>
               </button>
             )}
           </div>

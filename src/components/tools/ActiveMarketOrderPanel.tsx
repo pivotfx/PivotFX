@@ -8,6 +8,7 @@ import {
   computeLiveOrderMetrics,
   computeRealChartTradeParams,
   computeCandleSwingLevels,
+  evaluatePortfolioRiskExposure,
   getCurrentMacroContext,
   getPairSpecs,
   RiskManagementConfig,
@@ -28,7 +29,8 @@ import {
   ArrowRight,
   SlidersHorizontal,
   Bot,
-  ClipboardList
+  ClipboardList,
+  AlertTriangle
 } from 'lucide-react';
 
 interface ActiveMarketOrderPanelProps {
@@ -155,12 +157,16 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
           timeframe: ord.timeframe,
           broker: ord.broker.toUpperCase(),
           entryPrice: ord.entryPrice,
-          currentPrice: mkt.price,
+          livePrice: mkt.price,
           stopLoss: ord.stopLoss,
           tp1: ord.tp1,
           tp2: ord.tp2,
+          tp3: ord.tp3,
           floatingPips: metrics.floatingPips,
           netProfitUsd: metrics.netProfitUsd,
+          netProfitKes: metrics.netProfitKes,
+          keyLevel: mkt.keyLevel,
+          trendDirection: mkt.trendDirection,
           ema20: mkt.ema20,
           ema50: mkt.ema50,
           rsi: mkt.rsi,
@@ -226,6 +232,7 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
   };
 
   const activeOrderEntries = Object.values(activeOrders).filter((o): o is ActiveMarketOrder => Boolean(o));
+  const portfolioExposure = evaluatePortfolioRiskExposure(activeOrders, riskConfig);
 
   // ============================================================================
   // MODE 1: COMPACT LIVE STRIP AT TOP OF RADAR VIEW (WHEN 1+ ORDERS ARE LOADED)
@@ -236,10 +243,21 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
     return (
       <div className="p-4 rounded-2xl bg-[#0B1324] border border-[#00C261]/55 space-y-3 font-mono tabular-nums">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-xs font-black text-[#00C261]">
+          <div className="flex items-center gap-2 text-xs font-black text-[#00C261] flex-wrap">
             <ShieldCheck className="w-4 h-4 shrink-0" />
             <span>
               PLACED BROKER ORDERS MONITOR ({activeOrderEntries.length} ACTIVE · LIVE P&amp;L &amp; SL GUARD)
+            </span>
+            <span
+              className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                portfolioExposure.severity === 'HIGH_STACKED_RISK'
+                  ? 'bg-red-950/70 border-red-500/50 text-red-300'
+                  : portfolioExposure.severity === 'CAUTION'
+                  ? 'bg-amber-950/70 border-amber-500/50 text-amber-300'
+                  : 'bg-slate-900 border-slate-700 text-slate-300'
+              }`}
+            >
+              Open Risk: ${portfolioExposure.totalOpenRiskUsd.toFixed(2)} ({portfolioExposure.totalOpenRiskPct}%)
             </span>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -255,6 +273,22 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
             </button>
           </div>
         </div>
+
+        {portfolioExposure.severity !== 'SAFE' && portfolioExposure.warningHeadline && (
+          <div
+            className={`px-3 py-2 rounded-xl border text-[11px] flex items-start gap-2 font-sans ${
+              portfolioExposure.severity === 'HIGH_STACKED_RISK'
+                ? 'bg-red-950/45 border-red-500/50 text-red-200'
+                : 'bg-amber-950/45 border-amber-500/45 text-amber-200'
+            }`}
+          >
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+            <span>
+              <strong className="font-mono">{portfolioExposure.warningHeadline}: </strong>
+              {portfolioExposure.warningDetail}
+            </span>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
           {activeOrderEntries.map((ord) => {
@@ -406,6 +440,22 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
           </div>
         )}
 
+        {portfolioExposure.severity !== 'SAFE' && portfolioExposure.warningHeadline && (
+          <div
+            className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 font-sans ${
+              portfolioExposure.severity === 'HIGH_STACKED_RISK'
+                ? 'bg-red-950/45 border-red-500/55 text-red-200'
+                : 'bg-amber-950/45 border-amber-500/50 text-amber-200'
+            }`}
+          >
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+            <div>
+              <strong className="font-mono text-white block">{portfolioExposure.warningHeadline}</strong>
+              <span>{portfolioExposure.warningDetail}</span>
+            </div>
+          </div>
+        )}
+
         {/* Active Open Orders Grid */}
         {activeOrderEntries.length > 0 ? (
           <div className="space-y-4">
@@ -498,10 +548,7 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
                     {metrics.netProfitUsd >= 0.5 && (
                       <div className="p-3 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-[#0B1525] to-emerald-950/90 border border-[#00C261]/80 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs shadow-[0_0_20px_rgba(0,194,97,0.25)]">
                         <div className="flex items-center gap-2.5">
-                          <span className="relative flex h-3 w-3 shrink-0">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00C261] opacity-75" />
-                            <span className="relative inline-flex rounded-full h-3 w-3 bg-[#00C261]" />
-                          </span>
+                          <TrendingUp className="w-4 h-4 text-[#00C261] shrink-0" />
                           <div>
                             <span className="font-black text-[#00C261] block text-sm">
                               TRADE IN PROFIT: +${metrics.netProfitUsd.toFixed(2)} (+{metrics.floatingPips} pips)
@@ -859,6 +906,13 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
   const existingOrder = activeOrders[pair] || null;
   const pairHistory = orderHistory.filter((h) => h.pair === pair).slice(0, 4);
   const isBuyPlanned = computed.direction === 'BUY';
+  const candidateExposure = !existingOrder
+    ? evaluatePortfolioRiskExposure(activeOrders, riskConfig, {
+        pair,
+        direction: computed.direction,
+        riskUsd: computed.actualRiskUsd
+      })
+    : portfolioExposure;
 
   return (
     <div className="p-5 rounded-2xl bg-[#0A1120] border-2 border-[#00C261]/55 space-y-4 font-mono tabular-nums">
@@ -978,6 +1032,25 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
           <span>{statusFeedback}</span>
         </div>
       )}
+
+      {!existingOrder &&
+        candidateExposure.openOrderCount > 0 &&
+        candidateExposure.severity !== 'SAFE' &&
+        candidateExposure.warningHeadline && (
+          <div
+            className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 font-sans ${
+              candidateExposure.severity === 'HIGH_STACKED_RISK'
+                ? 'bg-red-950/45 border-red-500/55 text-red-200'
+                : 'bg-amber-950/45 border-amber-500/50 text-amber-200'
+            }`}
+          >
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+            <div>
+              <strong className="font-mono text-white block">{candidateExposure.warningHeadline}</strong>
+              <span>{candidateExposure.warningDetail}</span>
+            </div>
+          </div>
+        )}
 
       {!existingOrder ? (
         /* NOTIFY PIVOTFX WHEN YOU PLACE ORDER ON YOUR BROKER */
@@ -1389,7 +1462,7 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
                   </div>
                 ) : (
                   <p className="text-[11px] text-slate-400 font-sans">
-                    Click the button on the right to get live Gemini 3.8 Flash coaching on whether to hold inside ATR swing protection, tighten SL on structure break, or trail profit targets.
+                    Click the button on the right to get live Gemini AI Position Coach guidance on whether to hold inside ATR swing protection, tighten SL on structure break, or trail profit targets.
                   </p>
                 )}
               </div>

@@ -1,18 +1,16 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { PropAccountConfig } from '../../types/propDesk';
 import { savePropAccount } from '../../utils/propDeskStorage';
 import { audioAlertEngine } from '../../utils/audioAlerts';
 import {
   X,
   ShieldAlert,
-  ShieldCheck,
   RotateCcw,
   AlertTriangle,
   Lock,
   Unlock,
   TrendingUp,
   DollarSign,
-  Activity,
 } from 'lucide-react';
 
 interface PropDrawdownGuardModalProps {
@@ -20,6 +18,9 @@ interface PropDrawdownGuardModalProps {
   onClose: () => void;
   config: PropAccountConfig;
   onUpdateConfig: (newConfig: PropAccountConfig) => void;
+  liveFloatingUsd?: number;
+  liveOpenRiskUsd?: number;
+  openOrdersCount?: number;
 }
 
 const ACCOUNT_SIZES = [10000, 25000, 50000, 100000, 200000];
@@ -29,19 +30,34 @@ export const PropDrawdownGuardModal: React.FC<PropDrawdownGuardModalProps> = ({
   onClose,
   config,
   onUpdateConfig,
+  liveFloatingUsd = 0,
+  liveOpenRiskUsd = 0,
+  openOrdersCount = 0,
 }) => {
   const [localConfig, setLocalConfig] = useState<PropAccountConfig>(config);
 
+  useEffect(() => {
+    setLocalConfig(config);
+  }, [config, isOpen]);
+
   if (!isOpen) return null;
 
-  const maxDailyLossAllowed = (localConfig.accountSize * localConfig.maxDailyLossPct) / 100;
-  const maxTotalDrawdownAllowed = (localConfig.accountSize * localConfig.maxTotalDrawdownPct) / 100;
+  const maxDailyLossAllowed = Math.max(1, (localConfig.accountSize * localConfig.maxDailyLossPct) / 100);
+  const maxTotalDrawdownAllowed = Math.max(1, (localConfig.accountSize * localConfig.maxTotalDrawdownPct) / 100);
 
-  const dailyLossPctUsed = Math.min(100, (localConfig.todayLossUsd / maxDailyLossAllowed) * 100);
-  const totalDrawdownPctUsed = Math.min(
-    100,
-    (localConfig.totalDrawdownUsd / maxTotalDrawdownAllowed) * 100
+  const liveFloatingDrawdownUsd = liveFloatingUsd < 0 ? Math.abs(liveFloatingUsd) : 0;
+  const effectiveTodayLossUsd = localConfig.todayLossUsd + liveFloatingDrawdownUsd;
+  const effectiveTotalDrawdownUsd = localConfig.totalDrawdownUsd + liveFloatingDrawdownUsd;
+
+  const dailyLossPctUsed = Math.max(
+    0,
+    Math.min(100, (effectiveTodayLossUsd / maxDailyLossAllowed) * 100)
   );
+  const totalDrawdownPctUsed = Math.max(
+    0,
+    Math.min(100, (effectiveTotalDrawdownUsd / maxTotalDrawdownAllowed) * 100)
+  );
+  const effectiveEquity = localConfig.currentEquity + liveFloatingUsd;
 
   const handleSelectSize = (size: number) => {
     const updated: PropAccountConfig = {
@@ -197,14 +213,44 @@ export const PropDrawdownGuardModal: React.FC<PropDrawdownGuardModalProps> = ({
           </div>
         </div>
 
+        {/* Live Broker Order Exposure Sync */}
+        <div className="my-4 grid grid-cols-3 divide-x divide-slate-800 rounded-xl bg-slate-900/70 border border-slate-800 text-xs tabular-nums">
+          <div className="p-3">
+            <span className="text-[11px] font-mono text-slate-400 block">Open Broker Orders</span>
+            <strong className="text-sm font-mono text-white">
+              {openOrdersCount} {openOrdersCount === 1 ? 'Active Trade' : 'Active Trades'}
+            </strong>
+          </div>
+          <div className="p-3">
+            <span className="text-[11px] font-mono text-slate-400 block">Live Floating P&L</span>
+            <strong
+              className={`text-sm font-mono ${
+                liveFloatingUsd > 0
+                  ? 'text-emerald-400'
+                  : liveFloatingUsd < 0
+                  ? 'text-rose-400'
+                  : 'text-slate-200'
+              }`}
+            >
+              {liveFloatingUsd >= 0 ? '+' : '-'}${Math.abs(liveFloatingUsd).toFixed(2)}
+            </strong>
+          </div>
+          <div className="p-3">
+            <span className="text-[11px] font-mono text-slate-400 block">Active SL Risk · Live Eq.</span>
+            <strong className="text-sm font-mono text-cyan-300">
+              ${liveOpenRiskUsd.toFixed(2)} · ${effectiveEquity.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+            </strong>
+          </div>
+        </div>
+
         {/* Live Gauges */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4 tabular-nums">
           {/* Daily Drawdown Gauge */}
           <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800/80">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-mono text-slate-400">Daily Loss Budget (4%)</span>
+              <span className="text-xs font-mono text-slate-400">Daily Loss Budget ({localConfig.maxDailyLossPct}%)</span>
               <span className="text-xs font-bold font-mono text-cyan-300">
-                ${localConfig.todayLossUsd.toFixed(2)} / ${maxDailyLossAllowed.toLocaleString()}
+                ${effectiveTodayLossUsd.toFixed(2)} / ${maxDailyLossAllowed.toLocaleString()}
               </span>
             </div>
             <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden">
@@ -219,17 +265,17 @@ export const PropDrawdownGuardModal: React.FC<PropDrawdownGuardModalProps> = ({
                 style={{ width: `${dailyLossPctUsed}%` }}
               />
             </div>
-            <p className="text-[10px] text-slate-400 mt-2">
-              Remaining daily risk buffer: ${(maxDailyLossAllowed - localConfig.todayLossUsd).toFixed(2)}
+            <p className="text-[11px] text-slate-400 mt-2">
+              Remaining daily risk buffer: ${Math.max(0, maxDailyLossAllowed - effectiveTodayLossUsd).toFixed(2)}
             </p>
           </div>
 
           {/* Max Trailing Drawdown Gauge */}
           <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800/80">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-mono text-slate-400">Max Trailing Drawdown (8%)</span>
+              <span className="text-xs font-mono text-slate-400">Max Trailing Drawdown ({localConfig.maxTotalDrawdownPct}%)</span>
               <span className="text-xs font-bold font-mono text-amber-300">
-                ${localConfig.totalDrawdownUsd.toFixed(2)} / ${maxTotalDrawdownAllowed.toLocaleString()}
+                ${effectiveTotalDrawdownUsd.toFixed(2)} / ${maxTotalDrawdownAllowed.toLocaleString()}
               </span>
             </div>
             <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden">
@@ -244,8 +290,8 @@ export const PropDrawdownGuardModal: React.FC<PropDrawdownGuardModalProps> = ({
                 style={{ width: `${totalDrawdownPctUsed}%` }}
               />
             </div>
-            <p className="text-[10px] text-slate-400 mt-2">
-              Drawdown buffer remaining: ${(maxTotalDrawdownAllowed - localConfig.totalDrawdownUsd).toFixed(2)}
+            <p className="text-[11px] text-slate-400 mt-2">
+              Drawdown buffer remaining: ${Math.max(0, maxTotalDrawdownAllowed - effectiveTotalDrawdownUsd).toFixed(2)}
             </p>
           </div>
         </div>

@@ -92,12 +92,24 @@ export interface SuggestedSignalLogEntry {
 export interface TradeNotification {
   id: string;
   pair?: CurrencyPair;
-  type: 'ORDER_PLACED' | 'PROFIT_MILESTONE' | 'TP_HIT' | 'SL_UPDATED' | 'SL_WARNING' | 'AI_SIGNAL';
+  type: 'ORDER_PLACED' | 'PROFIT_MILESTONE' | 'TP_HIT' | 'SL_UPDATED' | 'SL_WARNING' | 'AI_SIGNAL' | 'PRICE_ALERT';
   title: string;
   message: string;
   eatTimestamp: string;
   timestampMs?: number;
   read: boolean;
+}
+
+export interface PriceAlertRule {
+  id: string;
+  pair: CurrencyPair;
+  condition: 'ABOVE' | 'BELOW';
+  targetPrice: number;
+  label: string;
+  createdAtEat: string;
+  triggered: boolean;
+  triggeredAtEat?: string;
+  triggeredPrice?: number;
 }
 
 export interface PillarLesson {

@@ -20,6 +20,7 @@ export const ConfluenceMatrixModal: React.FC<ConfluenceMatrixModalProps> = ({
   if (!isOpen) return null;
 
   const fourStarCount = items.filter((i) => i.stars === 4).length;
+  const threeStarCount = items.filter((i) => i.stars === 3).length;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
@@ -39,14 +40,15 @@ export const ConfluenceMatrixModal: React.FC<ConfluenceMatrixModalProps> = ({
                   M5 · M15 · H1 · H4
                 </span>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Institutional trend alignment filter across 15 instruments. {fourStarCount} pairs locked in 4-Star Institutional Confluence.
+              <p className="text-xs text-slate-400 mt-0.5 tabular-nums">
+                Live engine trend alignment across {items.length} instruments · {fourStarCount} locked in 4-Star Confluence · {threeStarCount} in 3-Star Grade A.
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+            aria-label="Close Confluence Matrix Modal"
           >
             <X className="w-5 h-5" />
           </button>
@@ -55,25 +57,25 @@ export const ConfluenceMatrixModal: React.FC<ConfluenceMatrixModalProps> = ({
         {/* Legend */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 my-4 p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 text-xs">
           <div className="flex items-center space-x-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0" />
             <span className="text-slate-300 font-medium">M5: Precision Entry Timing</span>
           </div>
           <div className="flex items-center space-x-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0" />
             <span className="text-slate-300 font-medium">M15: Order Trigger</span>
           </div>
           <div className="flex items-center space-x-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0" />
             <span className="text-slate-300 font-medium">H1: Market Structure</span>
           </div>
           <div className="flex items-center space-x-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-purple-400" />
+            <span className="w-2.5 h-2.5 rounded-full bg-purple-400 shrink-0" />
             <span className="text-slate-300 font-medium">H4: Institutional Bias</span>
           </div>
         </div>
 
-        {/* Table of all 15 assets */}
-        <div className="overflow-x-auto rounded-xl border border-slate-800/80 bg-slate-950/40">
+        {/* Table of all live assets */}
+        <div className="overflow-x-auto rounded-xl border border-slate-800/80 bg-slate-950/40 tabular-nums">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-900/90 text-slate-400 uppercase tracking-wider text-[10px] font-mono">
               <tr>

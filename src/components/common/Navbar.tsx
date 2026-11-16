@@ -25,7 +25,8 @@ import {
   Globe,
   Bell,
   Volume2,
-  VolumeX
+  VolumeX,
+  Search
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -33,6 +34,7 @@ interface NavbarProps {
   onSelectTab: (tab: PageTab) => void;
   killSwitchUntil: number | null;
   onOpenLogoModal: () => void;
+  onOpenQuickJump?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -40,6 +42,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectTab,
   killSwitchUntil,
   onOpenLogoModal,
+  onOpenQuickJump,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -87,12 +90,12 @@ export const Navbar: React.FC<NavbarProps> = ({
           gain.connect(audioCtx.destination);
           osc.start();
           osc.stop(audioCtx.currentTime + 0.28);
-        } else if (notifType === 'TP_HIT' || notifType === 'PROFIT_MILESTONE') {
-          // Harmonious celebratory ascending chime for profit milestone
+        } else if (notifType === 'TP_HIT' || notifType === 'PROFIT_MILESTONE' || notifType === 'PRICE_ALERT') {
+          // Harmonious celebratory ascending chime for profit milestone or price alert hit
           const osc = audioCtx.createOscillator();
           const gain = audioCtx.createGain();
           osc.type = 'triangle';
-          osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+          osc.frequency.setValueAtTime(notifType === 'PRICE_ALERT' ? 988 : 880, audioCtx.currentTime);
           osc.frequency.exponentialRampToValueAtTime(1320, audioCtx.currentTime + 0.18);
           gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
           gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.22);
@@ -292,6 +295,19 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
             </button>
 
+            {onOpenQuickJump && (
+              <button
+                type="button"
+                onClick={onOpenQuickJump}
+                title="Quick Jump Markets & Pillars (Ctrl/Cmd + K)"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#0B1120] hover:bg-slate-900 text-slate-300 hover:text-white border border-slate-800 hover:border-[#D4AF37]/50 text-[11px] font-mono transition whitespace-nowrap shrink-0"
+              >
+                <Search className="w-3.5 h-3.5 text-[#D4AF37]" />
+                <span className="hidden 2xl:inline">Jump</span>
+                <span className="text-[10px] text-slate-500">⌘K</span>
+              </button>
+            )}
+
             <button
               onClick={onOpenLogoModal}
               title="PivotFx Brand Kit"
@@ -357,6 +373,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                             className={
                               n.type === 'ORDER_PLACED' || n.type === 'TP_HIT'
                                 ? 'text-[#00C261]'
+                                : n.type === 'PRICE_ALERT'
+                                ? 'text-cyan-300'
                                 : n.type === 'SL_WARNING'
                                 ? 'text-amber-300'
                                 : 'text-[#D4AF37]'
@@ -456,28 +474,41 @@ export const Navbar: React.FC<NavbarProps> = ({
             })}
           </div>
 
-          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/80">
+          <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80">
             <button
               type="button"
               onClick={() => {
                 setMobileMenuOpen(false);
                 globalLiveStream.requestOpenScannerView('trade_log');
               }}
-              className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-900 border border-[#00C261]/40 text-[#00C261] text-xs font-bold"
+              className="flex items-center justify-center gap-1.5 px-2.5 py-2.5 rounded-xl bg-slate-900 border border-[#00C261]/40 text-[#00C261] text-xs font-bold whitespace-nowrap"
             >
-              <Activity className="w-3.5 h-3.5" />
-              <span>Trade Log &amp; Orders</span>
+              <Activity className="w-3.5 h-3.5 shrink-0" />
+              <span>Trade Log</span>
             </button>
+            {onOpenQuickJump && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onOpenQuickJump();
+                }}
+                className="flex items-center justify-center gap-1.5 px-2.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 text-xs font-bold whitespace-nowrap"
+              >
+                <Search className="w-3.5 h-3.5 text-[#D4AF37] shrink-0" />
+                <span>Quick Jump</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
                 setMobileMenuOpen(false);
                 onOpenLogoModal();
               }}
-              className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-900 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-bold"
+              className="flex items-center justify-center gap-1.5 px-2.5 py-2.5 rounded-xl bg-slate-900 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-bold whitespace-nowrap"
             >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>3D Brand Kit</span>
+              <Sparkles className="w-3.5 h-3.5 shrink-0" />
+              <span>Brand Kit</span>
             </button>
           </div>
         </div>

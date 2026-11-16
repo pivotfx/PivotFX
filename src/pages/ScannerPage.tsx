@@ -239,17 +239,28 @@ export const ScannerPage: React.FC<ScannerPageProps> = ({
           const ctx = canvasRef.current.getContext('2d');
           if (ctx) {
             ctx.drawImage(videoRef.current, 0, 0, 300, 150);
-            const imgData = ctx.getImageData(0, 0, 300, 150);
-            let hasCyan = false;
-            for (let i = 0; i < imgData.data.length; i += 40) {
-              const r = imgData.data[i];
-              const g = imgData.data[i + 1];
-              const b = imgData.data[i + 2];
-              if (b > 180 && g > 150 && r < 100) hasCyan = true;
-            }
+            const frameDataUrl = canvasRef.current.toDataURL('image/jpeg', 0.9);
+            fetch('/api/ai/vision-chart', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                imageBase64: frameDataUrl,
+                fallbackPair: selectedPair,
+                fallbackTimeframe: selectedTimeframe
+              })
+            })
+              .then((r) => (r.ok ? r.json() : null))
+              .then((vData) => {
+                if (vData?.detectedPair) {
+                  setColorDetectionNotes([
+                    `Vision detected ${vData.detectedPair} (${vData.detectedTimeframe}) · ${vData.detectedTrend} (${vData.recommendedDirection}).`,
+                    vData.aiSummary || ticket.mt4SafetyProof
+                  ]);
+                }
+              })
+              .catch(() => {});
             setColorDetectionNotes([
-              `Anchored to ${selectedPair} (${selectedTimeframe}) candle price ${livePrice.toFixed(dec)}.`,
-              hasCyan ? 'Detected Cyan EMA 20 trend slope on frame.' : 'Identified candlestick body & wick structure.',
+              `Captured live chart frame · Scanning ${selectedPair} (${selectedTimeframe}) @ ${livePrice.toFixed(dec)}.`,
               ticket.mt4SafetyProof,
             ]);
           }

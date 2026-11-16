@@ -1,12 +1,13 @@
 import {
   BrokerId,
   CurrencyPair,
+  PriceAlertRule,
   SuggestedSignalLogEntry,
   Timeframe,
   TradeNotification
 } from '../types';
 
-export type { SuggestedSignalLogEntry, TradeNotification };
+export type { PriceAlertRule, SuggestedSignalLogEntry, TradeNotification };
 
 export type PatternCategory =
   | 'Tower Top Liquidity Sweep'
@@ -1033,6 +1034,334 @@ export function computeLiveOrderMetrics(
     projectedProfitAtUpdatedTpUsd,
     projectedProfitAtUpdatedTpKes,
     decimals
+  };
+}
+
+export interface PortfolioRiskCluster {
+  driver: string;
+  pairs: string[];
+  combinedRiskPct: number;
+}
+
+export interface PortfolioRiskExposureSummary {
+  openOrderCount: number;
+  protectedOrderCount: number;
+  totalOpenRiskUsd: number;
+  totalOpenRiskPct: number;
+  projectedTotalRiskUsd: number;
+  projectedTotalRiskPct: number;
+  stackedClusters: PortfolioRiskCluster[];
+  severity: 'SAFE' | 'CAUTION' | 'HIGH_STACKED_RISK';
+  warningHeadline: string | null;
+  warningDetail: string | null;
+}
+
+function getMacroDriversForOrder(pair: CurrencyPair, direction: 'BUY' | 'SELL'): string[] {
+  const isBuy = direction === 'BUY';
+  switch (pair) {
+    case 'EUR/USD':
+    case 'GBP/USD':
+    case 'AUD/USD':
+      return [isBuy ? 'SHORT USD' : 'LONG USD'];
+    case 'USD/CHF':
+    case 'USD/CAD':
+      return [isBuy ? 'LONG USD' : 'SHORT USD'];
+    case 'USD/JPY':
+      return [isBuy ? 'LONG USD' : 'SHORT USD', isBuy ? 'SHORT JPY' : 'LONG JPY'];
+    case 'GBP/JPY':
+    case 'EUR/JPY':
+      return [isBuy ? 'SHORT JPY' : 'LONG JPY'];
+    case 'XAU/USD':
+      return [isBuy ? 'SHORT USD (GOLD)' : 'LONG USD (GOLD)'];
+    case 'BTC/USD':
+    case 'ETH/USD':
+      return [isBuy ? 'LONG CRYPTO' : 'SHORT CRYPTO'];
+    case 'US30':
+    case 'NAS100':
+      return [isBuy ? 'LONG US EQUITIES' : 'SHORT US EQUITIES'];
+    default:
+      return [];
+  }
+}
+
+export function evaluatePortfolioRiskExposure(
+  activeOrders: Partial<Record<CurrencyPair, ActiveMarketOrder>>,
+  riskConfig: RiskManagementConfig,
+  candidate?: { pair: CurrencyPair; direction: 'BUY' | 'SELL'; riskUsd: number }
+): PortfolioRiskExposureSummary {
+  const accountBalanceUsd = Math.max(10, Number(riskConfig.accountBalanceUsd) || 200);
+  const openOrders = Object.values(activeOrders).filter((o): o is ActiveMarketOrder => Boolean(o));
+
+  let protectedOrderCount = 0;
+  let totalOpenRiskUsd = 0;
+
+  interface ExposureLeg {
+    pair: CurrencyPair;
+    direction: 'BUY' | 'SELL';
+    riskUsd: number;
+    label: string;
+  }
+
+  const legs: ExposureLeg[] = [];
+
+  openOrders.forEach((ord) => {
+    const isBuy = ord.direction === 'BUY';
+    const isProtected = isBuy ? ord.stopLoss >= ord.entryPrice : ord.stopLoss <= ord.entryPrice;
+    if (isProtected) {
+      protectedOrderCount += 1;
+    }
+    const { pipMultiplier, pipValPerMicroLot } = getPairSpecs(ord.pair);
+    const lotScale = Math.max(0.01, ord.lotSize || 0.01) / 0.01;
+    const rawRiskPips = Math.abs(ord.entryPrice - ord.stopLoss) * pipMultiplier;
+    const riskUsd = isProtected
+      ? 0
+      : Number((rawRiskPips * pipValPerMicroLot * lotScale).toFixed(2));
+    totalOpenRiskUsd += riskUsd;
+    legs.push({
+      pair: ord.pair,
+      direction: ord.direction,
+      riskUsd,
+      label: `${ord.pair} ${ord.direction}`
+    });
+  });
+
+  totalOpenRiskUsd = Number(totalOpenRiskUsd.toFixed(2));
+  const totalOpenRiskPct = Number(((totalOpenRiskUsd / accountBalanceUsd) * 100).toFixed(2));
+
+  const candidateAlreadyOpen = candidate ? Boolean(activeOrders[candidate.pair]) : false;
+  let projectedTotalRiskUsd = totalOpenRiskUsd;
+  if (candidate && !candidateAlreadyOpen) {
+    const candidateRiskUsd = Math.max(0, Number(candidate.riskUsd) || 0);
+    projectedTotalRiskUsd = Number((totalOpenRiskUsd + candidateRiskUsd).toFixed(2));
+    legs.push({
+      pair: candidate.pair,
+      direction: candidate.direction,
+      riskUsd: candidateRiskUsd,
+      label: `${candidate.pair} ${candidate.direction} (Planned)`
+    });
+  }
+  const projectedTotalRiskPct = Number(((projectedTotalRiskUsd / accountBalanceUsd) * 100).toFixed(2));
+
+  const driverBuckets = new Map<string, { pairs: string[]; riskUsd: number }>();
+  legs.forEach((leg) => {
+    const drivers = getMacroDriversForOrder(leg.pair, leg.direction);
+    // Normalize Gold's USD tag to fold into SHORT USD / LONG USD cluster awareness
+    drivers.forEach((rawDriver) => {
+      const normalizedDriver = rawDriver.startsWith('SHORT USD')
+        ? 'SHORT USD'
+        : rawDriver.startsWith('LONG USD')
+        ? 'LONG USD'
+        : rawDriver;
+      const existing = driverBuckets.get(normalizedDriver) || { pairs: [], riskUsd: 0 };
+      if (!existing.pairs.includes(leg.label)) {
+        existing.pairs.push(leg.label);
+        existing.riskUsd += leg.riskUsd;
+      }
+      driverBuckets.set(normalizedDriver, existing);
+    });
+  });
+
+  const stackedClusters: PortfolioRiskCluster[] = [];
+  driverBuckets.forEach((bucket, driver) => {
+    if (bucket.pairs.length >= 2) {
+      stackedClusters.push({
+        driver,
+        pairs: bucket.pairs,
+        combinedRiskPct: Number(((bucket.riskUsd / accountBalanceUsd) * 100).toFixed(2))
+      });
+    }
+  });
+
+  let severity: PortfolioRiskExposureSummary['severity'] = 'SAFE';
+  let warningHeadline: string | null = null;
+  let warningDetail: string | null = null;
+
+  if (projectedTotalRiskPct >= 3.5 || (stackedClusters.length > 0 && projectedTotalRiskPct >= 2.2)) {
+    severity = 'HIGH_STACKED_RISK';
+  } else if (stackedClusters.length > 0 || projectedTotalRiskPct >= 2.0) {
+    severity = 'CAUTION';
+  }
+
+  if (severity !== 'SAFE') {
+    const primaryCluster = stackedClusters[0];
+    if (primaryCluster && projectedTotalRiskPct >= 2.2) {
+      warningHeadline = `STACKED ${primaryCluster.driver} EXPOSURE (${projectedTotalRiskPct}% TOTAL EQUITY AT RISK)`;
+      warningDetail = `${primaryCluster.pairs.join(' + ')} double up the same ${primaryCluster.driver} macro bet ($${projectedTotalRiskUsd.toFixed(2)} combined SL risk on $${accountBalanceUsd}). Lock Breakeven on one open trade or halve lot size before adding.`;
+    } else if (primaryCluster) {
+      warningHeadline = `CORRELATED ${primaryCluster.driver} STACK (${primaryCluster.pairs.length} PAIRS)`;
+      warningDetail = `${primaryCluster.pairs.join(' + ')} move together on USD/JPY news. Combined unprotected risk is ${projectedTotalRiskPct}% ($${projectedTotalRiskUsd.toFixed(2)}).`;
+    } else {
+      warningHeadline = `ELEVATED OPEN PORTFOLIO RISK (${projectedTotalRiskPct}% / $${projectedTotalRiskUsd.toFixed(2)})`;
+      warningDetail = `Multiple open stop-losses total $${projectedTotalRiskUsd.toFixed(2)} (${projectedTotalRiskPct}% of $${accountBalanceUsd}). Keep combined open exposure under 3.0% to safeguard prop drawdown.`;
+    }
+  }
+
+  return {
+    openOrderCount: openOrders.length,
+    protectedOrderCount,
+    totalOpenRiskUsd,
+    totalOpenRiskPct,
+    projectedTotalRiskUsd,
+    projectedTotalRiskPct,
+    stackedClusters,
+    severity,
+    warningHeadline,
+    warningDetail
+  };
+}
+
+export interface CurrencyStrengthItem {
+  code: 'GBP' | 'EUR' | 'USD' | 'CHF' | 'AUD' | 'CAD' | 'JPY' | 'XAU';
+  score: number; // -100 to +100 relative strength
+  avgPctMove: number;
+  momentumBias: 'STRONG' | 'NEUTRAL' | 'WEAK';
+}
+
+export interface CurrencyStrengthReport {
+  rankings: CurrencyStrengthItem[];
+  strongest: CurrencyStrengthItem;
+  weakest: CurrencyStrengthItem;
+  topDivergencePair: CurrencyPair;
+  topDivergenceDirection: 'BUY' | 'SELL';
+  divergenceSpread: number;
+  summaryText: string;
+}
+
+const CURRENCY_PAIR_MATRIX_MAP: Partial<Record<string, { pair: CurrencyPair; invert?: boolean }>> = {
+  'EUR/USD': { pair: 'EUR/USD' },
+  'GBP/USD': { pair: 'GBP/USD' },
+  'AUD/USD': { pair: 'AUD/USD' },
+  'USD/JPY': { pair: 'USD/JPY' },
+  'USD/CHF': { pair: 'USD/CHF' },
+  'USD/CAD': { pair: 'USD/CAD' },
+  'GBP/JPY': { pair: 'GBP/JPY' },
+  'EUR/JPY': { pair: 'EUR/JPY' },
+  'XAU/USD': { pair: 'XAU/USD' }
+};
+
+export function computeCurrencyStrengthMatrix(markets: MarketScanData[]): CurrencyStrengthReport {
+  const buckets: Record<CurrencyStrengthItem['code'], number[]> = {
+    GBP: [],
+    EUR: [],
+    USD: [],
+    CHF: [],
+    AUD: [],
+    CAD: [],
+    JPY: [],
+    XAU: []
+  };
+
+  markets.forEach((m) => {
+    const pct = Number(m.change24hPct || 0);
+    const adxBoost = Math.max(0.75, Math.min(1.5, ((m.adxStrength ?? 20) / 22)));
+    const trendWeight =
+      m.trendDirection === 'UPTREND' ? 0.12 : m.trendDirection === 'DOWNTREND' ? -0.12 : 0;
+    const weightedMove = pct * adxBoost + trendWeight;
+
+    switch (m.pair) {
+      case 'EUR/USD':
+        buckets.EUR.push(weightedMove);
+        buckets.USD.push(-weightedMove);
+        break;
+      case 'GBP/USD':
+        buckets.GBP.push(weightedMove);
+        buckets.USD.push(-weightedMove);
+        break;
+      case 'AUD/USD':
+        buckets.AUD.push(weightedMove);
+        buckets.USD.push(-weightedMove);
+        break;
+      case 'USD/JPY':
+        buckets.USD.push(weightedMove);
+        buckets.JPY.push(-weightedMove);
+        break;
+      case 'USD/CHF':
+        buckets.USD.push(weightedMove);
+        buckets.CHF.push(-weightedMove);
+        break;
+      case 'USD/CAD':
+        buckets.USD.push(weightedMove);
+        buckets.CAD.push(-weightedMove);
+        break;
+      case 'GBP/JPY':
+        buckets.GBP.push(weightedMove);
+        buckets.JPY.push(-weightedMove);
+        break;
+      case 'EUR/JPY':
+        buckets.EUR.push(weightedMove);
+        buckets.JPY.push(-weightedMove);
+        break;
+      case 'XAU/USD':
+        buckets.XAU.push(weightedMove * 0.85);
+        buckets.USD.push(-weightedMove * 0.4);
+        break;
+      default:
+        break;
+    }
+  });
+
+  const rawItems: CurrencyStrengthItem[] = (Object.keys(buckets) as CurrencyStrengthItem['code'][]).map(
+    (code) => {
+      const vals = buckets[code];
+      const avg = vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+      const clampedScore = Math.max(-100, Math.min(100, Math.round(avg * 95)));
+      return {
+        code,
+        score: clampedScore,
+        avgPctMove: Number(avg.toFixed(2)),
+        momentumBias: clampedScore >= 18 ? 'STRONG' : clampedScore <= -18 ? 'WEAK' : 'NEUTRAL'
+      };
+    }
+  );
+
+  const rankings = [...rawItems].sort((a, b) => b.score - a.score);
+  const strongest = rankings[0];
+  const weakest = rankings[rankings.length - 1];
+
+  // Pick the sharpest executable pair supported in our 15-market universe
+  let bestPair: CurrencyPair = 'GBP/JPY';
+  let bestDir: 'BUY' | 'SELL' = 'BUY';
+  let bestSpread = -1;
+
+  const candidatePairs: Array<{
+    pair: CurrencyPair;
+    base: CurrencyStrengthItem['code'];
+    quote: CurrencyStrengthItem['code'];
+  }> = [
+    { pair: 'EUR/USD', base: 'EUR', quote: 'USD' },
+    { pair: 'GBP/USD', base: 'GBP', quote: 'USD' },
+    { pair: 'AUD/USD', base: 'AUD', quote: 'USD' },
+    { pair: 'USD/JPY', base: 'USD', quote: 'JPY' },
+    { pair: 'USD/CHF', base: 'USD', quote: 'CHF' },
+    { pair: 'USD/CAD', base: 'USD', quote: 'CAD' },
+    { pair: 'GBP/JPY', base: 'GBP', quote: 'JPY' },
+    { pair: 'EUR/JPY', base: 'EUR', quote: 'JPY' },
+    { pair: 'XAU/USD', base: 'XAU', quote: 'USD' }
+  ];
+
+  const scoreByCode = new Map(rawItems.map((i) => [i.code, i.score]));
+  candidatePairs.forEach((cand) => {
+    const baseScore = scoreByCode.get(cand.base) ?? 0;
+    const quoteScore = scoreByCode.get(cand.quote) ?? 0;
+    const diff = baseScore - quoteScore;
+    if (Math.abs(diff) > bestSpread) {
+      bestSpread = Math.abs(diff);
+      bestPair = cand.pair;
+      bestDir = diff >= 0 ? 'BUY' : 'SELL';
+    }
+  });
+
+  // Reference check to suppress unused map warning if extended later
+  void CURRENCY_PAIR_MATRIX_MAP;
+
+  return {
+    rankings,
+    strongest,
+    weakest,
+    topDivergencePair: bestPair,
+    topDivergenceDirection: bestDir,
+    divergenceSpread: Math.max(0, strongest.score - weakest.score),
+    summaryText: `Strongest ${strongest.code} (${strongest.score >= 0 ? `+${strongest.score}` : strongest.score}) vs Weakest ${weakest.code} (${weakest.score >= 0 ? `+${weakest.score}` : weakest.score}) → Best Momentum Focus: ${bestPair} (${bestDir})`
   };
 }
 
@@ -5032,7 +5361,7 @@ const inFlightSnapshotPromiseRef: { current: Promise<{ markets: MarketScanData[]
 };
 
 /**
- * Fetches live FX, Gold, and BTC spot prices & OHLC candles across all 10 markets simultaneously
+ * Fetches live FX, Gold, Indices, Oil, and Crypto spot prices & OHLC candles across all 15 markets simultaneously
  * via server institutional cache + direct exchange fallback.
  */
 export async function fetchLiveMarketSnapshot(
@@ -5413,7 +5742,7 @@ export function computeCandleSwingLevels(candles?: OhlcCandle[]): {
 
 /**
  * Generates the comprehensive Daily Global Trade Safety & Macro Factors report (Pillar 09)
- * answering whether it is safe to BUY or SELL today across all 10 markets, auto-updating
+ * answering whether it is safe to BUY or SELL today across all 15 markets, auto-updating
  * every second with live market telemetry and Kenya EAT countdown timers.
  */
 export function computeDailyMacroSafetyReport(
@@ -5787,6 +6116,7 @@ export interface GlobalStreamState {
   orderHistory: ClosedOrderHistoryEntry[];
   suggestedSignals: SuggestedSignalLogEntry[];
   notifications: TradeNotification[];
+  priceAlerts: PriceAlertRule[];
   superAiAutoEnabled: boolean;
   superAiNotes: Partial<Record<CurrencyPair, SuperAiLiveNote>>;
   deepAudits: Partial<Record<CurrencyPair, DeepVerifyResult>>;
@@ -5806,6 +6136,7 @@ const ACTIVE_ORDERS_STORAGE_KEY = 'pivotfx_active_market_orders_v1';
 const CLOSED_ORDERS_STORAGE_KEY = 'pivotfx_closed_orders_history_v1';
 const SUGGESTED_SIGNALS_STORAGE_KEY = 'pivotfx_suggested_signals_v1';
 const NOTIFICATIONS_STORAGE_KEY = 'pivotfx_trade_notifications_v1';
+const PRICE_ALERTS_STORAGE_KEY = 'pivotfx_price_alerts_v1';
 const BROKER_STORAGE_KEY = 'pivotfx_selected_broker_v1';
 const PROP_TRADES_STORAGE_KEY = 'pivotfx_prop_trades';
 
@@ -5844,6 +6175,16 @@ function loadPersistedNotifications(): TradeNotification[] {
     if (typeof window === 'undefined') return [];
     const raw = window.localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
     return raw ? (JSON.parse(raw) as TradeNotification[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadPersistedPriceAlerts(): PriceAlertRule[] {
+  try {
+    if (typeof window === 'undefined') return [];
+    const raw = window.localStorage.getItem(PRICE_ALERTS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as PriceAlertRule[]) : [];
   } catch {
     return [];
   }
@@ -5901,6 +6242,7 @@ class GlobalLiveMarketStreamEngine {
   private orderHistory: ClosedOrderHistoryEntry[] = loadPersistedOrderHistory();
   private suggestedSignals: SuggestedSignalLogEntry[] = loadPersistedSuggestedSignals();
   private notifications: TradeNotification[] = loadPersistedNotifications();
+  private priceAlerts: PriceAlertRule[] = loadPersistedPriceAlerts();
   private superAiAutoEnabled: boolean = true;
   private superAiNotes: Partial<Record<CurrencyPair, SuperAiLiveNote>> = {};
   private deepAudits: Partial<Record<CurrencyPair, DeepVerifyResult>> = {};
@@ -5940,9 +6282,8 @@ class GlobalLiveMarketStreamEngine {
 
   private persistSuggestedSignals() {
     try {
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(SUGGESTED_SIGNALS_STORAGE_KEY, JSON.stringify(this.suggestedSignals));
-      }
+      if (typeof window === 'undefined') return;
+      window.localStorage.setItem(SUGGESTED_SIGNALS_STORAGE_KEY, JSON.stringify(this.suggestedSignals));
     } catch {}
   }
 
@@ -5950,6 +6291,14 @@ class GlobalLiveMarketStreamEngine {
     try {
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(this.notifications));
+      }
+    } catch {}
+  }
+
+  private persistPriceAlerts() {
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(PRICE_ALERTS_STORAGE_KEY, JSON.stringify(this.priceAlerts));
       }
     } catch {}
   }
@@ -6049,6 +6398,98 @@ class GlobalLiveMarketStreamEngine {
     this.notifications = [];
     this.persistNotifications();
     this.broadcast();
+  }
+
+  public addPriceAlert(params: {
+    pair: CurrencyPair;
+    targetPrice: number;
+    label?: string;
+    condition?: 'ABOVE' | 'BELOW';
+  }): PriceAlertRule | null {
+    if (!Number.isFinite(params.targetPrice) || params.targetPrice <= 0) return null;
+    const { decimals } = getPairSpecs(params.pair);
+    const liveMkt = this.markets.find((m) => m.pair === params.pair);
+    const currentPrice = liveMkt?.price ?? params.targetPrice;
+    const targetRounded = Number(params.targetPrice.toFixed(decimals));
+    const condition: 'ABOVE' | 'BELOW' =
+      params.condition || (targetRounded >= currentPrice ? 'ABOVE' : 'BELOW');
+
+    const rule: PriceAlertRule = {
+      id: `pa_${Date.now()}_${params.pair.replace('/', '')}_${Math.random().toString(36).slice(2, 5)}`,
+      pair: params.pair,
+      condition,
+      targetPrice: targetRounded,
+      label: (params.label || 'Target Alert').trim(),
+      createdAtEat: this.formatNowEat(),
+      triggered: false
+    };
+
+    // Replace duplicate identical pair + target alert if armed
+    this.priceAlerts = [
+      rule,
+      ...this.priceAlerts.filter(
+        (a) => !(a.pair === rule.pair && Math.abs(a.targetPrice - rule.targetPrice) < Math.pow(10, -decimals))
+      )
+    ].slice(0, 35);
+    this.persistPriceAlerts();
+    this.broadcast();
+    return rule;
+  }
+
+  public removePriceAlert(id: string) {
+    this.priceAlerts = this.priceAlerts.filter((a) => a.id !== id);
+    this.persistPriceAlerts();
+    this.broadcast();
+  }
+
+  public clearTriggeredAlerts() {
+    this.priceAlerts = this.priceAlerts.filter((a) => !a.triggered);
+    this.persistPriceAlerts();
+    this.broadcast();
+  }
+
+  private checkPriceAlertsAgainstMarkets() {
+    if (this.priceAlerts.length === 0) return;
+    let changed = false;
+    const nowEat = this.formatNowEat();
+    const hitRules: PriceAlertRule[] = [];
+
+    this.priceAlerts = this.priceAlerts.map((alert) => {
+      if (alert.triggered) return alert;
+      const mkt = this.markets.find((m) => m.pair === alert.pair);
+      if (!mkt || mkt.price <= 0) return alert;
+      const hit =
+        alert.condition === 'ABOVE'
+          ? mkt.price >= alert.targetPrice
+          : mkt.price <= alert.targetPrice;
+      if (!hit) return alert;
+      changed = true;
+      const updated: PriceAlertRule = {
+        ...alert,
+        triggered: true,
+        triggeredAtEat: nowEat,
+        triggeredPrice: mkt.price
+      };
+      hitRules.push(updated);
+      return updated;
+    });
+
+    if (changed) {
+      this.persistPriceAlerts();
+      hitRules.forEach((rule) => {
+        this.pushNotification({
+          pair: rule.pair,
+          type: 'PRICE_ALERT',
+          title: `PRICE ALERT HIT · ${rule.pair} @ ${rule.triggeredPrice}`,
+          message: `${rule.label} (${rule.condition === 'ABOVE' ? '≥' : '≤'} ${rule.targetPrice}) triggered live at ${rule.triggeredAtEat}. Open chart to verify setup.`
+        });
+        try {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('pivotfx:price-alert-hit', { detail: rule }));
+          }
+        } catch {}
+      });
+    }
   }
 
   public logSuggestedSetup(params: {
@@ -6270,6 +6711,7 @@ class GlobalLiveMarketStreamEngine {
       orderHistory: [...this.orderHistory],
       suggestedSignals: [...this.suggestedSignals],
       notifications: [...this.notifications],
+      priceAlerts: [...this.priceAlerts],
       superAiAutoEnabled: this.superAiAutoEnabled,
       superAiNotes: { ...this.superAiNotes },
       deepAudits: { ...this.deepAudits },
@@ -7240,6 +7682,7 @@ class GlobalLiveMarketStreamEngine {
     // Dynamic sorting strictly from Top % down to Least % across all markets!
     this.markets = sortMarketsByTopPercent(updatedList, 'PCT_DESC');
     this.syncActiveOrdersWithMarkets();
+    this.checkPriceAlertsAgainstMarkets();
     if (
       scanMode === 'auto_1s' &&
       this.dailyMacroDirective.source !== 'gemini-4-hydrogen' &&
@@ -7638,6 +8081,7 @@ class GlobalLiveMarketStreamEngine {
       previousRank: prevRanks.get(m.pair)
     }));
     this.syncActiveOrdersWithMarkets();
+    this.checkPriceAlertsAgainstMarkets();
     this.syncedAt = tickStr;
     this.broadcast();
   }

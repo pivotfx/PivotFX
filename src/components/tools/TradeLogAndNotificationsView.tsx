@@ -9,12 +9,16 @@ import {
   ActiveMarketOrder,
   ClosedOrderHistoryEntry,
   MarketScanData,
+  RiskManagementConfig,
   globalLiveStream,
   computeLiveOrderMetrics,
+  evaluatePortfolioRiskExposure,
   getCurrentMacroContext,
-  getPairSpecs
+  getPairSpecs,
+  positionRiskStore
 } from '../../utils/liveMarketEngine';
 import {
+  AlertTriangle,
   Bot,
   Check,
   CheckCircle2,
@@ -101,6 +105,9 @@ export const TradeLogAndNotificationsView: React.FC<TradeLogAndNotificationsView
   const [coachAdviceByPair, setCoachAdviceByPair] = useState<
     Partial<Record<CurrencyPair, PositionCoachAdvice>>
   >({});
+  const [riskConfig, setRiskConfig] = useState<RiskManagementConfig>(() =>
+    positionRiskStore.getConfig()
+  );
 
   useEffect(() => {
     const unsubscribe = globalLiveStream.subscribe((state) => {
@@ -110,7 +117,11 @@ export const TradeLogAndNotificationsView: React.FC<TradeLogAndNotificationsView
       setOrderHistory(state.orderHistory);
       setSuggestedSignals(state.suggestedSignals);
     });
-    return () => unsubscribe();
+    const unsubRisk = positionRiskStore.subscribe((cfg) => setRiskConfig(cfg));
+    return () => {
+      unsubscribe();
+      unsubRisk();
+    };
   }, []);
 
   // Pre-fill manual broker form defaults whenever formPair changes
@@ -223,12 +234,16 @@ export const TradeLogAndNotificationsView: React.FC<TradeLogAndNotificationsView
           timeframe: order.timeframe,
           broker: order.broker.toUpperCase(),
           entryPrice: order.entryPrice,
-          currentPrice: mkt.price,
+          livePrice: mkt.price,
           stopLoss: order.stopLoss,
           tp1: order.tp1,
           tp2: order.tp2,
+          tp3: order.tp3,
           floatingPips: metrics.floatingPips,
           netProfitUsd: metrics.netProfitUsd,
+          netProfitKes: metrics.netProfitKes,
+          keyLevel: mkt.keyLevel,
+          trendDirection: mkt.trendDirection,
           ema20: mkt.ema20,
           ema50: mkt.ema50,
           rsi: mkt.rsi,
@@ -400,6 +415,28 @@ export const TradeLogAndNotificationsView: React.FC<TradeLogAndNotificationsView
             </span>
           </div>
         </div>
+
+        {(() => {
+          const portfolioExposure = evaluatePortfolioRiskExposure(activeOrders, riskConfig);
+          if (portfolioExposure.severity === 'SAFE' || !portfolioExposure.warningHeadline) {
+            return null;
+          }
+          return (
+            <div
+              className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 font-sans ${
+                portfolioExposure.severity === 'HIGH_STACKED_RISK'
+                  ? 'bg-red-950/45 border-red-500/55 text-red-200'
+                  : 'bg-amber-950/45 border-amber-500/50 text-amber-200'
+              }`}
+            >
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+              <div>
+                <strong className="font-mono text-white block">{portfolioExposure.warningHeadline}</strong>
+                <span>{portfolioExposure.warningDetail}</span>
+              </div>
+            </div>
+          );
+        })()}
 
         {statusBanner && (
           <div className="p-3 rounded-xl bg-emerald-950/60 border border-[#00C261]/50 text-emerald-200 text-xs flex items-center gap-2">

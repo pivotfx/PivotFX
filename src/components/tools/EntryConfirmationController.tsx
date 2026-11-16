@@ -7,6 +7,7 @@ import {
   evaluateOrderEntryMoment,
   evaluateOrderTrendSustainability,
   computeLiveOrderMetrics,
+  getUpcomingEconomicEvents,
   EntryMomentVerdict,
   TrendSustainabilityVerdict,
   globalLiveStream
@@ -35,7 +36,6 @@ import {
 import { audioAlertEngine } from '../../utils/audioAlerts';
 import {
   saveJournalTrade,
-  checkPairNewsLockout,
   getStoredPropAccount
 } from '../../utils/propDeskStorage';
 
@@ -145,8 +145,27 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
 
   const sustainability: TrendSustainabilityVerdict = evaluateOrderTrendSustainability(computed);
 
-  // Active Prop Guard and News Checks
-  const activeNewsLockout = checkPairNewsLockout(pair);
+  // Active Prop Guard and Live EAT News Checks
+  const activeNewsLockout = (() => {
+    if (kenyaTiming.windowStatusCode === 'CLOSED_WAIT') return null;
+    const matched = getUpcomingEconomicEvents().find((ev) => {
+      const affectsPair =
+        ev.currency === 'XAU/USD'
+          ? pair === 'XAU/USD'
+          : ev.currency === 'USD'
+          ? pair.includes('USD') || pair === 'US30' || pair === 'NAS100' || pair === 'USOIL'
+          : pair.includes(ev.currency);
+      return (
+        affectsPair &&
+        (ev.status === 'ACTIVE_NOW' || (ev.status === 'IMMINENT' && ev.minutesUntil <= 15))
+      );
+    });
+    if (!matched) return null;
+    return {
+      title: matched.name,
+      minutesUntilRelease: Math.max(0, matched.minutesUntil),
+    };
+  })();
   const propAccount = getStoredPropAccount();
   const isDeskLocked = propAccount.isCircuitBreakerTripped;
 
@@ -356,7 +375,7 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
       {activeNewsLockout && (
         <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-200 text-xs flex items-center justify-between">
           <div className="flex items-center space-x-2.5">
-            <Radio className="w-4 h-4 text-rose-400 animate-pulse shrink-0" />
+            <Radio className="w-4 h-4 text-rose-400 shrink-0" />
             <div>
               <span className="font-bold block text-rose-300">RED-FOLDER VOLATILITY ALERT: {activeNewsLockout.title}</span>
               <span className="text-[10px] text-amber-300/80">Release in {activeNewsLockout.minutesUntilRelease}m. High slippage warning for {pair}.</span>

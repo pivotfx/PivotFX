@@ -6,7 +6,9 @@ import {
   DEFAULT_RISK_MANAGEMENT_CONFIG,
   RiskManagementConfig,
   computeDynamicPositionRiskPlan,
+  evaluatePortfolioRiskExposure,
   getPairSpecs,
+  globalLiveStream,
   positionRiskStore
 } from '../../utils/liveMarketEngine';
 import { getStoredPropAccount } from '../../utils/propDeskStorage';
@@ -57,7 +59,14 @@ export const DynamicPositionSizeCalculator: React.FC<DynamicPositionSizeCalculat
       : ''
   );
 
+  const [activeOrders, setActiveOrders] = useState<Partial<Record<CurrencyPair, ActiveMarketOrder>>>(
+    () => globalLiveStream.getState().activeOrders
+  );
+
   useEffect(() => {
+    const unsubOrders = globalLiveStream.subscribe((st) => {
+      setActiveOrders(st.activeOrders);
+    });
     const unsub = positionRiskStore.subscribe((nextCfg) => {
       setRiskConfig(nextCfg);
       setBalanceInput((prev) => {
@@ -80,7 +89,10 @@ export const DynamicPositionSizeCalculator: React.FC<DynamicPositionSizeCalculat
           : prev;
       });
     });
-    return () => unsub();
+    return () => {
+      unsubOrders();
+      unsub();
+    };
   }, []);
 
   const riskPlan =
@@ -95,6 +107,11 @@ export const DynamicPositionSizeCalculator: React.FC<DynamicPositionSizeCalculat
   const { isGold, pipMultiplier, pipValPerStandardLot } = getPairSpecs(pair);
   const decimals = computed.decimals;
   const isBuy = computed.direction === 'BUY';
+  const portfolioExposure = evaluatePortfolioRiskExposure(activeOrders, riskConfig, {
+    pair,
+    direction: computed.direction,
+    riskUsd: riskPlan.actualRiskUsd
+  });
 
   const handleBalanceChange = (raw: string) => {
     setBalanceInput(raw);
@@ -552,6 +569,25 @@ export const DynamicPositionSizeCalculator: React.FC<DynamicPositionSizeCalculat
           </span>
         </div>
       )}
+
+      {!lockedOrder &&
+        portfolioExposure.openOrderCount > 0 &&
+        portfolioExposure.severity !== 'SAFE' &&
+        portfolioExposure.warningHeadline && (
+          <div
+            className={`p-2.5 rounded-xl border text-[11px] flex items-start gap-2 font-sans ${
+              portfolioExposure.severity === 'HIGH_STACKED_RISK'
+                ? 'bg-red-950/45 border-red-500/50 text-red-200'
+                : 'bg-amber-950/45 border-amber-500/45 text-amber-200'
+            }`}
+          >
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <span>
+              <strong className="font-mono text-white">{portfolioExposure.warningHeadline}: </strong>
+              {portfolioExposure.warningDetail}
+            </span>
+          </div>
+        )}
     </div>
   );
 };

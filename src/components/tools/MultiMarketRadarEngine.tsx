@@ -13,6 +13,8 @@ import {
   evaluatePairKenyaTiming,
   getCurrentMacroContext,
   getUpcomingEconomicEvents,
+  evaluateMultiTimeframeAlignment,
+  evaluatePortfolioRiskExposure,
   evaluateOrderEntryMoment,
   evaluateOrderTrendSustainability,
   EntryMomentVerdict,
@@ -28,6 +30,8 @@ import { LiveInteractiveCandleChart } from './LiveInteractiveCandleChart';
 import { ActiveMarketOrderPanel } from './ActiveMarketOrderPanel';
 import { DynamicPositionSizeCalculator } from './DynamicPositionSizeCalculator';
 import { DeepScanVerificationPanel } from './DeepScanVerificationPanel';
+import { CurrencyStrengthMatrixStrip } from './CurrencyStrengthMatrixStrip';
+import { PriceAlertManagerBar } from './PriceAlertManagerBar';
 import { ConfluenceMatrixModal } from '../prop/ConfluenceMatrixModal';
 import { PropDrawdownGuardModal } from '../prop/PropDrawdownGuardModal';
 import { NewsGuardModal } from '../prop/NewsGuardModal';
@@ -36,9 +40,8 @@ import { audioAlertEngine } from '../../utils/audioAlerts';
 import {
   getStoredJournalTrades,
   getStoredPropAccount,
-  computeConfluenceMatrix
 } from '../../utils/propDeskStorage';
-import { JournalTrade, PropAccountConfig } from '../../types/propDesk';
+import { JournalTrade, PropAccountConfig, ConfluenceMatrixItem } from '../../types/propDesk';
 import {
   RefreshCw,
   Sparkles,
@@ -69,7 +72,11 @@ import {
   Volume2,
   VolumeX,
   Radio,
-  ExternalLink
+  ExternalLink,
+  Search,
+  LayoutGrid,
+  Table2,
+  Bell
 } from 'lucide-react';
 
 export type { MarketScanData };
@@ -117,11 +124,13 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
   const [isRescanningCard, setIsRescanningCard] = useState(false);
   const [isReanalysingCardAi, setIsReanalysingCardAi] = useState(false);
   const [filterBias, setFilterBias] = useState<
-    'ALL' | 'GRADE_A' | 'PCT_MOVERS' | 'BUY' | 'SELL' | 'FLIPPED'
+    'ALL' | 'READY' | 'GRADE_A' | 'PCT_MOVERS' | 'BUY' | 'SELL' | 'FLIPPED'
   >('ALL');
   const [assetCategory, setAssetCategory] = useState<
     'ALL' | 'CRYPTO' | 'FOREX' | 'INDICES' | 'COMMODITIES'
   >('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [radarViewMode, setRadarViewMode] = useState<'cards' | 'table'>('cards');
   const [selectedPair, setSelectedPair] = useState<CurrencyPair | null>(
     () => globalLiveStream.getState().selectedPair
   );
@@ -179,9 +188,14 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
       setActiveOrders(streamState.activeOrders);
     });
     const unsubRisk = positionRiskStore.subscribe((nextCfg) => setRiskConfig(nextCfg));
+    const handlePropTradesUpdated = () => {
+      setJournalTrades(getStoredJournalTrades());
+    };
+    window.addEventListener('pivotfx:prop-trades-updated', handlePropTradesUpdated);
     return () => {
       unsubscribe();
       unsubRisk();
+      window.removeEventListener('pivotfx:prop-trades-updated', handlePropTradesUpdated);
     };
   }, []);
 
@@ -225,7 +239,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
     globalLiveStream.setSelectedPair(null);
 
     if (mode === 'h1_trend_lock') {
-      // Anchor all 10 markets to H1 institutional structure
+      // Anchor all 15 markets to H1 institutional structure
       markets.forEach((m) => {
         globalLiveStream.setPairTimeframe(m.pair, 'H1');
       });
@@ -335,7 +349,18 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
 
   // Filtered & Sorted Markets: always Top % to Least % unless user picks |%| or BUY/SELL filter
   const filteredMarkets = (() => {
+    const q = searchQuery.trim().toLowerCase();
     const base = markets.filter((m) => {
+      // 0. Search query filter
+      if (
+        q &&
+        !m.pair.toLowerCase().includes(q) &&
+        !m.symbol.toLowerCase().includes(q) &&
+        !(m.recommendedStrategy || '').toLowerCase().includes(q)
+      ) {
+        return false;
+      }
+
       // 1. Asset class category filter
       if (assetCategory === 'CRYPTO' && m.pair !== 'BTC/USD' && m.pair !== 'ETH/USD') return false;
       if (
@@ -346,6 +371,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
       if (assetCategory === 'COMMODITIES' && !['XAU/USD', 'USOIL'].includes(m.pair)) return false;
 
       // 2. Bias / Signal filter
+      if (filterBias === 'READY') return m.executionReadiness === 'READY_ENTER';
       if (filterBias === 'BUY') return m.bias === 'STRONG_BUY';
       if (filterBias === 'SELL') return m.bias === 'STRONG_SELL';
       if (filterBias === 'FLIPPED') return Boolean(m.directionFlipped);
@@ -369,13 +395,61 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
     return getCurrentMacroContext(pctMap);
   })();
 
-  const confluenceItems = (() => {
-    const trends: Record<string, 'BUY' | 'SELL' | 'NEUTRAL'> = {};
-    markets.forEach((m) => {
-      trends[m.pair] = m.h1TrendDirection === 'UPTREND' || m.change24hPct >= 0 ? 'BUY' : 'SELL';
-    });
-    return computeConfluenceMatrix(trends);
-  })();
+  const confluenceItems: ConfluenceMatrixItem[] = markets
+    .map((m) => {
+      const align =
+        m.mtfAlignment ||
+        evaluateMultiTimeframeAlignment({
+          pair: m.pair,
+          price: m.price,
+          ema20: m.ema20,
+          ema50: m.ema50,
+          h1TrendDirection:
+            m.h1TrendDirection || (m.bias === 'STRONG_SELL' ? 'DOWNTREND' : 'UPTREND'),
+          change24hPct: m.change24hPct,
+          macro: macroContext
+        });
+      const toSignal = (dir: 'BULLISH' | 'BEARISH'): 'BUY' | 'SELL' =>
+        dir === 'BULLISH' ? 'BUY' : 'SELL';
+      const m5 = toSignal(align.m5);
+      const m15 = toSignal(align.m15);
+      const h1 = toSignal(align.h1);
+      const h4 = toSignal(align.h4);
+      const buys = [m5, m15, h1, h4].filter((s) => s === 'BUY').length;
+      const sells = 4 - buys;
+      const stars = Math.max(buys, sells);
+      let bias: ConfluenceMatrixItem['bias'] = 'MIXED';
+      if (buys === 4) bias = 'STRONG BUY';
+      else if (sells === 4) bias = 'STRONG SELL';
+      else if (buys === 3) bias = 'BUY';
+      else if (sells === 3) bias = 'SELL';
+
+      return {
+        pair: m.pair,
+        m5,
+        m15,
+        h1,
+        h4,
+        stars,
+        bias,
+        isInstitutionalLock: stars === 4
+      };
+    })
+    .sort((a, b) => b.stars - a.stars);
+
+  const liveExposureSummary = evaluatePortfolioRiskExposure(activeOrders, riskConfig);
+  const openOrdersList = Object.values(activeOrders).filter(
+    (o): o is ActiveMarketOrder => Boolean(o)
+  );
+  const liveFloatingUsd = Number(
+    openOrdersList
+      .reduce((sum, ord) => {
+        const mkt = markets.find((m) => m.pair === ord.pair);
+        if (!mkt) return sum;
+        return sum + computeLiveOrderMetrics(ord, mkt.price, mkt.atrPips).netProfitUsd;
+      }, 0)
+      .toFixed(2)
+  );
 
   const topLeader = filteredMarkets[0] || markets[0];
   const focusedMarket = selectedPair ? markets.find((m) => m.pair === selectedPair) || null : null;
@@ -413,7 +487,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
             onClick={() => setShowDrawdownModal(true)}
             className={`px-3 py-1.5 rounded-xl border text-xs font-mono font-bold flex items-center space-x-1.5 transition active:scale-95 ${
               propAccount.isCircuitBreakerTripped
-                ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 animate-pulse'
+                ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
                 : 'bg-slate-900 hover:bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
             }`}
             title="Open Prop Firm Drawdown Meter & Circuit Breaker"
@@ -429,7 +503,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
             className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-mono font-bold flex items-center space-x-1.5 transition active:scale-95"
             title="High-Impact Red Folder Economic Calendar"
           >
-            <Radio className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+            <Radio className="w-3.5 h-3.5 text-rose-400" />
             <span>News Guard</span>
           </button>
 
@@ -589,7 +663,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
               <span
                 className={`px-2.5 py-1 rounded-lg font-black text-[10px] flex items-center gap-1.5 ${
                   activeOrImminent
-                    ? 'bg-amber-400 text-black animate-pulse'
+                    ? 'bg-amber-400 text-black'
                     : 'bg-emerald-950/80 text-[#00C261] border border-[#00C261]/50'
                 }`}
               >
@@ -620,7 +694,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
       {/* =========================================================================
           VIEW A: SINGLE SELECTED MARKET CHART & DEEP AI WORKSPACE
           Opens ONLY when user clicks a specific card! Includes independent card
-          Rescan, Reanalyse with Super AI, and Back to All 10 Cards buttons.
+          Rescan, Reanalyse with Super AI, and Back to All 15 Cards buttons.
           ========================================================================= */}
       {focusedMarket ? (
         (() => {
@@ -1123,6 +1197,16 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                     </div>
                   </div>
                 </div>
+
+                {/* REAL-TIME PRICE ALERT TRIGGER BAR FOR FOCUSED PAIR */}
+                <PriceAlertManagerBar
+                  mode="pair"
+                  pair={focusedMarket.pair}
+                  livePrice={focusedMarket.price}
+                  ema20={focusedMarket.ema20}
+                  bosLevel={computed.bosAnalysis?.bosTriggerLevel || 0}
+                  tp1={shownTp1}
+                />
 
                 {/* 5 CLICKABLE INDEPENDENT SUB-CARD TABS */}
                 <div className="pt-2 border-t border-slate-800">
@@ -1636,6 +1720,18 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
             onInspectPairCard={(targetPair) => handleOpenPairCard(targetPair)}
           />
 
+          {/* LIVE 8-CURRENCY STRENGTH METER & TOP DIVERGENCE ENGINE */}
+          <CurrencyStrengthMatrixStrip
+            markets={markets}
+            onSelectPair={(targetPair) => handleOpenPairCard(targetPair)}
+          />
+
+          {/* ACTIVE LIVE PRICE ALERT WATCHLIST STRIP */}
+          <PriceAlertManagerBar
+            mode="global"
+            onInspectPair={(targetPair) => handleOpenPairCard(targetPair)}
+          />
+
           {/* #1 Live Top % Leader Quick Strip */}
           {topLeader && (() => {
             const topSwings = computeCandleSwingLevels(topLeader.candles);
@@ -1765,13 +1861,13 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
             );
           })()}
 
-          {/* Asset Class Category Selector */}
+          {/* Asset Class Category Selector + Live Search + View Mode Switch */}
           <div className="flex flex-wrap items-center justify-between gap-2.5 bg-slate-950 p-3 rounded-2xl border border-slate-800 text-xs font-mono">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-slate-400 font-bold mr-1">Asset Class:</span>
               {[
                 { id: 'ALL', label: `All Markets (${markets.length})` },
-                { id: 'CRYPTO', label: '🟢 24/7 Crypto (BTC & ETH - Open Now!)' },
+                { id: 'CRYPTO', label: '24/7 Crypto (BTC & ETH)' },
                 { id: 'FOREX', label: 'Forex Majors & Crosses' },
                 { id: 'INDICES', label: 'Indices (US30 / NAS100 / GER40)' },
                 { id: 'COMMODITIES', label: 'Commodities (Gold & Oil)' }
@@ -1790,45 +1886,99 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                 </button>
               ))}
             </div>
-            <span className="text-[11px] text-slate-400 font-mono">
-              Showing {filteredMarkets.length} of {markets.length} pairs
-            </span>
-          </div>
 
-          {/* WEEKEND / MARKET CLOSED STRATEGIC ADVISORY SHIELD */}
-          <div className="p-4 rounded-2xl bg-[#120D0A] border border-amber-500/50 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs font-mono">
-            <div className="flex items-start gap-3">
-              <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40 shrink-0 mt-0.5">
-                <Clock className="w-5 h-5" />
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Filter pair..."
+                  aria-label="Filter markets by pair or strategy"
+                  className="w-36 sm:w-44 pl-8 pr-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 focus:border-[#D4AF37] text-xs text-white placeholder:text-slate-500 outline-none"
+                />
               </div>
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="px-2 py-0.5 rounded-md bg-amber-400 text-black font-black text-[10px]">
-                    MARKET CLOSED ADVISORY
-                  </span>
-                  <strong className="text-white text-sm">
-                    Is it advisable to trade when the market is closed? ABSOLUTELY NOT.
-                  </strong>
-                </div>
-                <p className="text-amber-200/90 text-xs leading-relaxed">
-                  Forex, Metals (Gold), and Indices close every Friday night and do not reopen until Sunday 23:55 EAT. Placing market orders during closed hours is dangerous: spreads widen 10x–50x, orders will be rejected by MT4/MT5 brokers, and you incur catastrophic Sunday night gap risk.
-                </p>
-                <div className="flex items-center gap-2 flex-wrap text-[11px] pt-0.5">
-                  <span className="text-[#00C261] font-bold">
-                    ✓ ACTIVE 24/7 ALTERNATIVE: Trade <strong>BTC/USD</strong> or <strong>ETH/USD</strong>!
-                  </span>
-                  <span className="text-slate-400">Crypto never closes and retains normal tight spreads right now.</span>
-                </div>
+
+              <div className="flex items-center gap-1 p-0.5 rounded-xl bg-slate-900 border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setRadarViewMode('cards')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold inline-flex items-center gap-1 transition whitespace-nowrap ${
+                    radarViewMode === 'cards'
+                      ? 'bg-[#D4AF37] text-black font-black'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span>Cards</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRadarViewMode('table')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold inline-flex items-center gap-1 transition whitespace-nowrap ${
+                    radarViewMode === 'table'
+                      ? 'bg-[#D4AF37] text-black font-black'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Table2 className="w-3.5 h-3.5" />
+                  <span>Pro Matrix</span>
+                </button>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setAssetCategory('CRYPTO')}
-              className="px-4 py-2.5 rounded-xl bg-[#00C261] hover:bg-emerald-400 text-black font-black text-xs shrink-0 whitespace-nowrap transition shadow-lg shadow-[#00C261]/20"
-            >
-              Trade 24/7 Crypto Now 🟢
-            </button>
           </div>
+
+          {/* CONTEXT-AWARE SESSION LIQUIDITY & WEEKEND SAFETY STRIP */}
+          {(() => {
+            const fxTiming = evaluatePairKenyaTiming('EUR/USD');
+            const fxClosed = fxTiming.windowStatusCode === 'CLOSED_WAIT';
+            if (fxClosed) {
+              return (
+                <div className="p-4 rounded-2xl bg-[#120D0A] border border-amber-500/50 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs font-mono">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40 shrink-0 mt-0.5">
+                      <Clock className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-amber-300 font-black text-[10px]">MARKET CLOSED ADVISORY</span>
+                        <span className="text-slate-600">·</span>
+                        <strong className="text-white text-sm">
+                          Forex &amp; Metals Closed — Opens in {fxTiming.countdownFormatted}
+                        </strong>
+                      </div>
+                      <p className="text-amber-200/90 text-xs font-sans leading-relaxed">
+                        Spreads widen 10x–50x during weekend/rollover closures. Avoid placing spot FX or Gold orders until sessions reopen; BTC/USD and ETH/USD remain active 24/7 with tight spreads.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAssetCategory('CRYPTO')}
+                    className="px-4 py-2.5 rounded-xl bg-[#00C261] hover:bg-emerald-400 text-black font-black text-xs shrink-0 whitespace-nowrap transition"
+                  >
+                    Filter 24/7 Crypto
+                  </button>
+                </div>
+              );
+            }
+            return (
+              <div className="px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+                <div className="flex items-center gap-2 text-slate-300">
+                  <Radio className="w-3.5 h-3.5 text-[#00C261] shrink-0" />
+                  <strong className="text-[#00C261]">EXCHANGES LIVE</strong>
+                  <span className="text-slate-600">·</span>
+                  <span>{fxTiming.windowBadgeShort}</span>
+                  <span className="text-slate-600">·</span>
+                  <span className="text-slate-400">Normal Interbank Spreads Active Across {markets.length} Pairs</span>
+                </div>
+                <span className="text-[11px] text-[#D4AF37] font-bold">
+                  Showing {filteredMarkets.length} of {markets.length} pairs
+                </span>
+              </div>
+            );
+          })()}
 
           {/* Filter & Ranking Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/70 p-3.5 rounded-2xl border border-slate-800">
@@ -1836,7 +1986,8 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
               <span className="text-xs font-mono text-slate-400 font-bold mr-1">Order / Filter:</span>
               {([
                 { id: 'ALL', label: `Top % → Least (#1–#${filteredMarkets.length})` },
-                { id: 'GRADE_A', label: 'Grade A+ Edge Only' },
+                { id: 'READY', label: 'Ready Now' },
+                { id: 'GRADE_A', label: 'Grade A+ Edge' },
                 { id: 'PCT_MOVERS', label: 'Largest |%| Swing' },
                 { id: 'BUY', label: 'Bullish (BUY)' },
                 { id: 'SELL', label: 'Bearish (SELL)' },
@@ -1867,7 +2018,170 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
             </button>
           </div>
 
-          {/* 10 INDEPENDENT CLICKABLE SUMMARY CARDS (Sorted Top % to Least %) */}
+          {filteredMarkets.length === 0 ? (
+            <div className="p-8 rounded-2xl bg-slate-950 border border-slate-800 text-center space-y-2 font-mono">
+              <p className="text-sm font-bold text-white">No markets match the current filter</p>
+              <p className="text-xs text-slate-400">Clear your search filter or switch back to All Markets to inspect live setups.</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setFilterBias('ALL');
+                  setAssetCategory('ALL');
+                }}
+                className="mt-2 px-4 py-2 rounded-xl btn-gold text-black font-black text-xs"
+              >
+                Reset All Filters
+              </button>
+            </div>
+          ) : radarViewMode === 'table' ? (
+            /* PRO EXECUTION MATRIX TABLE */
+            <div className="rounded-2xl bg-slate-950 border border-slate-800 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse font-mono tabular-nums text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-800 bg-[#070B14] text-[10px] text-slate-400 uppercase tracking-wider">
+                      <th className="py-3 px-3">#</th>
+                      <th className="py-3 px-3">Market</th>
+                      <th className="py-3 px-3 text-right">Live Price</th>
+                      <th className="py-3 px-3 text-right">24h %</th>
+                      <th className="py-3 px-3">Signal &amp; Verdict</th>
+                      <th className="py-3 px-3 text-right">Entry</th>
+                      <th className="py-3 px-3 text-right">Stop Loss</th>
+                      <th className="py-3 px-3 text-right">TP2 Target</th>
+                      <th className="py-3 px-3 text-right">Est. Net / R:R</th>
+                      <th className="py-3 px-3 text-right">ADX / MACD</th>
+                      <th className="py-3 px-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/70">
+                    {filteredMarkets.map((m, idx) => {
+                      const activeTf = customTfs[m.pair] || m.recommendedTf;
+                      const cardSwings = computeCandleSwingLevels(m.candles);
+                      const computed = computeRealChartTradeParams({
+                        targetPair: m.pair,
+                        targetTf: activeTf,
+                        targetBroker: selectedBroker,
+                        price: m.price,
+                        keyLevel: m.keyLevel,
+                        ema20: m.ema20,
+                        ema50: m.ema50,
+                        rsi: m.rsi,
+                        atrPips: m.atrPips,
+                        candles: m.candles,
+                        swingLow: cardSwings.swingLow,
+                        swingHigh: cardSwings.swingHigh,
+                        change24hPct: m.change24hPct,
+                        macro: macroContext,
+                        h1TrendDirection: m.h1TrendDirection,
+                        bosAnalysis: m.bosAnalysis,
+                        riskConfig
+                      });
+                      const isBuy = computed.direction === 'BUY';
+                      const pctPos = m.change24hPct >= 0;
+                      const loadedOrder = activeOrders[m.pair];
+                      return (
+                        <tr
+                          key={m.pair}
+                          onClick={() => handleOpenPairCard(m.pair)}
+                          className="hover:bg-slate-900/80 cursor-pointer transition-colors"
+                        >
+                          <td className="py-3 px-3 text-[#D4AF37] font-black">{idx + 1}</td>
+                          <td className="py-3 px-3">
+                            <div className="font-black text-white">{m.pair}</div>
+                            <div className="text-[10px] text-slate-400">
+                              {activeTf} · {computed.confidence}% AI
+                              {loadedOrder ? ' · ACTIVE' : ''}
+                            </div>
+                          </td>
+                          <td className="py-3 px-3 text-right font-bold text-[#D4AF37]">{m.price}</td>
+                          <td className={`py-3 px-3 text-right font-bold ${pctPos ? 'text-[#00C261]' : 'text-red-400'}`}>
+                            {pctPos ? `+${m.change24hPct.toFixed(2)}%` : `${m.change24hPct.toFixed(2)}%`}
+                          </td>
+                          <td className="py-3 px-3">
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
+                                  isBuy ? 'bg-[#00C261]/20 text-[#00C261]' : 'bg-red-500/20 text-red-300'
+                                }`}
+                              >
+                                {computed.direction}
+                              </span>
+                              <span className="text-[10px] text-slate-300 truncate max-w-[140px]">
+                                {computed.executionReadiness === 'READY_ENTER'
+                                  ? 'READY NOW'
+                                  : computed.executionReadiness === 'WAIT_PULLBACK'
+                                  ? 'WAIT PULLBACK'
+                                  : computed.executionReadiness === 'NO_TRADE_CLOSED'
+                                  ? 'CLOSED'
+                                  : 'CHOP'}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-3 text-right text-slate-200">{computed.entryPrice}</td>
+                          <td className="py-3 px-3 text-right text-red-300 font-bold">{computed.stopLoss}</td>
+                          <td className="py-3 px-3 text-right text-[#00C261] font-bold">{computed.tp2}</td>
+                          <td className="py-3 px-3 text-right">
+                            <span className="text-[#00C261] font-black">+${computed.netProfitUsd.toFixed(2)}</span>
+                            <span className="text-slate-500 block text-[10px]">{computed.riskReward}</span>
+                          </td>
+                          <td className="py-3 px-3 text-right">
+                            <span className="text-cyan-300 font-bold">{(computed.adxStrength ?? 21).toFixed(0)}</span>
+                            <span className="text-slate-400 block text-[10px]">{computed.macdBias || 'FLAT'}</span>
+                          </td>
+                          <td className="py-3 px-3 text-right" onClick={(e) => e.stopPropagation()}>
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const rule = globalLiveStream.addPriceAlert({
+                                    pair: m.pair,
+                                    targetPrice: m.ema20,
+                                    label: '20 EMA Pullback'
+                                  });
+                                  if (rule) {
+                                    handleQuickCopyValue(rule.targetPrice, `tbl-al-${m.pair}`);
+                                  }
+                                }}
+                                className="px-2 py-1 rounded bg-slate-900 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[10px] inline-flex items-center gap-1"
+                                title={`Arm live pullback alert at EMA20 (${m.ema20})`}
+                              >
+                                <Bell className="w-3 h-3" />
+                                <span>{copiedCardPair === `tbl-al-${m.pair}` ? 'Armed' : 'Alert'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleQuickCopyValue(computed.stopLoss, `tbl-sl-${m.pair}`)}
+                                className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-[10px]"
+                                title="Copy SL"
+                              >
+                                {copiedCardPair === `tbl-sl-${m.pair}` ? 'SL ✓' : 'SL'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onOpenTradingViewForPair(m.pair, activeTf, m.price)}
+                                className="px-2 py-1 rounded bg-sky-950/70 hover:bg-sky-500 text-sky-300 hover:text-black border border-sky-500/40 text-[10px] font-bold"
+                              >
+                                TV
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenPairCard(m.pair)}
+                                className="px-2.5 py-1 rounded bg-[#D4AF37]/20 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black text-[10px] font-black"
+                              >
+                                Inspect
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+          /* 15 INDEPENDENT CLICKABLE SUMMARY CARDS (Sorted Top % to Least %) */
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {filteredMarkets.map((m, idx) => {
               const activeTf = customTfs[m.pair] || m.recommendedTf;
@@ -1961,7 +2275,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                     {kenyaTiming.windowStatusCode === 'CLOSED_WAIT' ? (
                       <div className="flex items-center justify-between gap-1 text-[10px] bg-red-950/70 border border-red-500/60 px-2.5 py-1 rounded-xl text-red-200">
                         <span className="font-bold flex items-center gap-1.5 text-red-400">
-                          <span className="w-2 h-2 rounded-full bg-red-500" />
+                          <Clock className="w-3 h-3 shrink-0" />
                           <span>MARKET CLOSED</span>
                         </span>
                         <span className="text-amber-300 font-mono font-bold">Opens in {kenyaTiming.countdownFormatted}</span>
@@ -1969,7 +2283,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                     ) : (
                       <div className="flex items-center justify-between gap-1 text-[10px] bg-emerald-950/60 border border-[#00C261]/50 px-2.5 py-1 rounded-xl text-emerald-200">
                         <span className="font-bold flex items-center gap-1.5 text-[#00C261]">
-                          <span className="w-2 h-2 rounded-full bg-[#00C261]" />
+                          <Radio className="w-3 h-3 shrink-0" />
                           <span>{m.pair.includes('BTC') || m.pair.includes('ETH') ? '24/7 CRYPTO LIVE' : 'SESSION BELL OPEN'}</span>
                         </span>
                         <span className="text-[#00C261] font-mono font-bold">Normal Spread ✓</span>
@@ -2236,6 +2550,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
               );
             })}
           </div>
+          )}
         </div>
       )}
 
@@ -2256,6 +2571,9 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
         onClose={() => setShowDrawdownModal(false)}
         config={propAccount}
         onUpdateConfig={(newCfg) => setPropAccount(newCfg)}
+        liveFloatingUsd={liveFloatingUsd}
+        liveOpenRiskUsd={liveExposureSummary.totalOpenRiskUsd}
+        openOrdersCount={openOrdersList.length}
       />
 
       <NewsGuardModal
