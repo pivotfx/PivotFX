@@ -157,7 +157,10 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
     riskConfigRef.current = riskConfig;
   }, [riskConfig]);
 
+  const [, setEatClockTick] = useState<number>(0);
+
   useEffect(() => {
+    const tickId = window.setInterval(() => setEatClockTick((t) => (t + 1) % 86400), 1000);
     const unsubRisk = positionRiskStore.subscribe((nextCfg) => {
       setRiskConfig(nextCfg);
     });
@@ -192,7 +195,12 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
               inspectedSideRef.current !== 'AUTO' ? inspectedSideRef.current : undefined;
             const useH1 =
               tfRef.current === 'H1' || tfRef.current === 'H4' || tfRef.current === 'D1';
-            const matchCandles = useH1 ? (match.h1Candles || match.candles) : match.candles;
+            const matchCandles =
+              match.timeframe === tfRef.current
+                ? match.candles
+                : useH1
+                ? match.h1Candles || match.candles
+                : match.candles;
             const matchSwings = computeCandleSwingLevels(matchCandles);
             return computeRealChartTradeParams({
               targetPair: match.pair,
@@ -220,6 +228,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
       }
     });
     return () => {
+      window.clearInterval(tickId);
       unsubscribe();
       unsubRisk();
     };
@@ -227,6 +236,8 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
 
   const handlePairChange = (newPair: CurrencyPair) => {
     setPair(newPair);
+    globalLiveStream.setSelectedPair(newPair);
+    globalLiveStream.setPairTimeframe(newPair, timeframe);
     setLoggedToJournal(false);
     setValidationError(null);
     setIsCustomCandleLocked(false);
@@ -242,6 +253,42 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
       setPrice(base.toFixed(decimals));
     }
     fetchPairLiveCandleSnapshot(newPair, timeframe).then((snap) => {
+      setPrice(snap.price.toFixed(decimals));
+      setEma20(snap.ema20.toFixed(decimals));
+      setEma50(snap.ema50.toFixed(decimals));
+      setRsi(snap.rsi.toFixed(1));
+      setLastSyncedAt(snap.lastCandleTime);
+    });
+  };
+
+  const handleTimeframeChange = (newTf: Timeframe) => {
+    setTimeframe(newTf);
+    setLoggedToJournal(false);
+    setValidationError(null);
+    globalLiveStream.setPairTimeframe(pair, newTf);
+    const match = liveMarkets.find((m) => m.pair === pair);
+    const { decimals } = getPairSpecs(pair);
+    if (match) {
+      const useH1 = newTf === 'H1' || newTf === 'H4' || newTf === 'D1';
+      const reEval = evaluateCandleSeriesAndTick({
+        pair,
+        timeframe: newTf,
+        livePrice: parseFloat(price) || match.price,
+        baseCandles:
+          match.timeframe === newTf
+            ? match.candles
+            : useH1
+            ? match.h1Candles || match.candles
+            : match.candles,
+        candlesAreRealOhlc: match.candlesAreRealOhlc,
+        change24hPct: match.change24hPct,
+        h1TrendDirection: match.h1TrendDirection
+      });
+      setEma20(reEval.ema20.toFixed(decimals));
+      setEma50(reEval.ema50.toFixed(decimals));
+      setRsi(reEval.rsi.toFixed(1));
+    }
+    fetchPairLiveCandleSnapshot(pair, newTf).then((snap) => {
       setPrice(snap.price.toFixed(decimals));
       setEma20(snap.ema20.toFixed(decimals));
       setEma50(snap.ema50.toFixed(decimals));
@@ -568,9 +615,12 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
   const displayMacro = getCurrentMacroContext(pctMapForDisplay);
   const activePairMarket = liveMarkets.find((m) => m.pair === pair);
   const displayUseH1 = timeframe === 'H1' || timeframe === 'H4' || timeframe === 'D1';
-  const displayCandles = displayUseH1
-    ? (activePairMarket?.h1Candles || activePairMarket?.candles)
-    : activePairMarket?.candles;
+  const displayCandles =
+    activePairMarket?.timeframe === timeframe
+      ? activePairMarket?.candles
+      : displayUseH1
+      ? activePairMarket?.h1Candles || activePairMarket?.candles
+      : activePairMarket?.candles;
   const displaySwings = computeCandleSwingLevels(displayCandles);
   const displayedTicket = computedTicket
     ? computeRealChartTradeParams({
@@ -744,9 +794,12 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
         const parsedRsi = parseFloat(rsi) || activeMarketItem.rsi;
         const activeTiming = evaluatePairKenyaTiming(pair);
         const previewUseH1 = timeframe === 'H1' || timeframe === 'H4' || timeframe === 'D1';
-        const previewCandles = previewUseH1
-          ? (activeMarketItem.h1Candles || activeMarketItem.candles || [])
-          : (activeMarketItem.candles || []);
+        const previewCandles =
+          activeMarketItem.timeframe === timeframe
+            ? activeMarketItem.candles || []
+            : previewUseH1
+            ? activeMarketItem.h1Candles || activeMarketItem.candles || []
+            : activeMarketItem.candles || [];
         const previewSwings = computeCandleSwingLevels(previewCandles);
         const previewTicket = computeRealChartTradeParams({
           targetPair: pair,
@@ -774,9 +827,9 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
           <div className="space-y-4">
             <div
               className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono ${
-                activeTiming.windowStatusCode === 'OPEN'
+                activeTiming.windowStatusCode === 'OPEN' && activeTiming.isFavorableTime
                   ? 'bg-emerald-950/45 border-[#00C261]/70 text-emerald-100'
-                  : activeTiming.windowStatusCode === 'OPENING_SOON'
+                  : activeTiming.windowStatusCode === 'OPEN' || activeTiming.windowStatusCode === 'OPENING_SOON'
                   ? 'bg-amber-950/45 border-amber-400/70 text-amber-100'
                   : 'bg-red-950/55 border-red-500/80 text-red-100'
               }`}
@@ -933,7 +986,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                 label="3. Chart Timeframe"
                 options={timeframeOptions}
                 value={timeframe}
-                onChange={(val) => setTimeframe(val as Timeframe)}
+                onChange={(val) => handleTimeframeChange(val as Timeframe)}
               />
             </div>
 

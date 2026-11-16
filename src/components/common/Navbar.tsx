@@ -53,6 +53,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   }, [soundEnabled]);
 
   const [eatTime, setEatTime] = useState<string>('');
+  const [eatDay, setEatDay] = useState<string>('');
   const [sessionStatus, setSessionStatus] = useState<{ label: string; isOpen: boolean }>({
     label: 'Nairobi EAT',
     isOpen: true,
@@ -133,8 +134,20 @@ export const Navbar: React.FC<NavbarProps> = ({
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
+        hour12: false,
       });
+      const dayStr = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Africa/Nairobi',
+        weekday: 'short',
+        day: '2-digit',
+        month: 'short',
+      }).format(now);
+      const weekday = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Africa/Nairobi',
+        weekday: 'short',
+      }).format(now);
       setEatTime(timeStr);
+      setEatDay(dayStr);
 
       const eatHour = parseInt(
         now.toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', hour12: false }),
@@ -145,8 +158,14 @@ export const Navbar: React.FC<NavbarProps> = ({
         10
       );
       const totalMin = eatHour * 60 + eatMin;
+      const isWeekendClosed =
+        weekday === 'Sat' ||
+        (weekday === 'Sun' && eatHour < 23) ||
+        (weekday === 'Fri' && totalMin >= 23 * 60 + 55);
 
-      if (totalMin >= 600 && totalMin < 780) {
+      if (isWeekendClosed) {
+        setSessionStatus({ label: 'Weekend · Crypto 24/7', isOpen: false });
+      } else if (totalMin >= 600 && totalMin < 780) {
         setSessionStatus({ label: 'London Open · Open', isOpen: true });
       } else if (totalMin >= 930 && totalMin < 1170) {
         setSessionStatus({ label: 'London/NY · Open', isOpen: true });
@@ -284,7 +303,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Open Nairobi Session & Macro Safety Guard"
             >
               <Clock className="w-3.5 h-3.5 text-[#D4AF37] shrink-0" />
-              <span className="text-white font-bold tabular-nums">{eatTime} EAT</span>
+              <span className="text-white font-bold tabular-nums">{eatDay ? `${eatDay} · ` : ''}{eatTime} EAT</span>
               <span aria-hidden="true" className="hidden 2xl:inline text-slate-600">·</span>
               <span
                 className={`hidden 2xl:inline font-bold ${

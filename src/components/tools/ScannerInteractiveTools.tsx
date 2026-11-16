@@ -270,7 +270,10 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
     selectedPairRef.current = pair;
   }, [pair]);
 
+  const [, setEatClockTick] = useState<number>(0);
+
   useEffect(() => {
+    const tickId = window.setInterval(() => setEatClockTick((t) => (t + 1) % 86400), 1000);
     if (initialStreamState.selectedPair) {
       void globalLiveStream.fetchSuperAiNoteForPair(initialStreamState.selectedPair, 'M15', true);
     }
@@ -320,6 +323,7 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
     const unsubRisk = positionRiskStore.subscribe((nextCfg) => setRiskConfig(nextCfg));
     window.addEventListener('pivotfx:open-scanner-view', handleOpenScannerViewEvt);
     return () => {
+      window.clearInterval(tickId);
       unsubscribe();
       unsubRisk();
       window.removeEventListener('pivotfx:open-scanner-view', handleOpenScannerViewEvt);
@@ -389,7 +393,12 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
         pair: newPair,
         timeframe: activeTf,
         livePrice: m.price,
-        baseCandles: useH1 ? (m.h1Candles || m.candles) : m.candles,
+        baseCandles:
+          m.timeframe === activeTf
+            ? m.candles
+            : useH1
+            ? m.h1Candles || m.candles
+            : m.candles,
         candlesAreRealOhlc: m.candlesAreRealOhlc,
         change24hPct: m.change24hPct,
         h1TrendDirection: m.h1TrendDirection
@@ -2015,9 +2024,9 @@ InpMagicNumber=777129
               return (
                 <div
                   className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono ${
-                    view2Timing.windowStatusCode === 'OPEN'
+                    view2Timing.windowStatusCode === 'OPEN' && view2Timing.isFavorableTime
                       ? 'bg-emerald-950/45 border-[#00C261]/70 text-emerald-100'
-                      : view2Timing.windowStatusCode === 'OPENING_SOON'
+                      : view2Timing.windowStatusCode === 'OPEN' || view2Timing.windowStatusCode === 'OPENING_SOON'
                       ? 'bg-amber-950/45 border-amber-400/70 text-amber-100'
                       : 'bg-red-950/55 border-red-500/80 text-red-100'
                   }`}

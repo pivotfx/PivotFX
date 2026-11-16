@@ -44,7 +44,8 @@ export const NewsGuardModal: React.FC<NewsGuardModalProps> = ({
   const events = getUpcomingEconomicEvents();
   const timing = evaluatePairKenyaTiming(selectedPair as CurrencyPair);
   const macro = getCurrentMacroContext();
-  const isWeekendClosed = timing.windowStatusCode === 'CLOSED_WAIT';
+  const isWeekendClosed = Boolean(timing.isWeekendClosed);
+  const isOffSession = !isWeekendClosed && timing.windowStatusCode === 'CLOSED_WAIT';
 
   const activeRelevantLockout =
     !isWeekendClosed &&
@@ -55,15 +56,19 @@ export const NewsGuardModal: React.FC<NewsGuardModalProps> = ({
     );
 
   const spreadStatusLabel = isWeekendClosed
-    ? 'MARKET CLOSED — WAIT OPEN'
+    ? 'WEEKEND CLOSED — WAIT OPEN'
     : activeRelevantLockout
     ? 'HIGH-IMPACT NEWS LOCKOUT'
+    : isOffSession
+    ? `OFF-SESSION · OPENS IN ${timing.countdownFormatted}`
     : 'CURRENT SPREAD NORMAL';
 
   const spreadStatusClass = isWeekendClosed
     ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
     : activeRelevantLockout
     ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+    : isOffSession
+    ? 'bg-slate-800 text-amber-300 border-amber-500/30'
     : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
 
   return (

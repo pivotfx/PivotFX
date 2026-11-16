@@ -147,7 +147,7 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
 
   // Active Prop Guard and Live EAT News Checks
   const activeNewsLockout = (() => {
-    if (kenyaTiming.windowStatusCode === 'CLOSED_WAIT') return null;
+    if (kenyaTiming.isWeekendClosed) return null;
     const matched = getUpcomingEconomicEvents().find((ev) => {
       const affectsPair =
         ev.currency === 'XAU/USD'
@@ -331,9 +331,17 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
             <span>
               {entryMoment.status === 'PRIME_NOW'
                 ? `Prime EP Valid: ${formatCycleCountdown(secondsRemainingInCycle)}`
+                : kenyaTiming.isEarlySettlePhase
+                ? `Too Early · Wait ${Math.max(1, Math.ceil((kenyaTiming.earlySettleSecondsLeft || 60) / 60))}m`
+                : kenyaTiming.isClosingPhase
+                ? `Closing in ${kenyaTiming.countdownFormatted}`
+                : kenyaTiming.windowStatusCode !== 'OPEN'
+                ? `Opens in ${kenyaTiming.countdownFormatted}`
+                : activeNewsLockout
+                ? entryMoment.badge
                 : entryMoment.status === 'WAIT_PULLBACK'
                 ? `Retest Pullback Timer: ${formatCycleCountdown(secondsRemainingInCycle)}`
-                : `Opens in ${kenyaTiming.countdownFormatted}`}
+                : entryMoment.badge}
             </span>
           </span>
           <span className="text-[#00C261] font-bold">
@@ -697,9 +705,14 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
               >
                 {entryMoment.status === 'PRIME_NOW'
                   ? 'ENTRY TIMING: PRIME MOMENT CONFIRMED ✓'
-                  : entryMoment.status === 'WAIT_PULLBACK'
+                  : entryMoment.status === 'WAIT_PULLBACK' &&
+                    !kenyaTiming.isEarlySettlePhase &&
+                    !kenyaTiming.isClosingPhase &&
+                    kenyaTiming.windowStatusCode === 'OPEN' &&
+                    !activeNewsLockout &&
+                    Boolean(entryMoment.discountPips)
                   ? `WAIT PULLBACK: ${entryMoment.advisoryPrice}`
-                  : 'MARKET CLOSED · DO NOT ENTER'}
+                  : entryMoment.badge}
               </span>
             </div>
             <p className="text-xs text-white font-medium leading-snug line-clamp-1 font-sans">
@@ -711,6 +724,14 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
                 <span className="text-[#D4AF37] font-bold">
                   {entryMoment.status === 'PRIME_NOW'
                     ? `Optimal Entry Window: ${formatCycleCountdown(secondsRemainingInCycle)}`
+                    : kenyaTiming.isEarlySettlePhase
+                    ? `Settle Wait: ${Math.max(1, Math.ceil((kenyaTiming.earlySettleSecondsLeft || 60) / 60))}m (Closes ${kenyaTiming.countdownFormatted})`
+                    : kenyaTiming.isClosingPhase
+                    ? `Session Closing in ${kenyaTiming.countdownFormatted}`
+                    : kenyaTiming.windowStatusCode !== 'OPEN'
+                    ? `Opens in ${kenyaTiming.countdownFormatted}`
+                    : activeNewsLockout
+                    ? `News Caution · Session ${kenyaTiming.countdownFormatted}`
                     : entryMoment.status === 'WAIT_PULLBACK'
                     ? `Retest Pullback Countdown: ${formatCycleCountdown(secondsRemainingInCycle)}`
                     : `Opens in ${kenyaTiming.countdownFormatted}`}
@@ -734,9 +755,19 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
             >
               {entryMoment.status === 'PRIME_NOW'
                 ? 'Safe to Copy SL/TP'
-                : entryMoment.status === 'WAIT_PULLBACK'
+                : kenyaTiming.isEarlySettlePhase
+                ? 'Too Early'
+                : kenyaTiming.isClosingPhase
+                ? 'Closing Soon'
+                : kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                ? 'Opening Soon'
+                : kenyaTiming.windowStatusCode === 'CLOSED_WAIT'
+                ? 'Session Closed'
+                : activeNewsLockout
+                ? 'News Caution'
+                : entryMoment.status === 'WAIT_PULLBACK' && entryMoment.discountPips
                 ? `Save ${entryMoment.discountPips}p`
-                : 'Session Closed'}
+                : 'Wait & Study'}
             </span>
             <div className="mt-1 text-slate-400 text-xs flex justify-end">
               {showEntryAudit ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}

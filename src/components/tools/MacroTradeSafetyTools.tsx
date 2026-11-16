@@ -84,7 +84,10 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
     }, 1500);
   };
 
+  const [, setEatClockTick] = useState<number>(0);
+
   useEffect(() => {
+    const tickId = window.setInterval(() => setEatClockTick((t) => (t + 1) % 86400), 1000);
     const unsubscribe = globalLiveStream.subscribe((streamState) => {
       setMarkets(streamState.markets);
       setSyncedAt(streamState.syncedAt);
@@ -96,6 +99,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
     });
     const unsubRisk = positionRiskStore.subscribe((nextCfg) => setRiskConfig(nextCfg));
     return () => {
+      window.clearInterval(tickId);
       unsubscribe();
       unsubRisk();
     };
@@ -518,9 +522,9 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                       <Clock className="w-4 h-4 text-cyan-400" />
                       <span
                         className={
-                          focusedCard.kenyaTiming.windowStatusCode === 'OPEN'
+                          focusedCard.kenyaTiming.windowStatusCode === 'OPEN' && focusedCard.kenyaTiming.isFavorableTime
                             ? 'text-[#00C261]'
-                            : focusedCard.kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                            : focusedCard.kenyaTiming.windowStatusCode === 'OPEN' || focusedCard.kenyaTiming.windowStatusCode === 'OPENING_SOON'
                             ? 'text-amber-300'
                             : 'text-red-300'
                         }
@@ -539,15 +543,19 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                   <div className="px-4 py-3 rounded-xl bg-black/75 border border-white/15 text-right shrink-0">
                     <span
                       className={`text-[10px] uppercase block font-black ${
-                        focusedCard.kenyaTiming.windowStatusCode === 'OPEN'
+                        focusedCard.kenyaTiming.windowStatusCode === 'OPEN' && focusedCard.kenyaTiming.isFavorableTime
                           ? 'text-[#00C261]'
-                          : focusedCard.kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                          : focusedCard.kenyaTiming.windowStatusCode === 'OPEN' || focusedCard.kenyaTiming.windowStatusCode === 'OPENING_SOON'
                           ? 'text-amber-300'
                           : 'text-red-300'
                       }`}
                     >
                       {focusedCard.kenyaTiming.windowStatusCode === 'OPEN'
-                        ? 'MARKET OPEN · CLOSES IN'
+                        ? focusedCard.kenyaTiming.isEarlySettlePhase
+                          ? 'EARLY SETTLE · CLOSES IN'
+                          : focusedCard.kenyaTiming.isClosingPhase
+                          ? 'CLOSING SOON · IN'
+                          : 'MARKET OPEN · CLOSES IN'
                         : focusedCard.kenyaTiming.windowStatusCode === 'OPENING_SOON'
                         ? 'OPENS IN'
                         : 'MARKET CLOSED · OPENS IN'}
@@ -853,9 +861,9 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                   {/* Color-Coded Kenya EAT Entry Window Status + Live Countdown */}
                   <div
                     className={`p-2.5 rounded-xl border space-y-1 text-[11px] ${
-                      card.kenyaTiming.windowStatusCode === 'OPEN'
+                      card.kenyaTiming.windowStatusCode === 'OPEN' && card.kenyaTiming.isFavorableTime
                         ? 'bg-emerald-950/30 border-[#00C261]/45'
-                        : card.kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                        : card.kenyaTiming.windowStatusCode === 'OPEN' || card.kenyaTiming.windowStatusCode === 'OPENING_SOON'
                         ? 'bg-amber-950/30 border-amber-400/45'
                         : 'bg-red-950/35 border-red-500/45'
                     }`}
@@ -863,9 +871,9 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                     <div className="flex items-center justify-between gap-1">
                       <span
                         className={`font-black flex items-center gap-1 ${
-                          card.kenyaTiming.windowStatusCode === 'OPEN'
+                          card.kenyaTiming.windowStatusCode === 'OPEN' && card.kenyaTiming.isFavorableTime
                             ? 'text-[#00C261]'
-                            : card.kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                            : card.kenyaTiming.windowStatusCode === 'OPEN' || card.kenyaTiming.windowStatusCode === 'OPENING_SOON'
                             ? 'text-amber-300'
                             : 'text-red-300'
                         }`}
@@ -873,7 +881,11 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                         <Clock className="w-3 h-3 shrink-0" />
                         <span>
                           {card.kenyaTiming.windowStatusCode === 'OPEN'
-                            ? 'MARKET OPEN'
+                            ? card.kenyaTiming.isEarlySettlePhase
+                              ? 'TOO EARLY · STUDY'
+                              : card.kenyaTiming.isClosingPhase
+                              ? 'CLOSING SOON'
+                              : 'MARKET OPEN'
                             : card.kenyaTiming.windowStatusCode === 'OPENING_SOON'
                             ? 'OPENS IN'
                             : 'CLOSED · OPENS IN'}

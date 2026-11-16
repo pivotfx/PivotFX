@@ -155,6 +155,12 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
   const [propAccount, setPropAccount] = useState<PropAccountConfig>(() => getStoredPropAccount());
   const [journalTrades, setJournalTrades] = useState<JournalTrade[]>(() => getStoredJournalTrades());
   const [isAudioActive, setIsAudioActive] = useState<boolean>(() => audioAlertEngine.isEnabled());
+  const [, setEatClockTick] = useState<number>(0);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setEatClockTick((t) => (t + 1) % 86400), 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const handleToggleSound = () => {
     const nextState = audioAlertEngine.toggle();
@@ -967,9 +973,9 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                     <div className="flex items-center gap-2 flex-wrap text-[11px] text-slate-300 font-sans">
                       <span
                         className={`font-bold ${
-                          kenyaTiming.windowStatusCode === 'OPEN'
+                          kenyaTiming.windowStatusCode === 'OPEN' && kenyaTiming.isFavorableTime
                             ? 'text-[#00C261]'
-                            : kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                            : kenyaTiming.windowStatusCode === 'OPEN' || kenyaTiming.windowStatusCode === 'OPENING_SOON'
                             ? 'text-amber-300'
                             : 'text-red-400'
                         }`}
@@ -1196,6 +1202,31 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                       <span className="text-[10px] text-cyan-300">+${computed.netProfit48hUsd.toFixed(2)} est.</span>
                     </div>
                   </div>
+
+                  {/* Direct Live 3-Horizon Projection Strip (1H-4H / 4H-12H / 12H-48H) */}
+                  {computed.trajectoryHorizons && computed.trajectoryHorizons.length > 0 && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-1">
+                      {computed.trajectoryHorizons.map((step) => (
+                        <div
+                          key={step.horizon}
+                          className="p-2.5 rounded-xl bg-slate-900/75 border border-slate-800 space-y-1 text-xs"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] text-[#D4AF37] font-black">{step.horizon}</span>
+                            <span className="text-[10px] text-[#00C261] font-bold">
+                              +{step.targetPips}p · +${step.netProfitUsd.toFixed(2)}
+                            </span>
+                          </div>
+                          <strong className="text-xs text-white block">
+                            Target @ {step.targetPrice} (+{step.netProfitKes} KES)
+                          </strong>
+                          <p className="text-[10px] text-slate-400 leading-snug line-clamp-2 font-sans">
+                            {step.driverSummary}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* REAL-TIME PRICE ALERT TRIGGER BAR FOR FOCUSED PAIR */}
@@ -1942,14 +1973,20 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                     </div>
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-amber-300 font-black text-[10px]">MARKET CLOSED ADVISORY</span>
+                        <span className="text-amber-300 font-black text-[10px]">
+                          {fxTiming.isWeekendClosed ? 'WEEKEND MARKET CLOSED' : 'OFF-SESSION FX/METALS PAUSE'}
+                        </span>
                         <span className="text-slate-600">·</span>
                         <strong className="text-white text-sm">
-                          Forex &amp; Metals Closed — Opens in {fxTiming.countdownFormatted}
+                          {fxTiming.isWeekendClosed
+                            ? `Forex & Metals Closed — Opens in ${fxTiming.countdownFormatted}`
+                            : `${fxTiming.nextWindowName} Opens in ${fxTiming.countdownFormatted}`}
                         </strong>
                       </div>
                       <p className="text-amber-200/90 text-xs font-sans leading-relaxed">
-                        Spreads widen 10x–50x during weekend/rollover closures. Avoid placing spot FX or Gold orders until sessions reopen; BTC/USD and ETH/USD remain active 24/7 with tight spreads.
+                        {fxTiming.isWeekendClosed
+                          ? 'Spreads widen 10x–50x during weekend closures. Please wait until Monday opening or trade 24/7 BTC/USD & ETH/USD.'
+                          : 'Oops — EUR/USD & GBP/USD are currently outside prime London/NY liquidity (study levels & wait for opening bell). USD/JPY & Crypto may still offer selective moves.'}
                       </p>
                     </div>
                   </div>
@@ -1963,11 +2000,20 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                 </div>
               );
             }
+            const sessionAccent =
+              macroContext.sessionWindowName.includes('Tokyo') || macroContext.sessionWindowName.includes('Asian')
+                ? { text: 'text-sky-300', border: 'border-sky-500/45', bg: 'bg-sky-950/25', label: 'ASIAN SESSION LIVE' }
+                : macroContext.sessionWindowName.includes('London Open')
+                ? { text: 'text-[#00C261]', border: 'border-[#00C261]/45', bg: 'bg-emerald-950/25', label: 'LONDON SESSION LIVE' }
+                : macroContext.sessionWindowName.includes('New York')
+                ? { text: 'text-[#F3D36B]', border: 'border-[#D4AF37]/55', bg: 'bg-yellow-950/25', label: 'NEW YORK SESSION LIVE' }
+                : { text: 'text-amber-300', border: 'border-amber-500/45', bg: 'bg-amber-950/25', label: 'LULL / STUDY WINDOW' };
+
             return (
-              <div className="px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+              <div className={`px-4 py-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 text-xs font-mono ${sessionAccent.bg} ${sessionAccent.border}`}>
                 <div className="flex items-center gap-2 text-slate-300">
-                  <Radio className="w-3.5 h-3.5 text-[#00C261] shrink-0" />
-                  <strong className="text-[#00C261]">EXCHANGES LIVE</strong>
+                  <Radio className={`w-3.5 h-3.5 shrink-0 ${sessionAccent.text}`} />
+                  <strong className={sessionAccent.text}>{sessionAccent.label}</strong>
                   <span className="text-slate-600">·</span>
                   <span>{fxTiming.windowBadgeShort}</span>
                   <span className="text-slate-600">·</span>
@@ -2236,12 +2282,14 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                       handleOpenPairCard(m.pair);
                     }
                   }}
-                  className={`rounded-2xl p-4 sm:p-5 bg-slate-950 border transition-all cursor-pointer flex flex-col justify-between space-y-3 font-mono tabular-nums hover:-translate-y-0.5 ${
-                    loadedOrder
-                      ? 'border-[#00C261] shadow-[0_0_20px_rgba(0,194,97,0.16)]'
+                  className={`rounded-2xl p-4 sm:p-5 border transition-all cursor-pointer flex flex-col justify-between space-y-3 font-mono tabular-nums hover:-translate-y-0.5 ${
+                    kenyaTiming.windowStatusCode === 'CLOSED_WAIT'
+                      ? 'bg-[#060912] opacity-85 border-slate-800/80 hover:border-slate-600'
+                      : loadedOrder
+                      ? 'bg-[#081713] border-[#00C261] shadow-[0_0_20px_rgba(0,194,97,0.16)]'
                       : rank === 1
-                      ? 'border-[#D4AF37] shadow-[0_0_20px_rgba(212,175,55,0.12)]'
-                      : 'border-slate-800 hover:border-[#D4AF37]/70'
+                      ? 'bg-[#0C1322] border-[#D4AF37] shadow-[0_0_20px_rgba(212,175,55,0.12)]'
+                      : 'bg-[#0A101E] border-slate-800 hover:border-[#D4AF37]/70'
                   }`}
                 >
                   {/* Top Row: Rank + Trend & BUY/SELL + Go-Ahead Badge */}
@@ -2271,14 +2319,40 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                       </span>
                     </div>
 
-                    {/* Market Open vs. Weekend Closed Status Badge */}
+                    {/* Market Open vs. Early Settle / Opening Soon / Closed Status Badge */}
                     {kenyaTiming.windowStatusCode === 'CLOSED_WAIT' ? (
                       <div className="flex items-center justify-between gap-1 text-[10px] bg-red-950/70 border border-red-500/60 px-2.5 py-1 rounded-xl text-red-200">
                         <span className="font-bold flex items-center gap-1.5 text-red-400">
                           <Clock className="w-3 h-3 shrink-0" />
-                          <span>MARKET CLOSED</span>
+                          <span>{kenyaTiming.isWeekendClosed ? 'MARKET CLOSED' : 'NOT RIGHT TIME'}</span>
                         </span>
                         <span className="text-amber-300 font-mono font-bold">Opens in {kenyaTiming.countdownFormatted}</span>
+                      </div>
+                    ) : kenyaTiming.windowStatusCode === 'OPENING_SOON' ? (
+                      <div className="flex items-center justify-between gap-1 text-[10px] bg-amber-950/70 border border-amber-500/60 px-2.5 py-1 rounded-xl text-amber-200">
+                        <span className="font-bold flex items-center gap-1.5 text-amber-300">
+                          <Clock className="w-3 h-3 shrink-0" />
+                          <span>TOO EARLY · WAIT</span>
+                        </span>
+                        <span className="text-amber-300 font-mono font-bold">Opens in {kenyaTiming.countdownFormatted}</span>
+                      </div>
+                    ) : kenyaTiming.isEarlySettlePhase ? (
+                      <div className="flex items-center justify-between gap-1 text-[10px] bg-amber-950/70 border border-amber-500/60 px-2.5 py-1 rounded-xl text-amber-200">
+                        <span className="font-bold flex items-center gap-1.5 text-amber-300">
+                          <Clock className="w-3 h-3 shrink-0" />
+                          <span>EARLY SETTLE · STUDY</span>
+                        </span>
+                        <span className="text-amber-300 font-mono font-bold">
+                          Wait {Math.max(1, Math.ceil((kenyaTiming.earlySettleSecondsLeft || 60) / 60))}m
+                        </span>
+                      </div>
+                    ) : kenyaTiming.isClosingPhase ? (
+                      <div className="flex items-center justify-between gap-1 text-[10px] bg-amber-950/70 border border-amber-500/60 px-2.5 py-1 rounded-xl text-amber-200">
+                        <span className="font-bold flex items-center gap-1.5 text-amber-300">
+                          <Clock className="w-3 h-3 shrink-0" />
+                          <span>CLOSING SOON</span>
+                        </span>
+                        <span className="text-amber-300 font-mono font-bold">Closes {kenyaTiming.countdownFormatted}</span>
                       </div>
                     ) : (
                       <div className="flex items-center justify-between gap-1 text-[10px] bg-emerald-950/60 border border-[#00C261]/50 px-2.5 py-1 rounded-xl text-emerald-200">
@@ -2286,7 +2360,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                           <Radio className="w-3 h-3 shrink-0" />
                           <span>{m.pair.includes('BTC') || m.pair.includes('ETH') ? '24/7 CRYPTO LIVE' : 'SESSION BELL OPEN'}</span>
                         </span>
-                        <span className="text-[#00C261] font-mono font-bold">Normal Spread ✓</span>
+                        <span className="text-[#00C261] font-mono font-bold">Safe Window ✓</span>
                       </div>
                     )}
 
@@ -2486,9 +2560,9 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                   <div className="flex items-center justify-between gap-1.5 pt-2 border-t border-slate-800/80 text-[10px]">
                     <span
                       className={`inline-flex items-center gap-1 font-bold truncate ${
-                        kenyaTiming.windowStatusCode === 'OPEN'
+                        kenyaTiming.windowStatusCode === 'OPEN' && kenyaTiming.isFavorableTime
                           ? 'text-[#00C261]'
-                          : kenyaTiming.windowStatusCode === 'OPENING_SOON'
+                          : kenyaTiming.windowStatusCode === 'OPEN' || kenyaTiming.windowStatusCode === 'OPENING_SOON'
                           ? 'text-amber-300'
                           : 'text-red-300'
                       }`}

@@ -39,6 +39,7 @@ export interface MacroContextSnapshot {
   isRolloverWindow: boolean;
   isUsReleaseWindow: boolean;
   eatHour: number;
+  eatDayString: string;
   eatTimeString: string;
   sessionWindowName: string;
   overallDaySafety: 'FAVOURABLE_BUY' | 'FAVOURABLE_SELL' | 'SELECTIVE_CAUTION';
@@ -136,6 +137,7 @@ export interface MarketScanData {
   bias: 'STRONG_BUY' | 'STRONG_SELL' | 'NEUTRAL_CHOP';
   confidence: number;
   recommendedTf: Timeframe;
+  timeframe?: Timeframe;
   trend: string;
   trendDirection: 'UPTREND' | 'DOWNTREND' | 'RANGING';
   h1TrendDirection?: 'UPTREND' | 'DOWNTREND' | 'RANGING';
@@ -601,6 +603,10 @@ export interface KenyaEntryWindowInfo {
   countdownFormatted: string;
   countdownSeconds: number;
   reasonText: string;
+  isEarlySettlePhase?: boolean;
+  earlySettleSecondsLeft?: number;
+  isClosingPhase?: boolean;
+  isWeekendClosed?: boolean;
 }
 
 export interface AssetDailySafetyCard {
@@ -1639,6 +1645,17 @@ export function getCurrentMacroContext(
     riskScore > 0.4 ? 'RISK-ON EXPANSION' : riskScore < -0.4 ? 'RISK-OFF SAFE-HAVEN' : 'MIXED CONSOLIDATION';
 
   const now = new Date();
+  const nairobiWeekday = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Africa/Nairobi',
+    weekday: 'short'
+  }).format(now);
+  const eatDayString = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Nairobi',
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  }).format(now);
   const eatHour = parseInt(
     now.toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', hour12: false }),
     10
@@ -1647,6 +1664,10 @@ export function getCurrentMacroContext(
     now.toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', minute: '2-digit' }),
     10
   );
+  const isWeekendClosed =
+    nairobiWeekday === 'Sat' ||
+    (nairobiWeekday === 'Sun' && eatHour < 23) ||
+    (nairobiWeekday === 'Fri' && eatHour === 23 && eatMin >= 55);
 
   const dxySummary =
     dxyPressurePct >= 0.12
@@ -1665,7 +1686,9 @@ export function getCurrentMacroContext(
     hour12: false
   })} EAT`;
 
-  const sessionWindowName = isRolloverWindow
+  const sessionWindowName = isWeekendClosed
+    ? 'Weekend FX Closure · Crypto 24/7 Live'
+    : isRolloverWindow
     ? 'Rollover Spread-Widening Window'
     : eatHour >= 3 && eatHour < 10
     ? 'Tokyo / Asian Range Window'
@@ -1676,7 +1699,7 @@ export function getCurrentMacroContext(
     : 'New York PM Continuation Window';
 
   const overallDaySafety: MacroContextSnapshot['overallDaySafety'] =
-    isRolloverWindow || isUsReleaseWindow
+    isWeekendClosed || isRolloverWindow || isUsReleaseWindow
       ? 'SELECTIVE_CAUTION'
       : dxyPressurePct <= -0.05 || (eurPct >= 0 && gbpPct >= 0)
       ? 'FAVOURABLE_BUY'
@@ -1699,6 +1722,7 @@ export function getCurrentMacroContext(
     isRolloverWindow,
     isUsReleaseWindow,
     eatHour,
+    eatDayString,
     eatTimeString,
     sessionWindowName,
     overallDaySafety,
@@ -4420,10 +4444,70 @@ export function evaluateOrderEntryMoment(
   if (kenyaTiming.windowStatusCode === 'CLOSED_WAIT') {
     return {
       status: 'MARKET_CLOSED',
-      badge: 'MARKET CLOSED · DO NOT ENTER',
-      headline: `Market Closed (Opens in ${kenyaTiming.countdownFormatted})`,
-      actionGuidance: 'Brokers halt order execution and spreads widen 10x–50x. Do not rush! Wait for market open or trade 24/7 Crypto.',
+      badge: 'NOT RIGHT TIME · PLEASE WAIT',
+      headline: `Oops — ${pair} Window Closed (Opens in ${kenyaTiming.countdownFormatted})`,
+      actionGuidance: kenyaTiming.isWeekendClosed
+        ? `Brokers halt weekend FX/Metals execution. Please wait for market open (${kenyaTiming.nextWindowName}) or inspect 24/7 Crypto.`
+        : `Please do not rush into ${pair} right now — off-session spreads and fakeouts are high. Wait ${kenyaTiming.countdownFormatted} for ${kenyaTiming.nextWindowName} and study key levels first.`,
       themeColor: '#EF4444'
+    };
+  }
+
+  if (kenyaTiming.windowStatusCode === 'OPENING_SOON') {
+    return {
+      status: 'WAIT_PULLBACK',
+      badge: `TOO EARLY · OPENS IN ${kenyaTiming.countdownFormatted}`,
+      headline: `Please Wait — ${pair} Opens in ${kenyaTiming.countdownFormatted}`,
+      actionGuidance: `${kenyaTiming.nextWindowName} is about to open. Please do not jump in early; study 1H 20/50 EMA structure and wait for the opening bell candle to close.`,
+      themeColor: '#F59E0B',
+      advisoryPrice: computed.advisoryEntryPrice
+    };
+  }
+
+  if (kenyaTiming.isEarlySettlePhase && kenyaTiming.earlySettleSecondsLeft) {
+    const waitMins = Math.max(1, Math.ceil(kenyaTiming.earlySettleSecondsLeft / 60));
+    return {
+      status: 'WAIT_PULLBACK',
+      badge: `TOO EARLY · STUDY MARKET (${waitMins}m TO PRIME)`,
+      headline: `Session Just Opened — Please Wait ${waitMins}m for Spreads to Settle`,
+      actionGuidance: `${pair} just entered ${kenyaTiming.currentWindowName}. Please pause ${waitMins} min so opening-bell stop hunts clear before pressing BUY/SELL.`,
+      themeColor: '#F59E0B',
+      advisoryPrice: computed.advisoryEntryPrice
+    };
+  }
+
+  if (kenyaTiming.isClosingPhase) {
+    return {
+      status: 'WAIT_PULLBACK',
+      badge: `CLOSING IN ${kenyaTiming.countdownFormatted} · AVOID NEW RISK`,
+      headline: `Please Avoid Fresh ${pair} Entries (Closing in ${kenyaTiming.countdownFormatted})`,
+      actionGuidance: `Less than 20 minutes remain in ${kenyaTiming.currentWindowName}. Please protect open profits instead of entering right before session close.`,
+      themeColor: '#F59E0B',
+      advisoryPrice: computed.advisoryEntryPrice
+    };
+  }
+
+  // Red-Folder Economic News / High Volatility Window Check
+  const impactingNews = getUpcomingEconomicEvents().find((ev) => {
+    const affectsPair =
+      ev.currency === 'XAU/USD'
+        ? pair === 'XAU/USD'
+        : ev.currency === 'USD'
+        ? pair.includes('USD') || pair === 'US30' || pair === 'NAS100' || pair === 'USOIL'
+        : pair.includes(ev.currency);
+    return (
+      affectsPair &&
+      (ev.status === 'ACTIVE_NOW' || (ev.status === 'IMMINENT' && ev.minutesUntil <= 15))
+    );
+  });
+  if (impactingNews && !kenyaTiming.isWeekendClosed) {
+    return {
+      status: 'WAIT_PULLBACK',
+      badge: `NEWS CAUTION · ${impactingNews.timeEAT}`,
+      headline: `Please Exercise Caution — ${impactingNews.name}`,
+      actionGuidance: `High-impact ${impactingNews.currency} news window is active/imminent (${impactingNews.timeEAT}). Please wait 15 minutes after release before placing market orders to avoid slippage.`,
+      themeColor: '#EF4444',
+      advisoryPrice: computed.advisoryEntryPrice
     };
   }
 
@@ -4431,8 +4515,8 @@ export function evaluateOrderEntryMoment(
     return {
       status: 'WAIT_PULLBACK',
       badge: `WAIT PULLBACK TO ${computed.advisoryEntryPrice}`,
-      headline: `Extended by ${computed.advisoryDiscountPips}p — Do Not Rush Entry!`,
-      actionGuidance: `Price is stretched away from 20 EMA. Wait for pullback to ${computed.advisoryEntryPrice} before entering order to save ${computed.advisoryDiscountPips} pips drawdown.`,
+      headline: `Extended by ${computed.advisoryDiscountPips}p — Please Do Not Rush Entry`,
+      actionGuidance: `Price is stretched away from 20 EMA. Please wait for pullback to ${computed.advisoryEntryPrice} before entering to save ${computed.advisoryDiscountPips} pips drawdown.`,
       themeColor: '#F59E0B',
       advisoryPrice: computed.advisoryEntryPrice,
       discountPips: computed.advisoryDiscountPips
@@ -4441,9 +4525,9 @@ export function evaluateOrderEntryMoment(
 
   return {
     status: 'PRIME_NOW',
-    badge: 'PRIME MOMENT TO ENTER (CONFIRMED ✓)',
-    headline: 'Right Moment Confirmed: Optimal 20/50 EMA Pullback Zone',
-    actionGuidance: `Price is in prime discount corridor with ${computed.alignedFactorsCount}/${computed.totalFactorsCount} aligned factors. Safe to copy SL & TP and execute broker order!`,
+    badge: 'SAFE TO ENTER · PRIME MOMENT ✓',
+    headline: 'Right Moment Confirmed: Clean Session & 20/50 EMA Zone',
+    actionGuidance: `Session window is live and price is in prime corridor with ${computed.alignedFactorsCount}/${computed.totalFactorsCount} aligned factors. Safe to apply SL & TP risk rules.`,
     themeColor: '#00C261',
     advisoryPrice: computed.advisoryEntryPrice
   };
@@ -4551,12 +4635,34 @@ export function buildCalibratedMarketItem(params: {
     }
   }
 
+  const aggregateBars = (bars: OhlcCandle[] | undefined, groupSize: number): OhlcCandle[] | undefined => {
+    if (!bars || bars.length < groupSize * 4 || groupSize <= 1) return bars;
+    const grouped: OhlcCandle[] = [];
+    for (let i = bars.length % groupSize; i + groupSize <= bars.length; i += groupSize) {
+      const slice = bars.slice(i, i + groupSize);
+      grouped.push({
+        time: slice[0].time,
+        open: slice[0].open,
+        high: Math.max(...slice.map((b) => b.high)),
+        low: Math.min(...slice.map((b) => b.low)),
+        close: slice[slice.length - 1].close
+      });
+    }
+    return grouped.length >= 8 ? grouped : bars;
+  };
+
   const isHigherTf =
     params.recommendedTf === 'H1' || params.recommendedTf === 'H4' || params.recommendedTf === 'D1';
-  const activeBaseCandles =
+  let activeBaseCandles =
     isHigherTf && patchedH1Candles && patchedH1Candles.length >= 22
       ? patchedH1Candles
       : params.candles;
+  if (params.recommendedTf === 'H4') {
+    activeBaseCandles = aggregateBars(activeBaseCandles, 4);
+  } else if (params.recommendedTf === 'D1') {
+    const d1Group = activeBaseCandles && activeBaseCandles.length >= 96 ? 8 : 6;
+    activeBaseCandles = aggregateBars(activeBaseCandles, d1Group);
+  }
 
   const evalData = evaluateCandleSeriesAndTick({
     pair: params.pair,
@@ -4634,6 +4740,7 @@ export function buildCalibratedMarketItem(params: {
     bias: isNeutral ? 'NEUTRAL_CHOP' : isBuy ? 'STRONG_BUY' : 'STRONG_SELL',
     confidence: isNeutral ? 69.5 : computed.confidence,
     recommendedTf: params.recommendedTf,
+    timeframe: params.recommendedTf,
     trend,
     trendDirection,
     h1TrendDirection: computed.h1TrendDirection,
@@ -5585,15 +5692,17 @@ export function evaluatePairKenyaTiming(pair: CurrencyPair, now: Date = new Date
   }).formatToParts(now);
 
   const weekday = nairobiParts.find((p) => p.type === 'weekday')?.value || 'Mon';
-  const eatH = parseInt(nairobiParts.find((p) => p.type === 'hour')?.value || '12', 10);
-  const eatM = parseInt(nairobiParts.find((p) => p.type === 'minute')?.value || '0', 10);
-  const eatS = parseInt(nairobiParts.find((p) => p.type === 'second')?.value || '0', 10);
+  const eatH = (parseInt(nairobiParts.find((p) => p.type === 'hour')?.value || '12', 10) || 0) % 24;
+  const eatM = parseInt(nairobiParts.find((p) => p.type === 'minute')?.value || '0', 10) || 0;
+  const eatS = parseInt(nairobiParts.find((p) => p.type === 'second')?.value || '0', 10) || 0;
   const secOfDay = eatH * 3600 + eatM * 60 + eatS;
 
   const isCrypto247 = pair === 'BTC/USD' || pair === 'ETH/USD';
   const isWeekendClosed =
     !isCrypto247 &&
-    (weekday === 'Sat' || (weekday === 'Sun' && eatH < 23) || (weekday === 'Fri' && eatH === 23 && eatM >= 55));
+    (weekday === 'Sat' ||
+      (weekday === 'Sun' && (eatH < 23 || (eatH === 23 && eatM < 55))) ||
+      (weekday === 'Fri' && eatH === 23 && eatM >= 55));
 
   if (isWeekendClosed) {
     let secsToOpen = 0;
@@ -5602,7 +5711,7 @@ export function evaluatePairKenyaTiming(pair: CurrencyPair, now: Date = new Date
     } else if (weekday === 'Sun') {
       secsToOpen = Math.max(60, 23 * 3600 + 55 * 60 - secOfDay);
     } else {
-      secsToOpen = 48 * 3600;
+      secsToOpen = (24 * 3600 - secOfDay) + 24 * 3600 + 23 * 3600 + 55 * 60;
     }
     const cd = formatCountdownHms(secsToOpen);
     return {
@@ -5615,7 +5724,8 @@ export function evaluatePairKenyaTiming(pair: CurrencyPair, now: Date = new Date
       nextWindowName: 'Sunday Night / Monday Open (23:55 EAT)',
       countdownFormatted: cd,
       countdownSeconds: secsToOpen,
-      reasonText: `${pair} is CLOSED for the weekend in Kenya (EAT). Reopens in ${cd}. DO NOT place live market orders now (broker execution halted, extreme spread risk). Use 1H pending limit orders for Monday, or trade 24/7 Crypto (BTC/USD, ETH/USD) which is live right now!`
+      reasonText: `${pair} is CLOSED for the weekend in Kenya (EAT). Reopens in ${cd}. Please do not place live market orders now (extreme spread risk) — study 1H levels or inspect 24/7 Crypto.`,
+      isWeekendClosed: true
     };
   }
 
@@ -5683,18 +5793,44 @@ export function evaluatePairKenyaTiming(pair: CurrencyPair, now: Date = new Date
 
   if (activeWin) {
     const secsLeft = Math.max(1, Math.round(activeWin.endSec - secOfDay));
+    const secsSinceStart = Math.max(0, Math.round(secOfDay - activeWin.startSec));
+    const isEarlySettlePhase = !isCrypto247 && secsSinceStart < 900;
+    const earlySettleSecondsLeft = isEarlySettlePhase ? 900 - secsSinceStart : 0;
+    const isClosingPhase = !isCrypto247 && secsLeft <= 1200;
     const cd = formatCountdownHms(secsLeft);
+    const earlyCd = formatCountdownHms(earlySettleSecondsLeft);
+
     return {
-      isFavorableTime: true,
+      isFavorableTime: !isEarlySettlePhase && !isClosingPhase,
       windowStatusCode: 'OPEN',
-      statusLabel: `MARKET OPEN · CLOSES IN ${cd}`,
-      windowBadgeShort: `OPEN · ${cd}`,
-      bannerHeadline: `MARKET OPEN · GOOD ENTRY WINDOW (Closes in ${cd})`,
+      statusLabel: isEarlySettlePhase
+        ? `TOO EARLY · PRIME IN ${earlyCd}`
+        : isClosingPhase
+        ? `CLOSING IN ${cd}`
+        : `MARKET OPEN · CLOSES IN ${cd}`,
+      windowBadgeShort: isEarlySettlePhase
+        ? `TOO EARLY · ${Math.ceil(earlySettleSecondsLeft / 60)}m`
+        : isClosingPhase
+        ? `CLOSING · ${cd}`
+        : `OPEN · ${cd}`,
+      bannerHeadline: isEarlySettlePhase
+        ? `TOO EARLY · PLEASE WAIT ${earlyCd} (STUDY STRUCTURE)`
+        : isClosingPhase
+        ? `CLOSING SOON IN ${cd} — PLEASE AVOID NEW ENTRIES`
+        : `MARKET OPEN · SAFE TO ENTER (Closes in ${cd})`,
       currentWindowName: activeWin.name,
       nextWindowName: 'Active Session Open',
       countdownFormatted: cd,
       countdownSeconds: secsLeft,
-      reasonText: `${pair} window OPEN inside ${activeWin.name} (${cd} remaining). Tight institutional spreads & active liquidity.`
+      reasonText: isEarlySettlePhase
+        ? `${pair} just opened inside ${activeWin.name}. Too early to rush — please wait ${Math.ceil(earlySettleSecondsLeft / 60)} min while spreads settle and study initial 15m price action.`
+        : isClosingPhase
+        ? `${pair} window closes in ${cd}. Please avoid opening fresh positions late in the session; protect open profits.`
+        : `${pair} window OPEN inside ${activeWin.name} (${cd} remaining). Tight institutional spreads & active liquidity.`,
+      isEarlySettlePhase,
+      earlySettleSecondsLeft,
+      isClosingPhase,
+      isWeekendClosed: false
     };
   }
 
@@ -5713,16 +5849,19 @@ export function evaluatePairKenyaTiming(pair: CurrencyPair, now: Date = new Date
   return {
     isFavorableTime: false,
     windowStatusCode: openingSoon ? 'OPENING_SOON' : 'CLOSED_WAIT',
-    statusLabel: openingSoon ? `OPENS SOON · IN ${cd}` : `WINDOW PAUSED · OPENS IN ${cd}`,
+    statusLabel: openingSoon ? `OPENS SOON · IN ${cd}` : `WAIT · OPENS IN ${cd}`,
     windowBadgeShort: openingSoon ? `OPENS IN ${cd}` : `WAIT · ${cd}`,
     bannerHeadline: openingSoon
-      ? `MARKET TO OPEN SOON · OPENS IN ${cd} (${nextWin.name})`
-      : `MARKET WINDOW WAITING · OPENS IN ${cd} (${nextWin.name})`,
-    currentWindowName: secOfDay >= 22 * 3600 || secOfDay < 2.5 * 3600 ? 'Low-Liquidity Rollover Zone' : 'Mid-Session Consolidation Lull',
+      ? `TOO EARLY — OPENS IN ${cd} (${nextWin.name})`
+      : `NOT RIGHT TO ENTER NOW — OPENS IN ${cd} (${nextWin.name})`,
+    currentWindowName: secOfDay >= 22 * 3600 || secOfDay < 2.5 * 3600 ? 'Low-Liquidity Rollover Zone' : 'Off-Session / Consolidation Lull',
     nextWindowName: nextWin.name,
     countdownFormatted: cd,
     countdownSeconds: secsUntil,
-    reasonText: `Next favourable liquidity window (${nextWin.name}) opens in ${cd}.`
+    reasonText: openingSoon
+      ? `Too early to enter ${pair} right now — ${nextWin.name} opens in ${cd}. Please wait and study 1H 20/50 EMA structure before entering.`
+      : `Oops — not the right time to enter ${pair}. Next clean window (${nextWin.name}) opens in ${cd}. Please wait and study higher-timeframe levels instead of forcing an off-session trade.`,
+    isWeekendClosed: false
   };
 }
 
@@ -8089,6 +8228,9 @@ class GlobalLiveMarketStreamEngine {
   public setPairTimeframe(pair: CurrencyPair, tf: Timeframe) {
     this.customTimeframes[pair] = tf;
     this.rebuildAndSortMarkets(undefined, 'rescan', this.liveFeedConnected);
+    if (typeof fetch !== 'undefined') {
+      void this.rescanSinglePair(pair, tf);
+    }
   }
 
   public unlockPairToLiveStream(pair: CurrencyPair) {

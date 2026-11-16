@@ -67,19 +67,45 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   const [showValueZone, setShowValueZone] = useState<boolean>(true);
   const [showAdvisoryLine, setShowAdvisoryLine] = useState<boolean>(true);
   const [showBosLine, setShowBosLine] = useState<boolean>(true);
+  const [showProjection, setShowProjection] = useState<boolean>(true);
 
-  const rawVisible = candles.slice(-44);
+  const safeLive = livePrice > 0 ? livePrice : entryPrice > 0 ? entryPrice : 1;
+  const synthesizedFallback: OhlcCandle[] = React.useMemo(() => {
+    if (candles && candles.length >= 5) return [];
+    const stepBase = Math.max(2 / pipMultiplier, Math.abs(tp1 - safeLive) * 0.14 || safeLive * 0.0012);
+    const out: OhlcCandle[] = [];
+    const isBuyInit = direction === 'BUY';
+    let cur = ema50 > 0 ? ema50 : isBuyInit ? safeLive - stepBase * 4 : safeLive + stepBase * 4;
+    const nowSec = Math.floor(Date.now() / 1000);
+    for (let i = 0; i < 24; i++) {
+      const wave = Math.sin(i * 0.55) * 0.45 + (isBuyInit ? 0.18 : -0.18);
+      const next = i === 23 ? safeLive : cur + wave * stepBase * 0.5;
+      const hi = Math.max(cur, next) + stepBase * 0.28;
+      const lo = Math.min(cur, next) - stepBase * 0.28;
+      out.push({
+        time: nowSec - (24 - i) * 900,
+        open: Number(cur.toFixed(decimals)),
+        high: Number(hi.toFixed(decimals)),
+        low: Number(lo.toFixed(decimals)),
+        close: Number(next.toFixed(decimals)),
+      });
+      cur = next;
+    }
+    return out;
+  }, [candles, decimals, direction, ema50, pipMultiplier, safeLive, tp1]);
+
+  const rawVisible = (candles && candles.length >= 5 ? candles : synthesizedFallback).slice(-44);
   const rawLast = rawVisible[rawVisible.length - 1];
   const needsTailAnchor =
     rawVisible.length > 0 &&
-    livePrice > 0 &&
+    safeLive > 0 &&
     rawLast &&
     rawLast.close > 0 &&
-    Math.abs(rawLast.close - livePrice) / livePrice > 0.0018;
+    Math.abs(rawLast.close - safeLive) / safeLive > 0.0018;
 
   const visibleCandles: OhlcCandle[] = rawVisible.map((c, idx) => {
     if (needsTailAnchor) {
-      const ratio = livePrice / rawLast.close;
+      const ratio = safeLive / rawLast.close;
       return {
         time: c.time,
         open: Number((c.open * ratio).toFixed(decimals)),
@@ -88,12 +114,12 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
         close: Number((c.close * ratio).toFixed(decimals))
       };
     }
-    if (idx === rawVisible.length - 1 && livePrice > 0) {
+    if (idx === rawVisible.length - 1 && safeLive > 0) {
       return {
         ...c,
-        close: livePrice,
-        high: Math.max(c.high, livePrice),
-        low: Math.min(c.low, livePrice)
+        close: safeLive,
+        high: Math.max(c.high, safeLive),
+        low: Math.min(c.low, safeLive)
       };
     }
     return c;
@@ -168,7 +194,7 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   const plotW = svgWidth - padLeft - padRight;
   const plotH = svgHeight - padTop - padBottom;
   // Leave clean 54px forward-projection lane on the right side of candles for multi-point BUY/SELL trajectory arc
-  const candlePlotW = Math.max(120, plotW - 54);
+  const candlePlotW = Math.max(120, plotW - 78);
 
   const priceToY = (p: number) => {
     const ratio = (maxP - p) / totalRange;
@@ -370,19 +396,33 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   const riskBandTop = Math.min(yEntry, ySl);
   const riskBandHeight = Math.max(2, Math.abs(ySl - yEntry));
   const lastCandleX = indexToX(Math.max(0, visibleCandles.length - 1));
+  const yLiveCoord = priceToY(livePrice);
   const rawRetestY =
-    advisoryEntryPrice && advisoryEntryPrice > 0
+    advisoryEntryPrice && advisoryEntryPrice > 0 && Math.abs(advisoryEntryPrice - livePrice) > 0.2 / pipMultiplier
       ? priceToY(advisoryEntryPrice)
-      : priceToY(livePrice);
+      : isBuy
+      ? Math.min(ySl - 8, yLiveCoord + Math.max(6, Math.abs(yLiveCoord - yTp1) * 0.22))
+      : Math.max(ySl + 8, yLiveCoord - Math.max(6, Math.abs(yLiveCoord - yTp1) * 0.22));
   // Clamp retest/pullback point strictly inside protected [EP, SL] risk corridor so visual trajectory never pierces SL
   const projRetestY = isBuy
     ? Math.min(rawRetestY, Math.max(yEntry, ySl - 6))
     : Math.max(rawRetestY, Math.min(yEntry, ySl + 6));
-  const projX1 = lastCandleX + 6;
-  const projX2 = Math.min(svgWidth - padRight - 28, lastCandleX + 20);
-  const projX3 = Math.min(svgWidth - padRight - 14, lastCandleX + 34);
-  const projX4 = Math.min(svgWidth - padRight - 4, lastCandleX + 48);
-  const trajectoryPolyPoints = `${projX1.toFixed(1)},${priceToY(livePrice).toFixed(1)} ${projX2.toFixed(1)},${projRetestY.toFixed(1)} ${projX3.toFixed(1)},${yTp1.toFixed(1)} ${projX4.toFixed(1)},${yTp2.toFixed(1)}`;
+  const projTarget1Y = tpTargetAlreadyHit ? yLiveCoord : yTp1;
+  const projTarget2Y = tpTargetAlreadyHit
+    ? isBuy
+      ? Math.max(padTop + 10, yLiveCoord - 18)
+      : Math.min(svgHeight - padBottom - 10, yLiveCoord + 18)
+    : yTp2;
+  const projX1 = lastCandleX + 8;
+  const projX2 = Math.min(svgWidth - padRight - 46, lastCandleX + 26);
+  const projX3 = Math.min(svgWidth - padRight - 24, lastCandleX + 48);
+  const projX4 = Math.min(svgWidth - padRight - 6, lastCandleX + 68);
+  const trajectoryPolyPoints = `${projX1.toFixed(1)},${yLiveCoord.toFixed(1)} ${projX2.toFixed(1)},${projRetestY.toFixed(1)} ${projX3.toFixed(1)},${projTarget1Y.toFixed(1)} ${projX4.toFixed(1)},${projTarget2Y.toFixed(1)}`;
+  const projGhostBars = [
+    { x: projX2, openY: yLiveCoord, closeY: projRetestY, bull: projRetestY < yLiveCoord },
+    { x: projX3, openY: projRetestY, closeY: projTarget1Y, bull: isBuy },
+    { x: projX4, openY: projTarget1Y, closeY: projTarget2Y, bull: isBuy }
+  ];
 
   // Mathematical geometry verification for BUY (SL < EP < TP1 < TP2) & SELL (TP2 < TP1 < EP < SL)
   const slDistPips = Number((Math.abs(entryPrice - stopLoss) * pipMultiplier).toFixed(1));
@@ -499,6 +539,18 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
               <span>{bosAnalysis.bosDirection.replace(/_/g, ' ')}</span>
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setShowProjection(!showProjection)}
+            className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
+              showProjection
+                ? 'bg-emerald-950/80 text-[#00C261] border-[#00C261]/60'
+                : 'bg-slate-900 text-slate-500 border-slate-800'
+            }`}
+            title="Toggle Forward Price Trajectory & Target Projection Wave"
+          >
+            Projection {showProjection ? 'ON' : 'OFF'}
+          </button>
         </div>
       </div>
 
@@ -626,9 +678,52 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
             );
           })}
 
-          {/* Projected Multi-Point Candlestick Trajectory (Live -> Pullback/Entry -> TP1 -> TP2 + Directional Arrowhead) */}
-          {!tpTargetAlreadyHit && (
-            <g opacity="0.95">
+          {/* Projected Multi-Point Candlestick Trajectory (Live -> Pullback/Retest -> TP1 -> TP2 + Ghost Projected Bars) */}
+          {showProjection && (
+            <g opacity="0.96">
+              {/* Vertical separator dividing Live Candles from Forward Projection Lane */}
+              <line
+                x1={lastCandleX + 4}
+                y1={padTop}
+                x2={lastCandleX + 4}
+                y2={svgHeight - padBottom}
+                stroke="rgba(212,175,55,0.22)"
+                strokeDasharray="2 3"
+              />
+              {/* Translucent projected wave candles */}
+              {projGhostBars.map((gb, gIdx) => {
+                const topY = Math.min(gb.openY, gb.closeY);
+                const h = Math.max(4, Math.abs(gb.closeY - gb.openY));
+                const barFill = gb.bull ? 'rgba(0, 194, 97, 0.22)' : 'rgba(239, 68, 68, 0.22)';
+                const barStroke = gb.bull ? '#00C261' : '#EF4444';
+                return (
+                  <g key={`ghost-${gIdx}`}>
+                    <line
+                      x1={gb.x}
+                      y1={Math.max(padTop, topY - 4)}
+                      x2={gb.x}
+                      y2={Math.min(svgHeight - padBottom, topY + h + 4)}
+                      stroke={barStroke}
+                      strokeOpacity="0.45"
+                      strokeWidth="1"
+                      strokeDasharray="2 2"
+                    />
+                    <rect
+                      x={gb.x - 4.5}
+                      y={topY}
+                      width={9}
+                      height={h}
+                      rx={1.5}
+                      fill={barFill}
+                      stroke={barStroke}
+                      strokeOpacity="0.7"
+                      strokeWidth="0.9"
+                      strokeDasharray="2 1.5"
+                    />
+                  </g>
+                );
+              })}
+
               <polyline
                 fill="none"
                 points={trajectoryPolyPoints}
@@ -640,22 +735,44 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
               <circle
                 cx={projX2}
                 cy={projRetestY}
-                r="2.8"
+                r="3"
                 fill="#040811"
                 stroke="#F8FAFC"
-                strokeWidth="1.3"
+                strokeWidth="1.4"
               />
               {/* TP1 Milestone Node */}
-              <circle cx={projX3} cy={yTp1} r="2.7" fill="#22D3EE" />
+              <circle cx={projX3} cy={projTarget1Y} r="3" fill="#22D3EE" />
+              <text
+                x={projX3}
+                y={isBuy ? projTarget1Y - 6 : projTarget1Y + 11}
+                fill="#67E8F9"
+                fontSize="8"
+                fontFamily="monospace"
+                fontWeight="bold"
+                textAnchor="middle"
+              >
+                TP1
+              </text>
               {/* Directional Arrowhead at TP2 Target (Pointing UP for BUY, DOWN for SELL) */}
               <polygon
                 points={
                   isBuy
-                    ? `${projX4},${yTp2 - 5} ${projX4 - 4.2},${yTp2 + 3.5} ${projX4 + 4.2},${yTp2 + 3.5}`
-                    : `${projX4},${yTp2 + 5} ${projX4 - 4.2},${yTp2 - 3.5} ${projX4 + 4.2},${yTp2 - 3.5}`
+                    ? `${projX4},${projTarget2Y - 5} ${projX4 - 4.2},${projTarget2Y + 3.5} ${projX4 + 4.2},${projTarget2Y + 3.5}`
+                    : `${projX4},${projTarget2Y + 5} ${projX4 - 4.2},${projTarget2Y - 3.5} ${projX4 + 4.2},${projTarget2Y - 3.5}`
                 }
                 fill={isBuy ? '#00C261' : '#EF4444'}
               />
+              <text
+                x={projX4}
+                y={isBuy ? Math.max(padTop + 8, projTarget2Y - 9) : Math.min(svgHeight - padBottom - 3, projTarget2Y + 14)}
+                fill={isBuy ? '#00C261' : '#FCA5A5'}
+                fontSize="8"
+                fontFamily="monospace"
+                fontWeight="bold"
+                textAnchor="middle"
+              >
+                {tpTargetAlreadyHit ? 'EXT' : 'TP2'}
+              </text>
             </g>
           )}
 
