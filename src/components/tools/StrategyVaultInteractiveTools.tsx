@@ -71,26 +71,26 @@ export const StrategyVaultInteractiveTools: React.FC = () => {
   const setups: StrategySetup[] = [
     {
       id: 'bos-10-factor',
-      name: '6. BOS / CHoCH + 11-Factor Zero-Mistake Protocol',
-      subtitle: 'Real-Time Structure, ADX, MACD & Bar/Consensus Confirmation',
+      name: '6. BOS / CHoCH + 12-Factor Zero-Mistake Protocol',
+      subtitle: 'Real-Time Structure, ADX, MACD, Pivots/Z-Score & Bar Consensus',
       winRate: '82%',
-      rrr: '1:2.9',
+      rrr: '1:2.25',
       bestSession: 'London / NY / 24/7 Crypto',
       coreConcept:
-        'Never buy into a downward Break of Structure (BOS) or sell into an upward structural shift. Our 11-Factor Zero-Mistake gate aligns H1 macro trend, M15/H1 Swing High/Low BOS/CHoCH, 20/50 EMA pullbacks, ADX(14) trend displacement (>= 14.5), MACD(12/26/9) momentum, Western OHLC Bar Close / Barchart & Investing Consensus (Factor 11), and ATR-protected Stop Loss distances before releasing READY_ENTER.',
+        'Never buy into a downward Break of Structure (BOS) or sell into an upward structural shift. Our 12-Factor Zero-Mistake gate aligns H1 macro trend, H1/M15 Swing High/Low BOS/CHoCH, 20/50 EMA pullbacks, ADX(14) trend displacement (>= 17.5), MACD(12/26/9) momentum, Western OHLC Bar Close / Barchart & Investing Consensus (Factor 11), Floor Pivots + Z-Score/OTE Quant (Factor 12), and 1.8x ATR-protected Stop Loss distances before releasing READY_ENTER.',
       entryRules: [
-        'Verify H1 & M15 EMA 20/50 agree with trend direction (or wait for clean CHoCH candle body close).',
-        'Confirm ADX(14) >= 14.5 & Readiness Gate shows READY_ENTER (never chase Extended candles > 0.8x ATR from 20 EMA).',
+        'Verify H1 & M15 EMA 20/50 agree with trend direction (and wait for clean CHoCH/BOS candle body close).',
+        'Confirm ADX(14) >= 17.5 & Readiness Gate shows READY_ENTER (never chase Extended candles > 1.55 Z-Score from 20 EMA).',
         'Verify Factor 11 (OHLC Bar Close & Barchart/Investing Consensus >= 67%) agrees and avoids Inside Bar coils.',
         'Cross-check canonical TradingView quote (OANDA:XAUUSD / FX:EURUSD / BINANCE:BTCUSDT).',
       ],
       invalidationRules: [
-        'Stop Loss placed strictly beyond protected BOS Swing High (Sell) or Swing Low (Buy) plus broker spread.',
+        'Stop Loss placed strictly beyond protected BOS Swing High (Sell) or Swing Low (Buy) with 1.8x ATR + broker spread.',
         'Dynamic Position Size Calculator automatically locks lot size so SL never exceeds your % equity cap.',
       ],
       takeProfitRules: [
-        'TP1 at 1.65x risk (scale out 50% and move SL to Breakeven).',
-        'TP2 at 2.85x+ risk (or calibrated dynamically to your $ USD Target Profit goal).',
+        'TP1 at 1.35x risk (scale out 50% and move SL to Breakeven).',
+        'TP2 at 2.25x risk (or calibrated dynamically to your $ USD Target Profit goal).',
       ],
       trendType: 'bearish',
       resistanceLevel: 3918.0,
@@ -109,7 +109,7 @@ export const StrategyVaultInteractiveTools: React.FC = () => {
       matchedPairs: ['XAU/USD', 'BTC/USD'],
       realSampleCase: {
         asset: 'XAU/USD (OANDA:XAUUSD · M15)',
-        date: '11-Factor BOS Validation Model',
+        date: '12-Factor BOS Validation Model',
         entryPrice: '3898.00',
         slPrice: '3914.50 (Protected Swing High)',
         tpPrice: '3858.00 (+400 pips)',
@@ -277,7 +277,7 @@ export const StrategyVaultInteractiveTools: React.FC = () => {
         'Confirm a 3-candle sequence where Candle 1 High < Candle 3 Low (Bullish FVG).',
         'Mark the FVG zone with the Rectangle tool.',
         'Wait patiently for price to drift into the gap (0.50 of the box).',
-        'Enter when lower-timeframe rejection + 11-Factor score confirm.',
+        'Enter when lower-timeframe rejection + 12-Factor score confirm.',
       ],
       invalidationRules: [
         'Stop Loss set just below Candle 1 swing low.',
@@ -372,7 +372,7 @@ export const StrategyVaultInteractiveTools: React.FC = () => {
         'Stop loss placed beyond the 50 EMA swing structure.',
         'If price closes 2 consecutive candles past the 50 EMA, trend is invalidated.',
       ],
-      takeProfitRules: ['Take Profit at the previous swing high + 1.65x / 2.85x extension.'],
+      takeProfitRules: ['Take Profit at the previous swing high + 1.35x / 2.25x extension.'],
       trendType: 'bullish',
       trendline: { startIndex: 0, startPrice: 157.55, endIndex: 5, endPrice: 158.65, label: 'Dynamic EMA Support' },
       entryLevel: 157.95,
@@ -414,7 +414,7 @@ export const StrategyVaultInteractiveTools: React.FC = () => {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-xs font-black text-cyan-300 uppercase tracking-wider">
             <Activity className="w-4 h-4 text-[#00C261]" />
-            <span>Real-Time 11-Factor Strategy Radar (Click to Open Chart &amp; Ticket)</span>
+            <span>Real-Time 12-Factor Strategy Radar (Click to Open Chart &amp; Ticket)</span>
           </div>
           <span className="text-[10px] text-slate-400">
             Auto-Synced Spot · ADX(14) &amp; MACD · TradingView Symbol Parity
@@ -455,7 +455,7 @@ export const StrategyVaultInteractiveTools: React.FC = () => {
                   </div>
 
                   <div className="text-[10px] text-cyan-300 font-bold line-clamp-1">
-                    {m.recommendedStrategy || '11-Factor EMA / Bar / BOS Trend'}
+                    {m.recommendedStrategy || '12-Factor EMA / Bar / Pivot BOS'}
                   </div>
 
                   <div className="flex items-center justify-between text-[9px] text-slate-400">

@@ -88,10 +88,51 @@ export interface DeepVerifyCheckItem {
     | 'MACD_MOMENTUM_SYNC'
     | 'SWING_SL_PROTECTED'
     | 'RR_AND_TP_VALID'
-    | 'ENTRY_NOT_CHASED';
+    | 'ENTRY_NOT_CHASED'
+    | 'STATISTICAL_ZSCORE_OK'
+    | 'PIVOT_CONFLUENCE_VALID';
   label: string;
   passed: boolean;
   detail: string;
+}
+
+export interface InstitutionalTelemetry {
+  zScore: number;
+  bbWidthPct: number;
+  squeezeActive: boolean;
+  stochK: number;
+  stochD: number;
+  cci20: number;
+  pivotLevels: {
+    pivot: number;
+    r1: number;
+    r2: number;
+    r3: number;
+    s1: number;
+    s2: number;
+    s3: number;
+  };
+  oteZoneMid: number;
+  fvgZone?: {
+    low: number;
+    high: number;
+    mid: number;
+    bias: 'BULLISH' | 'BEARISH';
+  };
+  roboticVerdict:
+    | 'PRIME_BUY'
+    | 'PRIME_SELL'
+    | 'SNIPER_LIMIT_BUY'
+    | 'SNIPER_LIMIT_SELL'
+    | 'STAND_ASIDE_NO_EDGE';
+  roboticScore: number;
+  roboticSummary: string;
+  estimatedWinProbPct: number;
+  expectedRMultiple: number;
+  drawdownSavingsPct?: number;
+  pivotWallClear?: boolean;
+  climaxWickSafe?: boolean;
+  spreadEfficiencyPct?: number;
 }
 
 export interface DeepVerifyResult {
@@ -118,6 +159,17 @@ export interface DeepVerifyResult {
   passedCount: number;
   totalChecks: number;
   syncedAt: string;
+  roboticGrade?: string;
+  macroNewsSummary?: string;
+  groundingSources?: Array<{ title: string; uri: string }>;
+  refinedLevels?: {
+    entryPrice: number;
+    stopLoss: number;
+    tp1: number;
+    tp2: number;
+    tp3?: number;
+    rationale: string;
+  };
 }
 
 export type CandlePatternSignal =
@@ -217,6 +269,9 @@ export interface MarketScanData {
   liveBacktest?: LiveBacktestStats;
   executionBrief?: PlainEnglishTradeGuide;
   plainEnglishGuide?: PlainEnglishTradeGuide;
+  institutionalTelemetry?: InstitutionalTelemetry;
+  advisoryEntryPrice?: number;
+  advisoryDiscountPips?: number;
 }
 
 export interface LiveBacktestStats {
@@ -348,6 +403,7 @@ export interface ComputedTradeParams {
   candlePattern?: CandlePatternSignal;
   executionBrief?: PlainEnglishTradeGuide;
   plainEnglishGuide?: PlainEnglishTradeGuide;
+  institutionalTelemetry?: InstitutionalTelemetry;
   limitPlan?: {
     entryPrice: number;
     stopLoss: number;
@@ -444,7 +500,7 @@ export function selectOptimalTradingStrategy(params: {
         ? 'NY Silver Bullet BOS + FVG Continuation'
         : isLondonWindow
         ? 'London BOS + Institutional FVG Sniper'
-        : 'BOS/CHoCH 11-Factor Trend Continuation',
+        : 'BOS/CHoCH 12-Factor Trend Continuation',
       winRateLabel: '78% Historical Edge',
       rationale: `${pair} confirmed ${bosAnalysis.bosDirection.replace('_', ' ')} while holding EMA 20/50 alignment and non-extended pullback room.`
     };
@@ -1499,10 +1555,12 @@ export function computeRealAdx(candles: OhlcCandle[], period = 14): {
   adx: number;
   plusDi: number;
   minusDi: number;
+  diSpread: number;
+  adxRising: boolean;
   regime: 'STRONG_TREND' | 'MODERATE_TREND' | 'CHOP_RANGE';
 } {
   if (!candles || candles.length < period + 2) {
-    return { adx: 21.0, plusDi: 22.0, minusDi: 20.0, regime: 'MODERATE_TREND' };
+    return { adx: 21.0, plusDi: 22.0, minusDi: 20.0, diSpread: 2.0, adxRising: true, regime: 'MODERATE_TREND' };
   }
 
   const dxValues: number[] = [];
@@ -1552,6 +1610,12 @@ export function computeRealAdx(candles: OhlcCandle[], period = 14): {
     dxValues.length > 0
       ? dxValues.slice(-period).reduce((acc, v) => acc + v, 0) / Math.min(period, dxValues.length)
       : 20;
+  const recentDxSlice = dxValues.slice(-3);
+  const priorDxSlice = dxValues.slice(-6, -3);
+  const recentDxAvg =
+    recentDxSlice.length > 0 ? recentDxSlice.reduce((a, b) => a + b, 0) / recentDxSlice.length : adxRaw;
+  const priorDxAvg =
+    priorDxSlice.length > 0 ? priorDxSlice.reduce((a, b) => a + b, 0) / priorDxSlice.length : recentDxAvg;
   const adx = Number(Math.min(75, Math.max(8, adxRaw)).toFixed(1));
   const regime: 'STRONG_TREND' | 'MODERATE_TREND' | 'CHOP_RANGE' =
     adx >= 25 ? 'STRONG_TREND' : adx >= 17 ? 'MODERATE_TREND' : 'CHOP_RANGE';
@@ -1560,6 +1624,8 @@ export function computeRealAdx(candles: OhlcCandle[], period = 14): {
     adx,
     plusDi: Number(lastPlusDi.toFixed(1)),
     minusDi: Number(lastMinusDi.toFixed(1)),
+    diSpread: Number((lastPlusDi - lastMinusDi).toFixed(1)),
+    adxRising: recentDxAvg >= priorDxAvg - 0.5,
     regime
   };
 }
@@ -1613,6 +1679,174 @@ export function detectLatestCandlePattern(candles: OhlcCandle[]): CandlePatternS
   }
 
   return 'CONSOLIDATION';
+}
+
+/**
+ * Computes Classic Floor Trader Pivot Points (P, R1-R3, S1-S3) from session OHLC swing bars.
+ */
+export function computeFloorPivotLevels(
+  candles: OhlcCandle[] | undefined,
+  livePrice: number,
+  atrPips: number,
+  pipMultiplier: number,
+  decimals: number
+): InstitutionalTelemetry['pivotLevels'] {
+  if (!candles || candles.length < 6) {
+    const unitAtr = Math.max(6, atrPips) / pipMultiplier;
+    const h = livePrice + unitAtr * 1.4;
+    const l = Math.max(1 / pipMultiplier, livePrice - unitAtr * 1.4);
+    const p = (h + l + livePrice) / 3;
+    const range = h - l;
+    return {
+      pivot: Number(p.toFixed(decimals)),
+      r1: Number((2 * p - l).toFixed(decimals)),
+      r2: Number((p + range).toFixed(decimals)),
+      r3: Number((h + 2 * (p - l)).toFixed(decimals)),
+      s1: Number((2 * p - h).toFixed(decimals)),
+      s2: Number((p - range).toFixed(decimals)),
+      s3: Number((l - 2 * (h - p)).toFixed(decimals))
+    };
+  }
+
+  const refSlice = candles.length >= 24 ? candles.slice(-24, -1) : candles.slice(0, -1);
+  const slice = refSlice.length >= 4 ? refSlice : candles;
+  const high = Math.max(...slice.map((c) => c.high));
+  const low = Math.min(...slice.map((c) => c.low));
+  const close = slice[slice.length - 1].close;
+  const pivot = (high + low + close) / 3;
+  const range = Math.max(1 / pipMultiplier, high - low);
+
+  return {
+    pivot: Number(pivot.toFixed(decimals)),
+    r1: Number((2 * pivot - low).toFixed(decimals)),
+    r2: Number((pivot + range).toFixed(decimals)),
+    r3: Number((high + 2 * (pivot - low)).toFixed(decimals)),
+    s1: Number((2 * pivot - high).toFixed(decimals)),
+    s2: Number((pivot - range).toFixed(decimals)),
+    s3: Number((low - 2 * (high - pivot)).toFixed(decimals))
+  };
+}
+
+/**
+ * Computes institutional statistical & oscillator telemetry:
+ * Statistical Z-Score vs SMA20, Bollinger-Inside-Keltner Squeeze, Stochastic(14,3,3),
+ * CCI(20), Classic Floor Pivots, 0.65 OTE Retracement, and unmitigated Fair Value Gap (FVG).
+ */
+export function computeInstitutionalQuantMetrics(p: {
+  candles?: OhlcCandle[];
+  livePrice: number;
+  ema20: number;
+  atrPips: number;
+  pipMultiplier: number;
+  decimals: number;
+}): Omit<InstitutionalTelemetry, 'roboticVerdict' | 'roboticScore' | 'roboticSummary' | 'estimatedWinProbPct' | 'expectedRMultiple'> {
+  const bars = p.candles && p.candles.length >= 6 ? p.candles : [];
+  const atrPrice = Math.max(4, p.atrPips) / p.pipMultiplier;
+  const pivotLevels = computeFloorPivotLevels(bars, p.livePrice, p.atrPips, p.pipMultiplier, p.decimals);
+
+  if (bars.length < 14) {
+    return {
+      zScore: Number(((p.livePrice - p.ema20) / Math.max(1e-6, atrPrice)).toFixed(2)),
+      bbWidthPct: 0.45,
+      squeezeActive: false,
+      stochK: p.livePrice >= p.ema20 ? 58 : 42,
+      stochD: p.livePrice >= p.ema20 ? 54 : 46,
+      cci20: p.livePrice >= p.ema20 ? 65 : -65,
+      pivotLevels,
+      oteZoneMid: Number(p.ema20.toFixed(p.decimals))
+    };
+  }
+
+  // 1. Statistical Z-Score & Bollinger vs Keltner Squeeze (20-period)
+  const bbSlice = bars.slice(-20);
+  const sma20 = bbSlice.reduce((s, c) => s + c.close, 0) / bbSlice.length;
+  const variance =
+    bbSlice.reduce((s, c) => s + (c.close - sma20) * (c.close - sma20), 0) / bbSlice.length;
+  const stdDev = Math.max(atrPrice * 0.2, Math.sqrt(variance));
+  const zScore = Number(Math.max(-4.5, Math.min(4.5, (p.livePrice - sma20) / stdDev)).toFixed(2));
+  const bbUpper = sma20 + 2 * stdDev;
+  const bbLower = sma20 - 2 * stdDev;
+  const keltnerUpper = p.ema20 + 1.5 * atrPrice;
+  const keltnerLower = p.ema20 - 1.5 * atrPrice;
+  const squeezeActive = bbUpper < keltnerUpper && bbLower > keltnerLower;
+  const bbWidthPct = Number((((bbUpper - bbLower) / Math.max(1e-6, sma20)) * 100).toFixed(3));
+
+  // 2. Stochastic (14, 3, 3)
+  const rawKSeries: number[] = [];
+  for (let idx = Math.max(13, bars.length - 6); idx < bars.length; idx++) {
+    const win = bars.slice(Math.max(0, idx - 13), idx + 1);
+    const hh = Math.max(...win.map((b) => b.high));
+    const ll = Math.min(...win.map((b) => b.low));
+    const den = Math.max(1e-9, hh - ll);
+    rawKSeries.push(((bars[idx].close - ll) / den) * 100);
+  }
+  const stochK = Number(
+    (rawKSeries.slice(-3).reduce((a, b) => a + b, 0) / Math.max(1, Math.min(3, rawKSeries.length))).toFixed(1)
+  );
+  const stochD = Number(
+    (rawKSeries.reduce((a, b) => a + b, 0) / Math.max(1, rawKSeries.length)).toFixed(1)
+  );
+
+  // 3. Commodity Channel Index CCI(20)
+  const typicals = bbSlice.map((b) => (b.high + b.low + b.close) / 3);
+  const tpMean = typicals.reduce((a, b) => a + b, 0) / typicals.length;
+  const meanDev = Math.max(
+    1e-9,
+    typicals.reduce((a, t) => a + Math.abs(t - tpMean), 0) / typicals.length
+  );
+  const latestTp = typicals[typicals.length - 1];
+  const cci20 = Number(
+    Math.max(-350, Math.min(350, (latestTp - tpMean) / (0.015 * meanDev))).toFixed(1)
+  );
+
+  // 4. Institutional OTE (0.65 Fib Retracement) & Latest Unmitigated Fair Value Gap (FVG)
+  const swingSlice = bars.slice(-18, -1);
+  const hi = swingSlice.length > 0 ? Math.max(...swingSlice.map((b) => b.high)) : p.livePrice;
+  const lo = swingSlice.length > 0 ? Math.min(...swingSlice.map((b) => b.low)) : p.livePrice;
+  const oteBull = hi - (hi - lo) * 0.65;
+  const oteBear = lo + (hi - lo) * 0.65;
+  const oteZoneMid = Number(
+    (p.livePrice >= p.ema20 ? oteBull * 0.45 + p.ema20 * 0.55 : oteBear * 0.45 + p.ema20 * 0.55).toFixed(
+      p.decimals
+    )
+  );
+
+  let fvgZone: InstitutionalTelemetry['fvgZone'];
+  const scanStart = Math.max(2, bars.length - 16);
+  for (let i = bars.length - 2; i >= scanStart; i--) {
+    const prev2 = bars[i - 2];
+    const next0 = bars[i];
+    if (next0.low > prev2.high && (next0.low - prev2.high) * p.pipMultiplier >= 0.4) {
+      fvgZone = {
+        low: Number(prev2.high.toFixed(p.decimals)),
+        high: Number(next0.low.toFixed(p.decimals)),
+        mid: Number(((prev2.high + next0.low) / 2).toFixed(p.decimals)),
+        bias: 'BULLISH'
+      };
+      break;
+    }
+    if (next0.high < prev2.low && (prev2.low - next0.high) * p.pipMultiplier >= 0.4) {
+      fvgZone = {
+        low: Number(next0.high.toFixed(p.decimals)),
+        high: Number(prev2.low.toFixed(p.decimals)),
+        mid: Number(((next0.high + prev2.low) / 2).toFixed(p.decimals)),
+        bias: 'BEARISH'
+      };
+      break;
+    }
+  }
+
+  return {
+    zScore,
+    bbWidthPct,
+    squeezeActive,
+    stochK,
+    stochD,
+    cci20,
+    pivotLevels,
+    oteZoneMid,
+    fvgZone
+  };
 }
 
 export function getCurrentMacroContext(
@@ -1765,12 +1999,36 @@ function detectSingleTfBos(
   const pivotHighs: Array<{ idx: number; price: number }> = [];
   const pivotLows: Array<{ idx: number; price: number }> = [];
 
-  for (let i = 1; i < closedBars.length - 1; i++) {
-    if (closedBars[i].high > closedBars[i - 1].high && closedBars[i].high >= closedBars[i + 1].high) {
-      pivotHighs.push({ idx: i, price: closedBars[i].high });
+  if (closedBars.length >= 16) {
+    for (let i = 2; i < closedBars.length - 2; i++) {
+      if (
+        closedBars[i].high > closedBars[i - 1].high &&
+        closedBars[i].high >= closedBars[i - 2].high &&
+        closedBars[i].high >= closedBars[i + 1].high &&
+        closedBars[i].high >= closedBars[i + 2].high
+      ) {
+        pivotHighs.push({ idx: i, price: closedBars[i].high });
+      }
+      if (
+        closedBars[i].low < closedBars[i - 1].low &&
+        closedBars[i].low <= closedBars[i - 2].low &&
+        closedBars[i].low <= closedBars[i + 1].low &&
+        closedBars[i].low <= closedBars[i + 2].low
+      ) {
+        pivotLows.push({ idx: i, price: closedBars[i].low });
+      }
     }
-    if (closedBars[i].low < closedBars[i - 1].low && closedBars[i].low <= closedBars[i + 1].low) {
-      pivotLows.push({ idx: i, price: closedBars[i].low });
+  }
+  if (pivotHighs.length < 2 || pivotLows.length < 2) {
+    pivotHighs.length = 0;
+    pivotLows.length = 0;
+    for (let i = 1; i < closedBars.length - 1; i++) {
+      if (closedBars[i].high > closedBars[i - 1].high && closedBars[i].high >= closedBars[i + 1].high) {
+        pivotHighs.push({ idx: i, price: closedBars[i].high });
+      }
+      if (closedBars[i].low < closedBars[i - 1].low && closedBars[i].low <= closedBars[i + 1].low) {
+        pivotLows.push({ idx: i, price: closedBars[i].low });
+      }
     }
   }
 
@@ -1796,8 +2054,8 @@ function detectSingleTfBos(
     (pivotLows.length >= 2 ? pivotLows[pivotLows.length - 2].price : fallbackPrevLow).toFixed(decimals)
   );
 
-  // Also capture the most significant protected swing extreme excluding just the latest 2 bars
-  const preRecentBars = closedBars.slice(-18, -2);
+  // Capture the most significant protected swing extreme excluding just the latest 2 bars
+  const preRecentBars = closedBars.slice(-20, -2);
   const refSwingHigh = Number(
     (preRecentBars.length >= 3
       ? Math.max(...preRecentBars.map((c) => c.high))
@@ -1821,16 +2079,15 @@ function detectSingleTfBos(
       : refSwingLow;
 
   const latestClose = closedBars[closedBars.length - 1].close;
-  const recent3MinClose = Math.min(...closedBars.slice(-3).map((c) => c.close), livePrice);
-  const recent3MaxClose = Math.max(...closedBars.slice(-3).map((c) => c.close), livePrice);
-  const noiseTolerance = Math.max(1.5 / pipMultiplier, (atrPips * 0.08) / pipMultiplier);
+  const noiseTolerance = Math.max(2.0 / pipMultiplier, (atrPips * 0.16) / pipMultiplier);
 
+  // Require CONFIRMED closed-candle body close beyond structural swing anchor (never flip off unclosed intra-bar wick)
   const brokeBelowSwingLow =
-    Math.min(livePrice, latestClose, recent3MinClose) < recentLowAnchor - noiseTolerance &&
-    livePrice < recentLowAnchor;
+    latestClose < recentLowAnchor - noiseTolerance &&
+    livePrice <= recentLowAnchor + noiseTolerance * 0.25;
   const brokeAboveSwingHigh =
-    Math.max(livePrice, latestClose, recent3MaxClose) > recentHighAnchor + noiseTolerance &&
-    livePrice > recentHighAnchor;
+    latestClose > recentHighAnchor + noiseTolerance &&
+    livePrice >= recentHighAnchor - noiseTolerance * 0.25;
 
   const wasPriorHigherHigh = lastSwingHigh >= prevSwingHigh;
   const wasPriorLowerLow = lastSwingLow <= prevSwingLow;
@@ -1998,6 +2255,10 @@ export function buildZeroMistakeChecklist(p: {
   adxStrength?: number;
   macdBias?: 'BULLISH' | 'BEARISH' | 'FLAT';
   candlePattern?: CandlePatternSignal;
+  zScore?: number;
+  stochK?: number;
+  cci20?: number;
+  pivotValue?: number;
 }): DeepVerifyCheckItem[] {
   const { decimals, pipMultiplier } = getPairSpecs(p.pair);
   const timing = evaluatePairKenyaTiming(p.pair);
@@ -2124,11 +2385,38 @@ export function buildZeroMistakeChecklist(p: {
     detail: `${p.macdBias || 'FLAT'} MACD impulse${patternLabel}`
   };
 
-  return [check1, check2, check3, check4, check5, check6, check7, check8];
+  // 9. Statistical Z-Score & Mean-Reversion Exhaustion Shield
+  const zScoreVal = p.zScore ?? (p.isExtendedZone ? 2.1 : 0.4);
+  const zScoreOk = Math.abs(zScoreVal) <= 1.95;
+  const check9: DeepVerifyCheckItem = {
+    id: 'STATISTICAL_ZSCORE_OK',
+    label: 'Z-Score & Exhaustion Filter (|Z|<=1.95)',
+    passed: zScoreOk,
+    detail: zScoreOk
+      ? `Z-Score ${zScoreVal >= 0 ? `+${zScoreVal}` : zScoreVal}σ sits inside normal statistical value corridor`
+      : `Z-Score ${zScoreVal >= 0 ? `+${zScoreVal}` : zScoreVal}σ stretched (>1.95σ mean-reversion snapback risk) — stage Limit EP`
+  };
+
+  // 10. Floor Pivot & Multi-Oscillator Stoch/CCI Confluence
+  const stochOk =
+    p.stochK === undefined ||
+    p.cci20 === undefined ||
+    (isBuy ? p.stochK < 86 && p.cci20 > -110 : p.stochK > 14 && p.cci20 < 110);
+  const check10: DeepVerifyCheckItem = {
+    id: 'PIVOT_CONFLUENCE_VALID',
+    label: 'Floor Pivot + Stoch/CCI Oscillator Gate',
+    passed: stochOk,
+    detail:
+      p.stochK !== undefined && p.cci20 !== undefined
+        ? `Stoch(14,3,3)=${p.stochK} · CCI(20)=${p.cci20}${p.pivotValue ? ` · Pivot=${p.pivotValue.toFixed(decimals)}` : ''}`
+        : 'Pivot & multi-oscillator headroom clear'
+  };
+
+  return [check1, check2, check3, check4, check5, check6, check7, check8, check9, check10];
 }
 
 /**
- * Evaluates ALL 11 Institutional Trading Factors simultaneously to judge BUY vs SELL:
+ * Evaluates ALL 12 Institutional Trading Factors simultaneously to judge BUY vs SELL:
  * 1. Live Candlestick Price Action & Liquidity Sweep
  * 2. 20/50 EMA Dynamic Trend Stack & Pullback Timing Guard
  * 3. 14-Period Wilder RSI Momentum & Exhaustion
@@ -2140,6 +2428,7 @@ export function buildZeroMistakeChecklist(p: {
  * 9. Market Structure Break of Structure (BOS / CHoCH) Anti-Reversal Shield
  * 10. MACD (12/26/9) Momentum & ADX (14) Trend Velocity Filter
  * 11. Western OHLC Bar Geometry & Barchart / Investing.com MA+Oscillator Consensus
+ * 12. Classic Floor Pivots + Statistical Z-Score / Bollinger-Keltner Squeeze + Stoch/CCI
  */
 export function evaluateAllTradeFactors(p: {
   pair: CurrencyPair;
@@ -2195,62 +2484,95 @@ export function evaluateAllTradeFactors(p: {
       ? 'UPTREND'
       : 'DOWNTREND');
 
-  // FACTOR 1: Candlestick Price Action, Multi-Candle Momentum & Liquidity Sweep (24 pts max)
+  // FACTOR 1: Candlestick Price Action, Closed-Candle Confirmation & Liquidity Sweep (24 pts max)
   const prevRef = p.prev3Close ?? p.ema20;
   const microDeltaPips = Number(((p.livePrice - prevRef) * pipMultiplier).toFixed(1));
   const noiseFloorPips = isGold ? 12.0 : isBtc ? 65.0 : isEth ? 6.0 : isIndex ? 18.0 : isOil ? 8.0 : 1.5;
   const significantDisplacementPips = noiseFloorPips * 2.0;
+  const lastClosedCandle =
+    p.candles && p.candles.length >= 2 ? p.candles[p.candles.length - 2] : undefined;
+  const lastClosedBull = Boolean(lastClosedCandle && lastClosedCandle.close >= lastClosedCandle.open);
+  const lastClosedBear = Boolean(lastClosedCandle && lastClosedCandle.close <= lastClosedCandle.open);
 
   if (p.isBearishPinOrSweep) {
     if (effectiveH1 === 'UPTREND' && p.ema20 > p.ema50 && p.livePrice > p.ema20) {
-      bullWeight += 12;
+      bullWeight += 10;
       bearWeight += 10;
       verdicts.push({
         name: '1. Candle & Liquidity Sweep',
-        signal: 'BUY',
+        signal: 'CAUTION',
         weight: '12%',
         detail: `Upper wick pause inside bullish EMA trend — support near ${p.keyLevel ? p.keyLevel.toFixed(decimals) : p.ema50.toFixed(decimals)}`
       });
-    } else {
-      bearWeight += 24;
-      bullWeight += 2;
+    } else if (lastClosedBear || p.livePrice <= p.ema20) {
+      bearWeight += 22;
+      bullWeight += 3;
       verdicts.push({
         name: '1. Candle & Liquidity Sweep',
         signal: 'SELL',
-        weight: '24%',
-        detail: `Upper wick rejection / BSL sweep detected (${microDeltaPips >= 0 ? `+${microDeltaPips}` : microDeltaPips}p swing)`
+        weight: '22%',
+        detail: `Confirmed bearish rejection / BSL sweep below 20 EMA (${microDeltaPips >= 0 ? `+${microDeltaPips}` : microDeltaPips}p swing)`
+      });
+    } else {
+      bearWeight += 10;
+      bullWeight += 10;
+      verdicts.push({
+        name: '1. Candle & Liquidity Sweep',
+        signal: 'CAUTION',
+        weight: '10%',
+        detail: `Upper wick pause above 20 EMA — wait closed bearish candle confirmation before selling`
       });
     }
   } else if (p.isBullishPinOrAbsorption) {
     if (effectiveH1 === 'DOWNTREND' && p.ema20 < p.ema50 && p.livePrice < p.ema20) {
-      bearWeight += 12;
+      bearWeight += 10;
       bullWeight += 10;
       verdicts.push({
         name: '1. Candle & Liquidity Sweep',
-        signal: 'SELL',
+        signal: 'CAUTION',
         weight: '12%',
         detail: `Lower wick pause inside bearish EMA trend — ceiling near ${p.keyLevel ? p.keyLevel.toFixed(decimals) : p.ema50.toFixed(decimals)}`
       });
-    } else {
-      bullWeight += 24;
-      bearWeight += 2;
+    } else if (lastClosedBull || p.livePrice >= p.ema20) {
+      bullWeight += 22;
+      bearWeight += 3;
       verdicts.push({
         name: '1. Candle & Liquidity Sweep',
         signal: 'BUY',
-        weight: '24%',
-        detail: `Lower wick absorption / SSL sweep near ${p.keyLevel ? p.keyLevel.toFixed(decimals) : p.livePrice.toFixed(decimals)}`
+        weight: '22%',
+        detail: `Confirmed bullish absorption / SSL sweep holding above 20 EMA near ${p.keyLevel ? p.keyLevel.toFixed(decimals) : p.livePrice.toFixed(decimals)}`
+      });
+    } else {
+      bullWeight += 10;
+      bearWeight += 10;
+      verdicts.push({
+        name: '1. Candle & Liquidity Sweep',
+        signal: 'CAUTION',
+        weight: '10%',
+        detail: `Lower wick bounce still below 20 EMA — wait closed bullish candle confirmation before buying`
       });
     }
   } else if (microDeltaPips >= significantDisplacementPips) {
     if (effectiveH1 === 'DOWNTREND' && p.livePrice <= p.ema50) {
-      bearWeight += 18;
-      bullWeight += 6;
-      verdicts.push({
-        name: '1. Candle & Liquidity Sweep',
-        signal: 'SELL',
-        weight: '18%',
-        detail: `Bearish Retracement Pullback (+${microDeltaPips}p bounce) into 20/50 EMA — Primary DOWNTREND intact (Sell the Rally)`
-      });
+      if (lastClosedBear) {
+        bearWeight += 18;
+        bullWeight += 6;
+        verdicts.push({
+          name: '1. Candle & Liquidity Sweep',
+          signal: 'SELL',
+          weight: '18%',
+          detail: `Bearish rally rejection close (+${microDeltaPips}p bounce) into 20/50 EMA — Primary DOWNTREND intact (Sell the Rally)`
+        });
+      } else {
+        bearWeight += 9;
+        bullWeight += 9;
+        verdicts.push({
+          name: '1. Candle & Liquidity Sweep',
+          signal: 'CAUTION',
+          weight: '10%',
+          detail: `Bullish bounce (+${microDeltaPips}p) inside H1 DOWNTREND — wait bearish closed candle rejection before selling`
+        });
+      }
     } else {
       bullWeight += 20;
       bearWeight += 4;
@@ -2263,14 +2585,25 @@ export function evaluateAllTradeFactors(p: {
     }
   } else if (microDeltaPips <= -significantDisplacementPips) {
     if (effectiveH1 === 'UPTREND' && p.livePrice >= p.ema50) {
-      bullWeight += 18;
-      bearWeight += 6;
-      verdicts.push({
-        name: '1. Candle & Liquidity Sweep',
-        signal: 'BUY',
-        weight: '18%',
-        detail: `Bullish Retracement Pullback (${microDeltaPips}p dip) into 20/50 EMA — Primary UPTREND intact (Buy the Dip)`
-      });
+      if (lastClosedBull) {
+        bullWeight += 18;
+        bearWeight += 6;
+        verdicts.push({
+          name: '1. Candle & Liquidity Sweep',
+          signal: 'BUY',
+          weight: '18%',
+          detail: `Bullish dip rejection close (${microDeltaPips}p dip) into 20/50 EMA — Primary UPTREND intact (Buy the Dip)`
+        });
+      } else {
+        bullWeight += 9;
+        bearWeight += 9;
+        verdicts.push({
+          name: '1. Candle & Liquidity Sweep',
+          signal: 'CAUTION',
+          weight: '10%',
+          detail: `Bearish drop (${microDeltaPips}p) inside H1 UPTREND — wait bullish closed candle confirmation (do not catch falling knife)`
+        });
+      }
     } else {
       bearWeight += 20;
       bullWeight += 4;
@@ -2950,6 +3283,59 @@ export function evaluateAllTradeFactors(p: {
     });
   }
 
+  // FACTOR 12: Institutional Floor Pivots, Z-Score & Multi-Oscillator (Stochastic 14/3/3 + CCI 20 + BB-Keltner Squeeze) (20 pts max)
+  const quantMetrics = computeInstitutionalQuantMetrics({
+    candles: p.candles,
+    livePrice: p.livePrice,
+    ema20: p.ema20,
+    atrPips: effectiveAtrPips,
+    pipMultiplier,
+    decimals
+  });
+  const pivotRef = quantMetrics.pivotLevels.pivot;
+  const zVal = quantMetrics.zScore;
+  const stochBull = quantMetrics.stochK >= quantMetrics.stochD && quantMetrics.stochK < 85 && quantMetrics.cci20 > 20;
+  const stochBear = quantMetrics.stochK <= quantMetrics.stochD && quantMetrics.stochK > 15 && quantMetrics.cci20 < -20;
+  const abovePivot = p.livePrice >= pivotRef;
+
+  if (Math.abs(zVal) > 2.05) {
+    bullWeight += abovePivot ? 6 : 4;
+    bearWeight += !abovePivot ? 6 : 4;
+    verdicts.push({
+      name: '12. Floor Pivots & Z-Score Quant',
+      signal: 'CAUTION',
+      weight: '10%',
+      detail: `Z-Score ${zVal >= 0 ? `+${zVal}` : zVal}σ stretched · Pivot ${pivotRef.toFixed(decimals)} · Stoch ${quantMetrics.stochK}/${quantMetrics.stochD} — wait value retest`
+    });
+  } else if (abovePivot && stochBull && (quantMetrics.squeezeActive || quantMetrics.cci20 >= 45)) {
+    const f12Pts = quantMetrics.squeezeActive ? 20 : 16;
+    bullWeight += f12Pts;
+    verdicts.push({
+      name: '12. Floor Pivots & Z-Score Quant',
+      signal: 'BUY',
+      weight: `${f12Pts}%`,
+      detail: `Above Pivot (${pivotRef.toFixed(decimals)}) · Stoch ${quantMetrics.stochK}>${quantMetrics.stochD} · CCI +${quantMetrics.cci20} · Z ${zVal}σ${quantMetrics.squeezeActive ? ' · Squeeze Release' : ''}`
+    });
+  } else if (!abovePivot && stochBear && (quantMetrics.squeezeActive || quantMetrics.cci20 <= -45)) {
+    const f12Pts = quantMetrics.squeezeActive ? 20 : 16;
+    bearWeight += f12Pts;
+    verdicts.push({
+      name: '12. Floor Pivots & Z-Score Quant',
+      signal: 'SELL',
+      weight: `${f12Pts}%`,
+      detail: `Below Pivot (${pivotRef.toFixed(decimals)}) · Stoch ${quantMetrics.stochK}<${quantMetrics.stochD} · CCI ${quantMetrics.cci20} · Z ${zVal}σ${quantMetrics.squeezeActive ? ' · Squeeze Release' : ''}`
+    });
+  } else {
+    bullWeight += 6;
+    bearWeight += 6;
+    verdicts.push({
+      name: '12. Floor Pivots & Z-Score Quant',
+      signal: 'CAUTION',
+      weight: '10%',
+      detail: `Pivot ${pivotRef.toFixed(decimals)} · Z-Score ${zVal}σ · Stoch ${quantMetrics.stochK}/${quantMetrics.stochD} · CCI ${quantMetrics.cci20}`
+    });
+  }
+
   const total = Math.max(1, bullWeight + bearWeight);
   const bullScorePct = Math.round((bullWeight / total) * 100);
   const bearScorePct = 100 - bullScorePct;
@@ -2959,17 +3345,27 @@ export function evaluateAllTradeFactors(p: {
   let isBuy: boolean;
   if (p.biasOverride) {
     isBuy = p.biasOverride === 'BUY';
-  } else if (bos && bos.brokenStructure && (bos.bosDirection === 'BEARISH_CHOCH' || bos.bosDirection === 'BEARISH_BOS')) {
-    // Structural Bearish BOS/CHoCH overrides lagging EMAs so we NEVER recommend BUY during a structural breakdown
+  } else if (
+    bos &&
+    bos.brokenStructure &&
+    (bos.bosDirection === 'BEARISH_CHOCH' || bos.bosDirection === 'BEARISH_BOS') &&
+    (effectiveH1 === 'DOWNTREND' || bearScorePct >= 50 || bearishEmaStack)
+  ) {
+    // Structural Bearish BOS/CHoCH backed by H1 or factor/EMA weight prevents buying a breakdown
     isBuy = false;
-  } else if (bos && bos.brokenStructure && (bos.bosDirection === 'BULLISH_CHOCH' || bos.bosDirection === 'BULLISH_BOS')) {
-    // Structural Bullish BOS/CHoCH overrides lagging EMAs so we NEVER recommend SELL during a structural breakout
+  } else if (
+    bos &&
+    bos.brokenStructure &&
+    (bos.bosDirection === 'BULLISH_CHOCH' || bos.bosDirection === 'BULLISH_BOS') &&
+    (effectiveH1 === 'UPTREND' || bullScorePct >= 50 || bullishEmaStack)
+  ) {
+    // Structural Bullish BOS/CHoCH backed by H1 or factor/EMA weight prevents shorting a breakout
     isBuy = true;
   } else if (bearishEmaStack && (effectiveH1 === 'DOWNTREND' || bearScorePct >= 52)) {
-    // Objective bearish price/EMA alignment: Price < 20 EMA < 50 EMA -> MUST project SELL
+    // Objective bearish price/EMA alignment: Price < 20 EMA < 50 EMA -> project SELL
     isBuy = false;
   } else if (bullishEmaStack && (effectiveH1 === 'UPTREND' || bullScorePct >= 52)) {
-    // Objective bullish price/EMA alignment: Price > 20 EMA > 50 EMA -> MUST project BUY
+    // Objective bullish price/EMA alignment: Price > 20 EMA > 50 EMA -> project BUY
     isBuy = true;
   } else if (bosBearActive && !bosBullActive && bearScorePct >= 50) {
     isBuy = false;
@@ -3497,16 +3893,30 @@ export function evaluateMultiTimeframeAlignment(p: {
   };
 }
 
+const cachedBackgroundCandles: Partial<
+  Record<CurrencyPair, { m15?: OhlcCandle[]; h1?: OhlcCandle[]; fetchedAt: number }>
+> = {};
+let isRefreshingBgCandles = false;
+
 export function runLiveCandleBacktest(params: {
   pair: CurrencyPair;
   candles?: OhlcCandle[];
+  h1Candles?: OhlcCandle[];
   atrPips?: number;
   brokerSpread: number;
   direction?: 'BUY' | 'SELL';
 }): LiveBacktestStats {
   const { pipMultiplier } = getPairSpecs(params.pair);
-  const bars = params.candles || [];
-  if (bars.length < 28) {
+  const rawBars = params.candles || [];
+  // Prefer higher-sample H1 structural window (120 bars = 5 days) if active candle window is sparse (< 80 bars)
+  const bars =
+    rawBars.length < 80 && params.h1Candles && params.h1Candles.length >= 60
+      ? params.h1Candles
+      : rawBars.length >= 30
+      ? rawBars
+      : params.h1Candles || rawBars;
+
+  if (bars.length < 30) {
     return {
       sampleTrades: 0,
       tp1BreakevenWins: 0,
@@ -3517,7 +3927,7 @@ export function runLiveCandleBacktest(params: {
       profitFactor: 0,
       netExpectancyR: 0,
       verdictLabel: 'LOW SAMPLE / CHOP',
-      summary: `Waiting for 28+ closed candles on ${params.pair} before backtest stats finalize.`
+      summary: `Waiting for 30+ closed candles on ${params.pair} before walk-forward precision backtest finalizes.`
     };
   }
 
@@ -3530,11 +3940,17 @@ export function runLiveCandleBacktest(params: {
   let grossLossR = 0;
   const spreadBuffer = params.brokerSpread * 1.25;
 
-  let i = 20;
+  let i = 24;
   while (i <= bars.length - 8) {
-    const windowCloses = bars.slice(0, i + 1).map((b) => b.close);
+    const windowBars = bars.slice(0, i + 1);
+    const windowCloses = windowBars.map((b) => b.close);
     const ema20 = computeRealEma(windowCloses, 20);
     const ema50 = computeRealEma(windowCloses, Math.min(50, windowCloses.length));
+    const ema50Prev =
+      windowCloses.length > 6 ? computeRealEma(windowCloses.slice(0, -6), Math.min(50, windowCloses.length - 6)) : ema50;
+    const rsiVal = computeRealRsi(windowCloses, 14);
+    const macd = computeRealMacd(windowCloses);
+    const adx = computeRealAdx(windowBars, 14);
 
     let atrSum = 0;
     const atrStart = Math.max(1, i - 13);
@@ -3552,12 +3968,44 @@ export function runLiveCandleBacktest(params: {
     const entryBar = bars[i];
     const entryPrice = entryBar.close;
 
-    const candidateSide: 'BUY' | 'SELL' | null =
-      ema20 > ema50 && entryBar.close >= ema20
-        ? 'BUY'
-        : ema20 < ema50 && entryBar.close <= ema20
-        ? 'SELL'
-        : null;
+    // Statistical Z-Score non-chase filter (last 20 closed bars)
+    const zWin = windowCloses.slice(-20);
+    const zMean = zWin.reduce((a, b) => a + b, 0) / Math.max(1, zWin.length);
+    const zVar = zWin.reduce((a, b) => a + (b - zMean) ** 2, 0) / Math.max(1, zWin.length);
+    const zStd = Math.max(1e-9, Math.sqrt(zVar));
+    const windowZ = (entryPrice - zMean) / zStd;
+
+    // Cross-examine ALL precision filters before taking a historical entry (ZERO lookahead):
+    // 1) EMA20 vs EMA50 + EMA50 slope (HTF proxy) + Closed candle confirmation in trend direction
+    // 2) ADX >= 18.0 & |+DI - -DI| > 2.0 directional agreement (eliminates dead chop whipsaws)
+    // 3) MACD(12,26,9) momentum agreement + RSI non-exhaustion corridor + Z-Score <= 1.45
+    const isBullQualified =
+      ema20 > ema50 &&
+      ema50 >= ema50Prev &&
+      entryBar.close > ema20 &&
+      entryBar.close >= entryBar.open &&
+      adx.adx >= 18.0 &&
+      adx.diSpread > 2.0 &&
+      macd.bias === 'BULLISH' &&
+      rsiVal >= 51 &&
+      rsiVal <= 67;
+
+    const isBearQualified =
+      ema20 < ema50 &&
+      ema50 <= ema50Prev &&
+      entryBar.close < ema20 &&
+      entryBar.close <= entryBar.open &&
+      adx.adx >= 18.0 &&
+      adx.diSpread < -2.0 &&
+      macd.bias === 'BEARISH' &&
+      rsiVal >= 33 &&
+      rsiVal <= 49;
+
+    const candidateSide: 'BUY' | 'SELL' | null = isBullQualified
+      ? 'BUY'
+      : isBearQualified
+      ? 'SELL'
+      : null;
 
     if (!candidateSide) {
       i += 1;
@@ -3565,13 +4013,13 @@ export function runLiveCandleBacktest(params: {
     }
 
     const distFromEma20Pips = Math.abs(entryPrice - ema20) * pipMultiplier;
-    // Enter only inside 20 EMA value corridor (avoid chasing overextended spikes)
-    if (distFromEma20Pips > atrPips * 1.35) {
+    // Enter only inside 20 EMA value corridor & Z-Score <= 1.45 (avoid chasing overextended spikes)
+    if (Math.abs(windowZ) > 1.45 || distFromEma20Pips > atrPips * 1.4) {
       i += 1;
       continue;
     }
 
-    const recentSlice = bars.slice(Math.max(0, i - 6), i + 1);
+    const recentSlice = bars.slice(Math.max(0, i - 8), i + 1);
     const swingLow = Math.min(...recentSlice.map((b) => b.low));
     const swingHigh = Math.max(...recentSlice.map((b) => b.high));
     const swingDistPips =
@@ -3579,10 +4027,11 @@ export function runLiveCandleBacktest(params: {
         ? Math.max(0, (entryPrice - swingLow) * pipMultiplier)
         : Math.max(0, (swingHigh - entryPrice) * pipMultiplier);
 
-    const slPips = Math.max(atrPips * 1.15, Math.min(atrPips * 2.1, swingDistPips)) + spreadBuffer;
+    // Swing-protected WIDE_TREND geometry: 1.8x ATR SL clearance + 1.35R TP1 (50% BE) + 2.25R TP2
+    const slPips = Math.max(atrPips * 1.8, Math.min(atrPips * 2.8, swingDistPips + atrPips * 0.45)) + spreadBuffer;
     const slDist = slPips / pipMultiplier;
-    const tp1Dist = (slPips * 1.6) / pipMultiplier;
-    const tp2Dist = (slPips * 2.7) / pipMultiplier;
+    const tp1Dist = (slPips * 1.35) / pipMultiplier;
+    const tp2Dist = (slPips * 2.25) / pipMultiplier;
 
     const slPrice = candidateSide === 'BUY' ? entryPrice - slDist : entryPrice + slDist;
     const tp1Price = candidateSide === 'BUY' ? entryPrice + tp1Dist : entryPrice - tp1Dist;
@@ -3592,8 +4041,9 @@ export function runLiveCandleBacktest(params: {
     let hitTp1 = false;
     let tradeR = 0;
     let closedAtBar = i + 1;
+    const maxHoldBars = 30;
 
-    for (let j = i + 1; j < Math.min(bars.length, i + 14); j++) {
+    for (let j = i + 1; j < Math.min(bars.length, i + 1 + maxHoldBars); j++) {
       const f = bars[j];
       closedAtBar = j;
       if (candidateSide === 'BUY') {
@@ -3601,7 +4051,7 @@ export function runLiveCandleBacktest(params: {
         // Conservative tie-breaker: check SL before TP if both touched in same candle
         if (f.low <= activeSl) {
           if (hitTp1) {
-            tradeR = 0.8 + 0.025; // +1.6R on 50% TP1 + tiny BE lock on remaining 50%
+            tradeR = 0.675 + 0.025; // 50% closed at +1.35R, 50% stopped at +0.05R BE lock
           } else {
             tradeR = -1.0;
           }
@@ -3611,14 +4061,14 @@ export function runLiveCandleBacktest(params: {
           hitTp1 = true;
         }
         if (f.high >= tp2Price) {
-          tradeR = 0.8 + 1.35; // 50% at 1.6R + 50% at 2.7R = +2.15R
+          tradeR = 0.675 + 1.125; // 50% at +1.35R + 50% at +2.25R = +1.80R
           break;
         }
       } else {
         const activeSl = hitTp1 ? beLockPrice : slPrice;
         if (f.high >= activeSl) {
           if (hitTp1) {
-            tradeR = 0.8 + 0.025;
+            tradeR = 0.675 + 0.025;
           } else {
             tradeR = -1.0;
           }
@@ -3628,13 +4078,13 @@ export function runLiveCandleBacktest(params: {
           hitTp1 = true;
         }
         if (f.low <= tp2Price) {
-          tradeR = 0.8 + 1.35;
+          tradeR = 0.675 + 1.125;
           break;
         }
       }
-      if (j === Math.min(bars.length - 1, i + 13)) {
+      if (j === Math.min(bars.length - 1, i + maxHoldBars)) {
         if (hitTp1) {
-          tradeR = 0.8;
+          tradeR = 0.675;
         } else {
           const markR =
             candidateSide === 'BUY'
@@ -3650,7 +4100,7 @@ export function runLiveCandleBacktest(params: {
     if (tradeR > 0) {
       grossWinR += tradeR;
       if (hitTp1) tp1BreakevenWins++;
-      if (tradeR >= 1.9) fullTp2Wins++;
+      if (tradeR >= 1.65) fullTp2Wins++;
     } else {
       grossLossR += Math.abs(tradeR);
       losses++;
@@ -3670,7 +4120,7 @@ export function runLiveCandleBacktest(params: {
       profitFactor: 0,
       netExpectancyR: 0,
       verdictLabel: 'LOW SAMPLE / CHOP',
-      summary: `Recent ${bars.length} candles on ${params.pair} stayed mostly inside chop — system rules rightly skipped low-edge entries.`
+      summary: `Recent ${bars.length} closed candles on ${params.pair} failed strict ADX>=18 + MACD + Z<=1.45 + Closed-Candle alignment — precision filter rightly stayed aside.`
     };
   }
 
@@ -3696,7 +4146,7 @@ export function runLiveCandleBacktest(params: {
     profitFactor,
     netExpectancyR,
     verdictLabel,
-    summary: `Walk-forward test across the last ${bars.length} closed candles on ${params.pair}: ${sampleTrades} qualified 20/50 EMA value-zone entries (${tp1WinRatePct}% reached TP1/positive close, ${losses} SL losses, ${profitFactor} Profit Factor, ${netExpectancyR >= 0 ? '+' : ''}${netExpectancyR}R avg expectancy per trade).`
+    summary: `Walk-forward precision test (${bars.length} candles, 1.8x ATR SL / 1.35R TP1 / 2.25R TP2): ${sampleTrades} ADX/MACD/Z-Score setups (${tp1WinRatePct}% positive/TP1 rate, ${losses} SL losses, ${profitFactor} PF, ${netExpectancyR >= 0 ? '+' : ''}${netExpectancyR}R avg expectancy).`
   };
 }
 
@@ -3766,6 +4216,7 @@ export function computeRealChartTradeParams(p: {
   macdBias?: 'BULLISH' | 'BEARISH' | 'FLAT';
   candlePattern?: CandlePatternSignal;
   candles?: OhlcCandle[];
+  h1Candles?: OhlcCandle[];
   macro?: MacroContextSnapshot;
   biasOverride?: 'BUY' | 'SELL';
   previousDirection?: 'BUY' | 'SELL';
@@ -3839,35 +4290,67 @@ export function computeRealChartTradeParams(p: {
     baseTp1Pips = isGold ? 40 : isBtc ? 420 : isEth ? 44 : isIndex ? 98 : isOil ? 64 : 28;
     baseTp2Pips = isGold ? 68 : isBtc ? 700 : isEth ? 74 : isIndex ? 165 : isOil ? 108 : 48;
   } else if (p.targetTf === 'H1') {
-    baseSlPips = isGold ? 24 : isBtc ? 240 : isEth ? 32 : isIndex ? 72 : isOil ? 42 : 20;
-    baseTp1Pips = isGold ? 45 : isBtc ? 480 : isEth ? 58 : isIndex ? 126 : isOil ? 74 : 36;
-    baseTp2Pips = isGold ? 76 : isBtc ? 800 : isEth ? 96 : isIndex ? 215 : isOil ? 126 : 60;
+    baseSlPips = isGold ? 28 : isBtc ? 260 : isEth ? 36 : isIndex ? 80 : isOil ? 46 : 24;
+    baseTp1Pips = isGold ? 38 : isBtc ? 350 : isEth ? 49 : isIndex ? 108 : isOil ? 62 : 33;
+    baseTp2Pips = isGold ? 63 : isBtc ? 585 : isEth ? 81 : isIndex ? 180 : isOil ? 104 : 54;
   } else if (p.targetTf === 'H4') {
-    baseSlPips = isGold ? 26 : isBtc ? 260 : isEth ? 40 : isIndex ? 90 : isOil ? 48 : 22;
-    baseTp1Pips = isGold ? 50 : isBtc ? 540 : isEth ? 72 : isIndex ? 158 : isOil ? 86 : 40;
-    baseTp2Pips = isGold ? 84 : isBtc ? 880 : isEth ? 120 : isIndex ? 268 : isOil ? 144 : 68;
+    baseSlPips = isGold ? 32 : isBtc ? 280 : isEth ? 42 : isIndex ? 95 : isOil ? 50 : 28;
+    baseTp1Pips = isGold ? 44 : isBtc ? 380 : isEth ? 57 : isIndex ? 128 : isOil ? 68 : 38;
+    baseTp2Pips = isGold ? 72 : isBtc ? 630 : isEth ? 95 : isIndex ? 215 : isOil ? 112 : 63;
   } else if (p.targetTf === 'D1') {
-    baseSlPips = isGold ? 28 : isBtc ? 280 : isEth ? 48 : isIndex ? 110 : isOil ? 52 : 24;
-    baseTp1Pips = isGold ? 56 : isBtc ? 600 : isEth ? 88 : isIndex ? 195 : isOil ? 96 : 45;
-    baseTp2Pips = isGold ? 92 : isBtc ? 980 : isEth ? 148 : isIndex ? 325 : isOil ? 162 : 76;
+    baseSlPips = isGold ? 38 : isBtc ? 320 : isEth ? 52 : isIndex ? 115 : isOil ? 56 : 32;
+    baseTp1Pips = isGold ? 52 : isBtc ? 435 : isEth ? 70 : isIndex ? 155 : isOil ? 76 : 44;
+    baseTp2Pips = isGold ? 86 : isBtc ? 720 : isEth ? 118 : isIndex ? 260 : isOil ? 126 : 72;
   }
 
-  // Derive MACD, ADX, and Candlestick Pattern telemetry if candles are available
-  const derivedCloses = p.candles && p.candles.length >= 18 ? p.candles.map((c) => c.close) : null;
+  // Resolve real cached OHLC candles automatically if caller omitted them so indicators & backtest NEVER diverge
+  const resolvedH1Candles: OhlcCandle[] | undefined =
+    p.h1Candles && p.h1Candles.length >= 20
+      ? p.h1Candles
+      : typeof cachedBackgroundCandles !== 'undefined'
+      ? cachedBackgroundCandles[p.targetPair]?.h1
+      : undefined;
+  const effectiveCandles: OhlcCandle[] | undefined =
+    p.candles && p.candles.length >= 12
+      ? p.candles
+      : typeof cachedBackgroundCandles !== 'undefined'
+      ? p.targetTf === 'H1' || p.targetTf === 'H4' || p.targetTf === 'D1'
+        ? cachedBackgroundCandles[p.targetPair]?.h1 || cachedBackgroundCandles[p.targetPair]?.m15
+        : cachedBackgroundCandles[p.targetPair]?.m15
+      : undefined;
+
+  // Derive MACD, ADX, Candlestick Pattern & Pin/Sweep signals consistently with evaluateCandleSeriesAndTick
+  const derivedCloses = effectiveCandles && effectiveCandles.length >= 18 ? effectiveCandles.map((c) => c.close) : null;
   const derivedMacd =
     p.macdBias !== undefined && p.macdHistogram !== undefined
       ? { bias: p.macdBias, histogram: p.macdHistogram }
       : derivedCloses
       ? computeRealMacd(derivedCloses)
       : { bias: (p.ema20 ?? p.price) >= (p.ema50 ?? p.price) ? ('BULLISH' as const) : ('BEARISH' as const), histogram: 0 };
-  const derivedAdx =
-    p.adxStrength !== undefined
-      ? p.adxStrength
-      : p.candles && p.candles.length >= 16
-      ? computeRealAdx(p.candles, 14).adx
-      : 21.0;
+  const adxStats =
+    effectiveCandles && effectiveCandles.length >= 16
+      ? computeRealAdx(effectiveCandles, 14)
+      : { adx: p.adxStrength ?? 21.0, plusDi: 22.0, minusDi: 20.0, diSpread: 2.0, adxRising: true, regime: 'MODERATE_TREND' as const };
+  const derivedAdx = p.adxStrength !== undefined ? p.adxStrength : adxStats.adx;
   const derivedPattern: CandlePatternSignal =
-    p.candlePattern ?? (p.candles && p.candles.length >= 3 ? detectLatestCandlePattern(p.candles) : 'CONSOLIDATION');
+    p.candlePattern ?? (effectiveCandles && effectiveCandles.length >= 3 ? detectLatestCandlePattern(effectiveCandles) : 'CONSOLIDATION');
+
+  const lastBarC = effectiveCandles && effectiveCandles.length >= 2 ? effectiveCandles[effectiveCandles.length - 1] : undefined;
+  const prevBarC = effectiveCandles && effectiveCandles.length >= 2 ? effectiveCandles[effectiveCandles.length - 2] : undefined;
+  const prev3BarC = effectiveCandles && effectiveCandles.length >= 4 ? effectiveCandles[effectiveCandles.length - 4] : prevBarC;
+  const prevBodyC = prevBarC ? Math.abs(prevBarC.close - prevBarC.open) : 0;
+  const prevUpperWickC = prevBarC ? Math.max(0, prevBarC.high - Math.max(prevBarC.open, prevBarC.close)) : 0;
+  const prevLowerWickC = prevBarC ? Math.max(0, Math.min(prevBarC.open, prevBarC.close) - prevBarC.low) : 0;
+  const derivedBearishPinOrSweep = Boolean(
+    (prevBarC && lastBarC && prevUpperWickC > prevBodyC * 1.25 && lastBarC.close < prevBarC.high) ||
+      derivedPattern === 'BEARISH_PIN_REJECTION' ||
+      derivedPattern === 'BEARISH_ENGULFING'
+  );
+  const derivedBullishPinOrAbsorption = Boolean(
+    (prevBarC && lastBarC && prevLowerWickC > prevBodyC * 1.25 && lastBarC.close > prevBarC.low) ||
+      derivedPattern === 'BULLISH_PIN_REJECTION' ||
+      derivedPattern === 'BULLISH_ENGULFING'
+  );
 
   // Unified All-Confluence BUY / SELL Evaluation
   const allFactorEval = evaluateAllTradeFactors({
@@ -3878,6 +4361,9 @@ export function computeRealChartTradeParams(p: {
     rsi: p.rsi ?? 52.0,
     atrPips: p.atrPips,
     keyLevel: p.keyLevel,
+    prev3Close: prev3BarC?.close,
+    isBearishPinOrSweep: derivedBearishPinOrSweep,
+    isBullishPinOrAbsorption: derivedBullishPinOrAbsorption,
     brokerSpread,
     macro: p.macro,
     h1TrendDirection: p.h1TrendDirection,
@@ -3889,7 +4375,7 @@ export function computeRealChartTradeParams(p: {
     macdBias: derivedMacd.bias,
     macdHistogram: derivedMacd.histogram,
     candlePattern: derivedPattern,
-    candles: p.candles
+    candles: effectiveCandles
   });
 
   const isBuy = allFactorEval.isBuy;
@@ -3909,7 +4395,19 @@ export function computeRealChartTradeParams(p: {
       ? (isBuy && macro.dxyPressurePct >= 0.05) || (!isBuy && macro.dxyPressurePct <= -0.05)
       : (isBuy && macro.dxyPressurePct <= -0.05) || (!isBuy && macro.dxyPressurePct >= 0.05);
 
-  // Anchor Stop Loss beyond real Swing High/Low (protected BOS swing anchor prioritized) + ATR volatility + broker spread
+  // Compute Institutional Quant Telemetry (Floor Pivots, Z-Score, BB-Keltner Squeeze, Stoch(14,3,3), CCI(20), OTE & FVG)
+  const ema20Anchor = p.ema20 ?? p.price;
+  const effectiveAtrForQuant = Math.max(4, p.atrPips ?? baseSlPips * 0.85);
+  const quantMetricsBase = computeInstitutionalQuantMetrics({
+    candles: effectiveCandles,
+    livePrice: p.price,
+    ema20: ema20Anchor,
+    atrPips: effectiveAtrForQuant,
+    pipMultiplier,
+    decimals
+  });
+
+  // Anchor Stop Loss beyond real Swing High/Low (protected BOS swing + 0.35x ATR liquidity sweep shield + broker spread)
   const bosSwingAnchor = isBuy
     ? p.bosAnalysis?.protectedSwingLow && p.bosAnalysis.protectedSwingLow < p.price
       ? p.bosAnalysis.protectedSwingLow
@@ -3923,16 +4421,21 @@ export function computeRealChartTradeParams(p: {
       ? Math.abs(p.price - relevantSwingPrice) * pipMultiplier
       : 0;
   const effectiveAtr = Math.max(3, p.atrPips ?? baseSlPips * 0.85);
-  const spreadBuffer = brokerSpread * 1.25;
-  const minSlFloor = isGold ? 18 : isBtc ? 160 : isEth ? 16 : isIndex ? 32 : isOil ? 22 : 9;
+  const spreadBuffer = brokerSpread * 1.3;
+  const sweepShieldPips = effectiveAtr * 0.45;
+  const minSlFloor = isGold ? 22 : isBtc ? 180 : isEth ? 18 : isIndex ? 36 : isOil ? 24 : 11;
   const maxStructuralSlCap = activeRiskCfg.enabled
-    ? Math.max(hardSlCapPips, baseSlPips * 2.2, effectiveAtr * 2.35 + spreadBuffer)
-    : hardSlCapPips;
+    ? Math.max(hardSlCapPips, baseSlPips * 2.4, effectiveAtr * 2.85 + spreadBuffer)
+    : Math.max(hardSlCapPips, effectiveAtr * 2.55 + spreadBuffer);
 
+  // Proven WIDE_TREND SL clearance (1.75x ATR + spread floor up to swing protection) to prevent intraday wicks shaking out winning trends
   const rawTargetSlPips =
     rawSwingDistPips > 0
-      ? Math.max(effectiveAtr * 1.1 + spreadBuffer, Math.min(rawSwingDistPips + spreadBuffer, maxStructuralSlCap))
-      : Math.min(effectiveAtr * 1.35 + spreadBuffer, maxStructuralSlCap);
+      ? Math.max(
+          effectiveAtr * 1.75 + spreadBuffer,
+          Math.min(rawSwingDistPips + sweepShieldPips + spreadBuffer, maxStructuralSlCap)
+        )
+      : Math.min(effectiveAtr * 1.85 + spreadBuffer, maxStructuralSlCap);
 
   const structuralSlPips = Number(
     Math.min(maxStructuralSlCap, Math.max(minSlFloor, rawTargetSlPips, baseSlPips)).toFixed(1)
@@ -3976,13 +4479,37 @@ export function computeRealChartTradeParams(p: {
     baseTp3Pips = Number((baseTp2Pips * 1.35).toFixed(1));
   } else {
     if (riskPlan && riskPlan.syncSlTpWithRisk) {
-      baseTp1Pips = Number((baseSlPips * 1.65).toFixed(1));
-      baseTp2Pips = Number((baseSlPips * 2.85).toFixed(1));
+      baseTp1Pips = Number((baseSlPips * 1.35).toFixed(1));
+      baseTp2Pips = Number((baseSlPips * 2.25).toFixed(1));
     } else {
-      baseTp1Pips = Number(Math.max(baseSlPips * 1.65, baseTp1Pips).toFixed(1));
-      baseTp2Pips = Number(Math.max(baseSlPips * 2.85, baseTp2Pips).toFixed(1));
+      baseTp1Pips = Number(Math.max(baseSlPips * 1.35, baseTp1Pips).toFixed(1));
+      baseTp2Pips = Number(Math.max(baseSlPips * 2.25, baseTp2Pips).toFixed(1));
     }
     baseTp3Pips = Number((baseTp2Pips * macroExpansionMultiplier * rsiHeadroomFactor).toFixed(1));
+  }
+
+  // Blend TP1 / TP2 gently toward institutional Floor Pivots (R1/R2 for BUY, S1/S2 for SELL) when structurally aligned
+  const piv = quantMetricsBase.pivotLevels;
+  if (!riskPlan?.targetProfitModeActive) {
+    if (isBuy) {
+      const r1Pips = (piv.r1 - p.price) * pipMultiplier;
+      const r2Pips = (piv.r2 - p.price) * pipMultiplier;
+      if (r1Pips >= baseSlPips * 1.25 && r1Pips <= baseTp1Pips * 1.3) {
+        baseTp1Pips = Number((baseTp1Pips * 0.55 + r1Pips * 0.45).toFixed(1));
+      }
+      if (r2Pips >= Math.max(baseTp1Pips + minLogicalGapPips, baseSlPips * 1.85) && r2Pips <= baseTp2Pips * 1.35) {
+        baseTp2Pips = Number((baseTp2Pips * 0.55 + r2Pips * 0.45).toFixed(1));
+      }
+    } else {
+      const s1Pips = (p.price - piv.s1) * pipMultiplier;
+      const s2Pips = (p.price - piv.s2) * pipMultiplier;
+      if (s1Pips >= baseSlPips * 1.25 && s1Pips <= baseTp1Pips * 1.3) {
+        baseTp1Pips = Number((baseTp1Pips * 0.55 + s1Pips * 0.45).toFixed(1));
+      }
+      if (s2Pips >= Math.max(baseTp1Pips + minLogicalGapPips, baseSlPips * 1.85) && s2Pips <= baseTp2Pips * 1.35) {
+        baseTp2Pips = Number((baseTp2Pips * 0.55 + s2Pips * 0.45).toFixed(1));
+      }
+    }
   }
 
   // Minimum safe pip separation so SL/TP NEVER collapse onto Entry / Live Candle price after rounding
@@ -4238,21 +4765,56 @@ export function computeRealChartTradeParams(p: {
       (ev) => ev.currency === p.targetPair || ev.currency.includes(baseCurrency) || ev.currency.includes('USD')
     ) || allEconomicEvents[0];
 
+  // Sniper Institutional Limit EP: Blends 20 EMA, 0.65 Fib OTE, and Unmitigated Fair Value Gap (FVG) discount/premium zone
   let advisoryEntryPrice = anchoredEntry;
   let advisoryDiscountPips = 0;
-  let advisoryEntryNote = `Direct market execution @ ${anchoredEntry.toFixed(decimals)}`;
+  let advisoryEntryNote = `Direct market execution @ ${anchoredEntry.toFixed(decimals)} (inside prime EMA/OTE value zone)`;
+  const validBullFvg =
+    quantMetricsBase.fvgZone &&
+    quantMetricsBase.fvgZone.bias === 'BULLISH' &&
+    quantMetricsBase.fvgZone.mid < p.price &&
+    quantMetricsBase.fvgZone.mid > slPrice + minGapPrice * 0.5
+      ? quantMetricsBase.fvgZone.mid
+      : undefined;
+  const validBearFvg =
+    quantMetricsBase.fvgZone &&
+    quantMetricsBase.fvgZone.bias === 'BEARISH' &&
+    quantMetricsBase.fvgZone.mid > p.price &&
+    quantMetricsBase.fvgZone.mid < slPrice - minGapPrice * 0.5
+      ? quantMetricsBase.fvgZone.mid
+      : undefined;
 
   if (isBuy) {
     if (p.price > ema20Val) {
-      advisoryEntryPrice = Number(ema20Val.toFixed(decimals));
-      advisoryDiscountPips = Number(((p.price - ema20Val) * pipMultiplier).toFixed(1));
-      advisoryEntryNote = `Advisory 1H Entry: Set BUY LIMIT @ ${advisoryEntryPrice} (20 EMA Pullback) to save ${advisoryDiscountPips} pips drawdown`;
+      const oteValid = quantMetricsBase.oteZoneMid < p.price && quantMetricsBase.oteZoneMid > slPrice + minGapPrice;
+      const blendedLimit = validBullFvg
+        ? ema20Val * 0.55 + validBullFvg * 0.45
+        : oteValid
+        ? ema20Val * 0.65 + quantMetricsBase.oteZoneMid * 0.35
+        : ema20Val;
+      advisoryEntryPrice = Number(
+        Math.min(anchoredEntry - 1 / pipMultiplier, Math.max(slPrice + minGapPrice * 0.75, blendedLimit)).toFixed(
+          decimals
+        )
+      );
+      advisoryDiscountPips = Number(((p.price - advisoryEntryPrice) * pipMultiplier).toFixed(1));
+      advisoryEntryNote = `Sniper BUY LIMIT @ ${advisoryEntryPrice} (${validBullFvg ? 'FVG + 20 EMA' : oteValid ? '0.65 OTE + 20 EMA' : '20 EMA Pullback'}) saves ${advisoryDiscountPips}p drawdown`;
     }
   } else {
     if (p.price < ema20Val) {
-      advisoryEntryPrice = Number(ema20Val.toFixed(decimals));
-      advisoryDiscountPips = Number(((ema20Val - p.price) * pipMultiplier).toFixed(1));
-      advisoryEntryNote = `Advisory 1H Entry: Set SELL LIMIT @ ${advisoryEntryPrice} (20 EMA Pullback) to gain ${advisoryDiscountPips} pips premium`;
+      const oteValid = quantMetricsBase.oteZoneMid > p.price && quantMetricsBase.oteZoneMid < slPrice - minGapPrice;
+      const blendedLimit = validBearFvg
+        ? ema20Val * 0.55 + validBearFvg * 0.45
+        : oteValid
+        ? ema20Val * 0.65 + quantMetricsBase.oteZoneMid * 0.35
+        : ema20Val;
+      advisoryEntryPrice = Number(
+        Math.max(anchoredEntry + 1 / pipMultiplier, Math.min(slPrice - minGapPrice * 0.75, blendedLimit)).toFixed(
+          decimals
+        )
+      );
+      advisoryDiscountPips = Number(((advisoryEntryPrice - p.price) * pipMultiplier).toFixed(1));
+      advisoryEntryNote = `Sniper SELL LIMIT @ ${advisoryEntryPrice} (${validBearFvg ? 'FVG + 20 EMA' : oteValid ? '0.65 OTE + 20 EMA' : '20 EMA Pullback'}) gains ${advisoryDiscountPips}p premium`;
     }
   }
 
@@ -4322,8 +4884,67 @@ export function computeRealChartTradeParams(p: {
             p.bosAnalysis.h1BosDirection === 'BULLISH_BOS' ||
             p.bosAnalysis.h1BosDirection === 'BULLISH_CHOCH')))
   );
+  // Minimum-Loss Precision Guards:
+  // 1) Spread-to-ATR Efficiency Shield (prevents entering when spread consumes >28% of a candle)
+  const spreadToAtrRatio = brokerSpread / Math.max(1, effectiveAtr);
+  const spreadEfficient = spreadToAtrRatio <= 0.28;
+  const spreadEfficiencyPct = Number(Math.max(0, Math.min(100, (1 - spreadToAtrRatio) * 100)).toFixed(1));
+
+  // 2) Floor Pivot Brick-Wall Headroom Guard (blocks chasing directly under R1 on BUY or above S1 on SELL)
+  const pivotObstacleDistPips = isBuy
+    ? (quantMetricsBase.pivotLevels.r1 - p.price) * pipMultiplier
+    : (p.price - quantMetricsBase.pivotLevels.s1) * pipMultiplier;
+  const pivotWallBlocked =
+    pivotObstacleDistPips > -effectiveAtr * 0.2 &&
+    pivotObstacleDistPips < Math.max(minLogicalGapPips * 1.35, actualSlPips * 0.55);
+  const pivotWallClear = !pivotWallBlocked;
+
+  // 3) Climax-Wick Rejection Guard on latest confirmed closed candle (blocks buying top wicks / selling bottom wicks)
+  const climaxWickAgainstSide = (() => {
+    if (!effectiveCandles || effectiveCandles.length < 3) return false;
+    const lc = effectiveCandles[effectiveCandles.length - 2];
+    const lcRange = Math.max(1e-9, lc.high - lc.low);
+    const lcBody = Math.abs(lc.close - lc.open);
+    const upperWick = Math.max(0, lc.high - Math.max(lc.open, lc.close));
+    const lowerWick = Math.max(0, Math.min(lc.open, lc.close) - lc.low);
+    if (isBuy) {
+      return upperWick / lcRange >= 0.48 && upperWick > lcBody * 1.15;
+    }
+    return lowerWick / lcRange >= 0.48 && lowerWick > lcBody * 1.15;
+  })();
+  const climaxWickSafe = !climaxWickAgainstSide;
+
+  // 4) Closed-Candle Confirmation & ADX/DI + MACD Cross-Examination Gate
+  // Prevents firing READY BUY right after a bearish candle closed below 20 EMA, or READY SELL right after a bullish close above 20 EMA.
+  const latestClosedCandle =
+    effectiveCandles && effectiveCandles.length >= 2 ? effectiveCandles[effectiveCandles.length - 2] : undefined;
+  const closedCandleOpposing = Boolean(
+    latestClosedCandle &&
+      ((isBuy && latestClosedCandle.close < latestClosedCandle.open && latestClosedCandle.close < ema20Val) ||
+        (!isBuy && latestClosedCandle.close > latestClosedCandle.open && latestClosedCandle.close > ema20Val))
+  );
+  const diAligned = isBuy ? adxStats.diSpread >= 1.8 : adxStats.diSpread <= -1.8;
+  const macdAligned = isBuy ? derivedMacd.bias === 'BULLISH' : derivedMacd.bias === 'BEARISH';
+  const weakTrendOrConflict =
+    derivedAdx < 17.5 ||
+    !diAligned ||
+    (!macdAligned && derivedMacd.bias !== 'FLAT') ||
+    !h1AlignedWithOrder;
+
+  const liveBacktest = runLiveCandleBacktest({
+    pair: p.targetPair,
+    candles: effectiveCandles,
+    h1Candles: resolvedH1Candles,
+    atrPips: effectiveAtr,
+    brokerSpread,
+    direction: isBuy ? 'BUY' : 'SELL'
+  });
+  const backtestNegativeRegime = liveBacktest.sampleTrades >= 2 && liveBacktest.netExpectancyR <= 0;
+
+  const livePriceOnWrongSideOfEma20 = isBuy ? p.price < ema20Val : p.price > ema20Val;
+
   let executionReadiness: ComputedTradeParams['executionReadiness'] = 'READY_ENTER';
-  let executionReadinessReason = `${allFactorEval.alignedFactorsCount}/${allFactorEval.totalFactorsCount} factors, BOS structure & 1H aligned inside value zone.`;
+  let executionReadinessReason = `${allFactorEval.alignedFactorsCount}/${allFactorEval.totalFactorsCount} factors, BOS structure, Closed Candle, ADX/DI (${derivedAdx.toFixed(1)}), MACD & 1H aligned inside value zone.`;
 
   if (pairTiming.windowStatusCode === 'CLOSED_WAIT') {
     executionReadiness = 'NO_TRADE_CLOSED';
@@ -4333,47 +4954,53 @@ export function computeRealChartTradeParams(p: {
     executionReadinessReason =
       p.bosAnalysis?.bosVetoReason ||
       `Opposing Break of Structure (${p.bosAnalysis?.bosDirection.replace('_', ' ')}) blocks ${isBuy ? 'BUY' : 'SELL'} to protect against structural reversal.`;
+  } else if (!spreadEfficient) {
+    executionReadiness = 'NO_TRADE_CHOP';
+    executionReadinessReason = `Spread bleed guard: ${brokerSpread}p spread consumes ${(spreadToAtrRatio * 100).toFixed(0)}% of ${p.targetTf} ATR (${effectiveAtr.toFixed(1)}p) — wait higher volatility session.`;
   } else if (
     allFactorEval.isFlatEmaChop ||
-    scoreMargin < 12 ||
-    allFactorEval.alignedFactorsCount < 4 ||
-    (!h1AlignedWithOrder && allFactorEval.alignedFactorsCount < 5 && !p.bosAnalysis?.brokenStructure)
+    scoreMargin < 14 ||
+    allFactorEval.alignedFactorsCount < 6 ||
+    weakTrendOrConflict ||
+    backtestNegativeRegime
   ) {
     executionReadiness = 'NO_TRADE_CHOP';
-    executionReadinessReason = allFactorEval.isFlatEmaChop
-      ? `20/50 EMA flat compression with RSI ${rsiVal.toFixed(1)} — consolidation chop zone, wait breakout.`
+    executionReadinessReason = backtestNegativeRegime
+      ? `Walk-forward regime shield: recent ${p.targetTf} candles show negative expectancy (${liveBacktest.netExpectancyR}R across ${liveBacktest.sampleTrades} trades) — stand aside until clean directional trend resumes.`
+      : allFactorEval.isFlatEmaChop || derivedAdx < 17.5
+      ? `Low-ADX chop compression (ADX ${derivedAdx.toFixed(1)} < 17.5 · RSI ${rsiVal.toFixed(1)}) — sideways trap, wait directional breakout.`
       : !h1AlignedWithOrder
-      ? `1H ${h1TrendDirection} conflicts with ${p.targetTf} ${isBuy ? 'BUY' : 'SELL'} (${allFactorEval.alignedFactorsCount}/${allFactorEval.totalFactorsCount} aligned) — stand aside until aligned.`
-      : `Low edge (${allFactorEval.bullScorePct}% vs ${allFactorEval.bearScorePct}%, ${allFactorEval.alignedFactorsCount}/${allFactorEval.totalFactorsCount} factors) — chop zone, wait clearer expansion.`;
-  } else if (allFactorEval.isExtendedZone || Boolean(slVolatilityWarning) || Boolean(p.opposingCandleWarning)) {
+      ? `1H ${h1TrendDirection} conflicts with ${p.targetTf} ${isBuy ? 'BUY' : 'SELL'} — stand aside until multi-timeframe aligned.`
+      : !macdAligned || !diAligned
+      ? `Indicator cross-exam conflict (MACD ${derivedMacd.bias} · DI spread ${adxStats.diSpread}) — do not force entry.`
+      : `Low edge (${allFactorEval.alignedFactorsCount}/${allFactorEval.totalFactorsCount} factors · ${allFactorEval.bullScorePct}% vs ${allFactorEval.bearScorePct}%) — wait clearer expansion.`;
+  } else if (
+    closedCandleOpposing ||
+    livePriceOnWrongSideOfEma20 ||
+    allFactorEval.isExtendedZone ||
+    Math.abs(quantMetricsBase.zScore) > 1.55 ||
+    Boolean(slVolatilityWarning) ||
+    Boolean(p.opposingCandleWarning) ||
+    pivotWallBlocked ||
+    climaxWickAgainstSide
+  ) {
     executionReadiness = 'WAIT_PULLBACK';
-    executionReadinessReason = p.opposingCandleWarning
+    executionReadinessReason = closedCandleOpposing
+      ? `Latest closed candle closed ${isBuy ? 'bearish below 20 EMA' : 'bullish above 20 EMA'} — wait next closed-candle reversal confirmation or Sniper Limit @ ${advisoryEntryPrice}.`
+      : livePriceOnWrongSideOfEma20
+      ? `Price (${anchoredEntry}) is currently on wrong side of 20 EMA (${ema20Val.toFixed(decimals)}) — wait closed candle reclaim or Sniper Limit @ ${advisoryEntryPrice}.`
+      : p.opposingCandleWarning
       ? p.opposingCandleWarning
+      : climaxWickAgainstSide
+      ? `Climax rejection wick detected on latest closed candle — stage Sniper Limit @ ${advisoryEntryPrice} instead of buying/selling into the wick.`
+      : pivotWallBlocked
+      ? `Floor Pivot barrier (${isBuy ? `R1 ${quantMetricsBase.pivotLevels.r1}` : `S1 ${quantMetricsBase.pivotLevels.s1}`}) is only ${pivotObstacleDistPips.toFixed(1)}p away — stage Sniper Limit @ ${advisoryEntryPrice} for clean R:R headroom.`
       : allFactorEval.isExtendedZone
-      ? `Price extended away from 20 EMA — use 20 EMA Limit (${advisoryEntryPrice}) rather than chasing.`
+      ? `Price extended away from 20 EMA — stage Sniper Limit @ ${advisoryEntryPrice} rather than chasing.`
+      : Math.abs(quantMetricsBase.zScore) > 1.55
+      ? `Statistical stretch (Z=${quantMetricsBase.zScore}σ) away from value — stage Sniper Limit @ ${advisoryEntryPrice} rather than chasing.`
       : `Candle ATR (${effectiveAtr.toFixed(1)}p) exceeds your ${actualSlPips}p SL — wait tight retest or increase SL budget.`;
   }
-
-  const finalGoAheadAssurance: ComputedTradeParams['goAheadAssurance'] =
-    executionReadiness === 'NO_TRADE_CLOSED'
-      ? 'STAND ASIDE: MARKET CLOSED'
-      : executionReadiness === 'NO_TRADE_CHOP'
-      ? 'STAND ASIDE: CHOP / CONFLICTED TIMEFRAMES'
-      : executionReadiness === 'WAIT_PULLBACK'
-      ? 'WAIT PULLBACK TO 20 EMA — EXTENDED ENTRY ZONE'
-      : allFactorEval.goAheadAssurance;
-
-  const finalIsFavourableOrder = executionReadiness === 'READY_ENTER' && isFavourableOrder && !bosConflictDetected;
-  const finalOrderVerdictLabel: ComputedTradeParams['orderVerdictLabel'] =
-    executionReadiness === 'NO_TRADE_CLOSED'
-      ? 'STAND ASIDE (MARKET CLOSED)'
-      : executionReadiness === 'NO_TRADE_CHOP'
-      ? 'STAND ASIDE (CHOP / CONFLICT)'
-      : executionReadiness === 'WAIT_PULLBACK'
-      ? isBuy
-        ? 'SELECTIVE BUY (WAIT PULLBACK)'
-        : 'SELECTIVE SELL (WAIT PULLBACK)'
-      : orderVerdictLabel;
 
   const tvSymbol = getTradingViewSymbol(p.targetPair);
   const strategyMatch = selectOptimalTradingStrategy({
@@ -4406,16 +5033,156 @@ export function computeRealChartTradeParams(p: {
     bosAnalysis: p.bosAnalysis,
     adxStrength: derivedAdx,
     macdBias: derivedMacd.bias,
-    candlePattern: derivedPattern
+    candlePattern: derivedPattern,
+    zScore: quantMetricsBase.zScore,
+    stochK: quantMetricsBase.stochK,
+    cci20: quantMetricsBase.cci20,
+    pivotValue: quantMetricsBase.pivotLevels.pivot
   });
 
-  const liveBacktest = runLiveCandleBacktest({
-    pair: p.targetPair,
-    candles: p.candles,
-    atrPips: effectiveAtr,
-    brokerSpread,
-    direction: isBuy ? 'BUY' : 'SELL'
-  });
+  const checksPassedCount = preflightChecks.filter((c) => c.passed).length;
+  const totalCheckCount = preflightChecks.length || 10;
+  const strictHighConviction =
+    executionReadiness === 'READY_ENTER' &&
+    allFactorEval.alignedFactorsCount >= 6 &&
+    scoreMargin >= 16 &&
+    derivedAdx >= 17.5 &&
+    diAligned &&
+    macdAligned &&
+    !closedCandleOpposing &&
+    !livePriceOnWrongSideOfEma20 &&
+    !backtestNegativeRegime &&
+    Math.abs(quantMetricsBase.zScore) <= 1.55 &&
+    pivotWallClear &&
+    climaxWickSafe &&
+    spreadEfficient &&
+    !bosConflictDetected &&
+    rrNumeric >= 1.75 &&
+    checksPassedCount >= 8;
+
+  const isWaitLimitCandidate =
+    !strictHighConviction &&
+    (executionReadiness === 'WAIT_PULLBACK' || executionReadiness === 'READY_ENTER') &&
+    spreadEfficient &&
+    !bosConflictDetected &&
+    !backtestNegativeRegime &&
+    h1AlignedWithOrder &&
+    diAligned &&
+    macdAligned &&
+    derivedAdx >= 17.5 &&
+    scoreMargin >= 14 &&
+    allFactorEval.alignedFactorsCount >= 6 &&
+    checksPassedCount >= 7;
+
+  // Lock executionReadiness strictly to verified roboticVerdict so UI readiness and robotic verdict never contradict
+  if (executionReadiness === 'READY_ENTER' && !strictHighConviction) {
+    if (isWaitLimitCandidate) {
+      executionReadiness = 'WAIT_PULLBACK';
+      executionReadinessReason = `Passed ${checksPassedCount}/${totalCheckCount} audit gates (${allFactorEval.alignedFactorsCount}/${allFactorEval.totalFactorsCount} factors) — wait Sniper Limit @ ${advisoryEntryPrice} for higher conviction.`;
+    } else {
+      executionReadiness = 'NO_TRADE_CHOP';
+      executionReadinessReason = `Precision safety gate (${checksPassedCount}/${totalCheckCount} audit checks · ${allFactorEval.alignedFactorsCount}/${allFactorEval.totalFactorsCount} factors) — stand aside for cleaner alignment.`;
+    }
+  }
+
+  const finalGoAheadAssurance: ComputedTradeParams['goAheadAssurance'] =
+    executionReadiness === 'NO_TRADE_CLOSED'
+      ? 'STAND ASIDE: MARKET CLOSED'
+      : executionReadiness === 'NO_TRADE_CHOP'
+      ? 'STAND ASIDE: CHOP / CONFLICTED TIMEFRAMES'
+      : executionReadiness === 'WAIT_PULLBACK'
+      ? 'WAIT PULLBACK TO 20 EMA — EXTENDED ENTRY ZONE'
+      : allFactorEval.goAheadAssurance;
+
+  const finalIsFavourableOrder = executionReadiness === 'READY_ENTER' && isFavourableOrder && !bosConflictDetected;
+  const finalOrderVerdictLabel: ComputedTradeParams['orderVerdictLabel'] =
+    executionReadiness === 'NO_TRADE_CLOSED'
+      ? 'STAND ASIDE (MARKET CLOSED)'
+      : executionReadiness === 'NO_TRADE_CHOP'
+      ? 'STAND ASIDE (CHOP / CONFLICT)'
+      : executionReadiness === 'WAIT_PULLBACK'
+      ? isBuy
+        ? 'SELECTIVE BUY (WAIT PULLBACK)'
+        : 'SELECTIVE SELL (WAIT PULLBACK)'
+      : orderVerdictLabel;
+
+  const roboticVerdict: InstitutionalTelemetry['roboticVerdict'] = strictHighConviction
+    ? isBuy
+      ? 'PRIME_BUY'
+      : 'PRIME_SELL'
+    : isWaitLimitCandidate
+    ? isBuy
+      ? 'SNIPER_LIMIT_BUY'
+      : 'SNIPER_LIMIT_SELL'
+    : 'STAND_ASIDE_NO_EDGE';
+
+  const drawdownSavingsPct =
+    advisoryDiscountPips > 0
+      ? Math.min(85, Math.round((advisoryDiscountPips / Math.max(1, actualSlPips)) * 100))
+      : 0;
+
+  const roboticScore = Number(
+    Math.min(
+      97,
+      Math.max(
+        20,
+        (checksPassedCount / totalCheckCount) * 42 +
+          (allFactorEval.alignedFactorsCount / Math.max(1, allFactorEval.totalFactorsCount)) * 32 +
+          Math.min(12, scoreMargin * 0.35) +
+          (derivedAdx >= 22 ? 6 : derivedAdx >= 17 ? 3 : -8) +
+          (adxStats.adxRising && diAligned ? 3 : 0) +
+          (quantMetricsBase.squeezeActive ? 4 : 0) -
+          (pivotWallBlocked ? 9 : 0) -
+          (climaxWickAgainstSide ? 8 : 0) -
+          (!spreadEfficient ? 14 : 0) -
+          (Math.abs(quantMetricsBase.zScore) > 1.9 ? 9 : 0) -
+          (bosConflictDetected ? 30 : 0)
+      )
+    ).toFixed(1)
+  );
+
+  const estimatedWinProbPct = Number(
+    Math.min(
+      78,
+      Math.max(
+        36,
+        Math.round(
+          42 +
+            (allFactorEval.alignedFactorsCount / Math.max(1, allFactorEval.totalFactorsCount)) * 18 +
+            (mtfAlignment.alignedCount >= 4 ? 7 : mtfAlignment.alignedCount === 3 ? 4 : -4) +
+            (liveBacktest.sampleTrades >= 4 && liveBacktest.tp1WinRatePct >= 55 ? 5 : 0) +
+            (adxStats.adxRising && diAligned ? 2 : 0) -
+            (pivotWallBlocked ? 5 : 0) -
+            (climaxWickAgainstSide ? 5 : 0) -
+            (!spreadEfficient ? 8 : 0) -
+            (allFactorEval.isExtendedZone ? 7 : 0) -
+            (bosConflictDetected ? 16 : 0)
+        )
+      )
+    )
+  );
+
+  const pWin = estimatedWinProbPct / 100;
+  const expectedRMultiple = Number((pWin * rrNumeric - (1 - pWin) * 1.0).toFixed(2));
+  const roboticSummary =
+    roboticVerdict === 'PRIME_BUY' || roboticVerdict === 'PRIME_SELL'
+      ? `HIGH-CONFLUENCE VERIFIED (${allFactorEval.alignedFactorsCount}/${allFactorEval.totalFactorsCount} Factors · ${checksPassedCount}/${totalCheckCount} Audit Gates · Z=${quantMetricsBase.zScore}σ · ADX=${derivedAdx.toFixed(1)} · Pivot Path Clear): Execute ${isBuy ? 'BUY' : 'SELL'} @ ${anchoredEntry} (or Sniper Limit ${advisoryEntryPrice}) with SL ${slPrice} -> TP1 ${tp1Price} -> TP2 ${tp2Price}.`
+      : roboticVerdict === 'SNIPER_LIMIT_BUY' || roboticVerdict === 'SNIPER_LIMIT_SELL'
+      ? `DIRECTIONAL EDGE LOCKED (${isBuy ? 'BUY' : 'SELL'}), MINIMUM-LOSS LIMIT STAGE: Stage Sniper Limit @ ${advisoryEntryPrice} (trims ${advisoryDiscountPips}p / ${drawdownSavingsPct}% potential drawdown) instead of chasing ${anchoredEntry}.`
+      : `PRECISION SAFETY BLOCK (${executionReadinessReason}): Algorithmic gate blocks execution — wait for higher-probability alignment.`;
+
+  const institutionalTelemetry: InstitutionalTelemetry = {
+    ...quantMetricsBase,
+    roboticVerdict,
+    roboticScore,
+    roboticSummary,
+    estimatedWinProbPct,
+    expectedRMultiple,
+    drawdownSavingsPct,
+    pivotWallClear,
+    climaxWickSafe,
+    spreadEfficiencyPct
+  };
 
   const plainEnglishGuide = buildPlainEnglishTradeGuide({
     pair: p.targetPair,
@@ -4512,6 +5279,7 @@ export function computeRealChartTradeParams(p: {
     candlePattern: derivedPattern,
     executionBrief: plainEnglishGuide,
     plainEnglishGuide,
+    institutionalTelemetry,
     limitPlan
   };
 }
@@ -4779,12 +5547,11 @@ export function buildCalibratedMarketItem(params: {
   });
 
   const absPct = Math.abs(effectivePct);
-  const isNeutral =
+  const preliminaryNeutral =
     !params.previousDirection &&
     absPct < 0.03 &&
     !evalData.bosAnalysis.brokenStructure &&
     Math.abs(evalData.bullScorePct - evalData.bearScorePct) <= 8;
-  const isBuy = evalData.isBuy;
 
   const computed = computeRealChartTradeParams({
     targetPair: params.pair,
@@ -4798,7 +5565,12 @@ export function buildCalibratedMarketItem(params: {
     ema50: evalData.ema50,
     rsi: evalData.rsi,
     atrPips: evalData.atrPips,
+    adxStrength: evalData.adxStrength,
+    macdBias: evalData.macdBias,
+    macdHistogram: evalData.macdHistogram,
+    candlePattern: evalData.candlePattern,
     candles: evalData.candles,
+    h1Candles: patchedH1Candles,
     macro: params.macro,
     previousDirection: params.previousDirection,
     previousTrendDirection: params.previousTrendDirection,
@@ -4808,6 +5580,10 @@ export function buildCalibratedMarketItem(params: {
     bosAnalysis: evalData.bosAnalysis,
     riskConfig: positionRiskStore.getConfig()
   });
+
+  // Unify direction strictly with computed.direction so MarketScanData.bias and SL/TP can NEVER contradict
+  const isBuy = computed.direction === 'BUY';
+  const isNeutral = preliminaryNeutral || computed.executionReadiness === 'NO_TRADE_CHOP';
 
   const trendDirection: 'UPTREND' | 'DOWNTREND' | 'RANGING' = isNeutral
     ? 'RANGING'
@@ -4824,7 +5600,7 @@ export function buildCalibratedMarketItem(params: {
     : computed.trendProjectionText;
 
   const ictPattern = isNeutral
-    ? `Equilibrium Near 20 EMA (${evalData.ema20.toFixed(decimals)}) — Awaiting Expansion`
+    ? `Equilibrium Near 20 EMA (${evalData.ema20.toFixed(decimals)}) — Stand Aside / Await Expansion`
     : evalData.bosAnalysis.brokenStructure
     ? `${evalData.bosAnalysis.bosDirection.replace('_', ' ')} @ ${evalData.bosAnalysis.bosTriggerLevel.toFixed(decimals)} · Key ${evalData.keyLevel.toFixed(decimals)}`
     : isBuy
@@ -4904,15 +5680,41 @@ export function buildCalibratedMarketItem(params: {
     strategyRationale: computed.strategyRationale,
     liveBacktest: computed.liveBacktest,
     executionBrief: computed.executionBrief,
-    plainEnglishGuide: computed.plainEnglishGuide
+    plainEnglishGuide: computed.plainEnglishGuide,
+    institutionalTelemetry: computed.institutionalTelemetry,
+    advisoryEntryPrice: computed.advisoryEntryPrice,
+    advisoryDiscountPips: computed.advisoryDiscountPips
   };
+}
+
+function getPrecisionTierRank(m: MarketScanData): number {
+  if (m.executionReadiness === 'NO_TRADE_CLOSED') return 0;
+  const v = m.institutionalTelemetry?.roboticVerdict;
+  if (v === 'PRIME_BUY' || v === 'PRIME_SELL') return 4;
+  if (v === 'SNIPER_LIMIT_BUY' || v === 'SNIPER_LIMIT_SELL') return 3;
+  if (m.executionReadiness === 'READY_ENTER') return 2;
+  if (m.executionReadiness === 'WAIT_PULLBACK') return 1;
+  return 0;
 }
 
 export function sortMarketsByTopPercent(
   list: MarketScanData[],
-  mode: 'PCT_DESC' | 'PCT_ABS' | 'CONFIDENCE' = 'PCT_DESC'
+  mode: 'PCT_DESC' | 'PCT_ABS' | 'CONFIDENCE' | 'PRECISION' = 'PCT_DESC'
 ): MarketScanData[] {
   const sorted = [...list].sort((a, b) => {
+    if (mode === 'PRECISION') {
+      const tierDiff = getPrecisionTierRank(b) - getPrecisionTierRank(a);
+      if (tierDiff !== 0) return tierDiff;
+      const scoreA = a.institutionalTelemetry?.roboticScore ?? a.confidence;
+      const scoreB = b.institutionalTelemetry?.roboticScore ?? b.confidence;
+      if (scoreB !== scoreA) return scoreB - scoreA;
+      const probA = a.institutionalTelemetry?.estimatedWinProbPct ?? 50;
+      const probB = b.institutionalTelemetry?.estimatedWinProbPct ?? 50;
+      if (probB !== probA) return probB - probA;
+      const expA = a.institutionalTelemetry?.expectedRMultiple ?? 0;
+      const expB = b.institutionalTelemetry?.expectedRMultiple ?? 0;
+      if (expB !== expA) return expB - expA;
+    }
     if (mode === 'PCT_ABS') {
       const diffAbs = Math.abs(b.change24hPct) - Math.abs(a.change24hPct);
       return diffAbs !== 0 ? diffAbs : b.change24hPct - a.change24hPct;
@@ -4954,7 +5756,7 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
     symbol: 'GOLD (Spot)',
     price: 3897.50,
     change24hPct: -0.45,
-    recommendedTf: 'M15',
+    recommendedTf: 'H1',
     recommendedSession: 'London / NY Overlap (15:30 - 18:30 EAT)',
     volatility: 'HIGH',
     spreadByBroker: {
@@ -4969,7 +5771,7 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
     symbol: 'Guppy / Dragon',
     price: 213.450,
     change24hPct: 0.48,
-    recommendedTf: 'M15',
+    recommendedTf: 'H1',
     recommendedSession: 'London Session (10:00 - 13:00 EAT)',
     volatility: 'HIGH',
     spreadByBroker: {
@@ -4984,7 +5786,7 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
     symbol: 'Cable (British Pound)',
     price: 1.35140,
     change24hPct: 0.42,
-    recommendedTf: 'M10',
+    recommendedTf: 'H1',
     recommendedSession: 'London Open (10:00 - 13:00 EAT)',
     volatility: 'HIGH',
     spreadByBroker: {
@@ -4999,7 +5801,7 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
     symbol: 'Fiber (Euro)',
     price: 1.16360,
     change24hPct: 0.35,
-    recommendedTf: 'M15',
+    recommendedTf: 'H1',
     recommendedSession: 'London / NY (10:00 - 17:00 EAT)',
     volatility: 'MEDIUM',
     spreadByBroker: {
@@ -5014,7 +5816,7 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
     symbol: 'Aussie',
     price: 0.69750,
     change24hPct: 0.31,
-    recommendedTf: 'M15',
+    recommendedTf: 'H1',
     recommendedSession: 'Asian / Sydney Session (03:00 - 09:00 EAT)',
     volatility: 'LOW',
     spreadByBroker: {
@@ -5044,7 +5846,7 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
     symbol: 'Swissy',
     price: 0.87940,
     change24hPct: 0.16,
-    recommendedTf: 'M15',
+    recommendedTf: 'H1',
     recommendedSession: 'Zurich / London Session (10:00 - 17:00 EAT)',
     volatility: 'MEDIUM',
     spreadByBroker: {
@@ -5059,7 +5861,7 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
     symbol: 'Euppy Cross',
     price: 183.790,
     change24hPct: 0.21,
-    recommendedTf: 'M15',
+    recommendedTf: 'H1',
     recommendedSession: 'London / Tokyo Cross (10:00 - 16:30 EAT)',
     volatility: 'HIGH',
     spreadByBroker: {
@@ -5074,7 +5876,7 @@ export const INITIAL_MARKETS_DATA: MarketScanData[] = sortMarketsByTopPercent([
     symbol: 'Loonie',
     price: 1.39485,
     change24hPct: -0.22,
-    recommendedTf: 'M15',
+    recommendedTf: 'H1',
     recommendedSession: 'New York Session (15:30 - 20:00 EAT)',
     volatility: 'MEDIUM',
     spreadByBroker: {
@@ -5468,11 +6270,6 @@ export async function fetchPairLiveCandleSnapshot(
   return p;
 }
 
-const cachedBackgroundCandles: Partial<
-  Record<CurrencyPair, { m15?: OhlcCandle[]; h1?: OhlcCandle[]; fetchedAt: number }>
-> = {};
-let isRefreshingBgCandles = false;
-
 async function refreshBackgroundRealOhlcCandles(force = false) {
   if (isRefreshingBgCandles || typeof fetch === 'undefined') return;
   const now = Date.now();
@@ -5488,8 +6285,8 @@ async function refreshBackgroundRealOhlcCandles(force = false) {
       (Object.keys(quotes) as CurrencyPair[]).forEach((pName) => {
         const q = quotes[pName];
         if (q) {
-          const m15 = Array.isArray(q.m15Candles) && q.m15Candles.length >= 15 ? q.m15Candles.slice(-60) : cachedBackgroundCandles[pName]?.m15;
-          const h1 = Array.isArray(q.h1Candles) && q.h1Candles.length >= 15 ? q.h1Candles.slice(-60) : cachedBackgroundCandles[pName]?.h1;
+          const m15 = Array.isArray(q.m15Candles) && q.m15Candles.length >= 15 ? q.m15Candles.slice(-90) : cachedBackgroundCandles[pName]?.m15;
+          const h1 = Array.isArray(q.h1Candles) && q.h1Candles.length >= 15 ? q.h1Candles.slice(-120) : cachedBackgroundCandles[pName]?.h1;
           if (m15 || h1) {
             cachedBackgroundCandles[pName] = { m15, h1, fetchedAt: Date.now() };
           }
@@ -6370,7 +7167,7 @@ export interface GlobalStreamState {
   syncedAt: string;
   liveFeedConnected: boolean;
   tickCount: number;
-  lastScanMode: 'auto_1s' | 'scan_all' | 'rescan' | 'deep_ai';
+  lastScanMode: 'auto_1s' | 'scan_all' | 'rescan' | 'deep_ai' | 'precision_ai';
   lockedPairs: Partial<Record<CurrencyPair, boolean>>;
   customTimeframes: Partial<Record<CurrencyPair, Timeframe>>;
 }
@@ -6497,7 +7294,7 @@ class GlobalLiveMarketStreamEngine {
   private syncedAt: string = 'Synchronizing...';
   private liveFeedConnected: boolean = false;
   private tickCount: number = 0;
-  private lastScanMode: 'auto_1s' | 'scan_all' | 'rescan' | 'deep_ai' = 'auto_1s';
+  private lastScanMode: 'auto_1s' | 'scan_all' | 'rescan' | 'deep_ai' | 'precision_ai' = 'auto_1s';
   private lockedPairs: Partial<Record<CurrencyPair, boolean>> = {};
   private customTimeframes: Partial<Record<CurrencyPair, Timeframe>> = {};
   private listeners = new Set<StreamListener>();
@@ -6753,7 +7550,7 @@ class GlobalLiveMarketStreamEngine {
     if (!market) return null;
 
     const broker = params.broker || this.activeBroker;
-    const timeframe = params.timeframe || this.customTimeframes[market.pair] || market.recommendedTf || 'M15';
+    const timeframe = params.timeframe || this.customTimeframes[market.pair] || market.recommendedTf || 'H1';
     const pctMap: Partial<Record<CurrencyPair, number>> = {};
     this.markets.forEach((m) => {
       pctMap[m.pair] = m.change24hPct;
@@ -6772,6 +7569,8 @@ class GlobalLiveMarketStreamEngine {
       ema50: market.ema50,
       rsi: market.rsi,
       atrPips: market.atrPips,
+      candles: market.candles,
+      h1Candles: market.h1Candles,
       swingLow: swings.swingLow,
       swingHigh: swings.swingHigh,
       macro,
@@ -6779,6 +7578,7 @@ class GlobalLiveMarketStreamEngine {
       previousDirection: dir,
       h1TrendDirection: market.h1TrendDirection,
       change24hPct: market.change24hPct,
+      bosAnalysis: market.bosAnalysis,
       riskConfig: positionRiskStore.getConfig()
     });
 
@@ -6890,10 +7690,17 @@ class GlobalLiveMarketStreamEngine {
           message: `Target TP2 (${order.tp2}) reached (+$${metrics.netProfitUsd.toFixed(2)}). Trail SL or extend to TP3 (${order.tp3}).`
         });
       }
+      const dynamicBeTrigger = Math.max(4, Number(((market.atrPips || 16) * 0.55).toFixed(1)));
+      const dynamicLockTrigger = Math.max(
+        dynamicBeTrigger * 1.85,
+        Number(((market.atrPips || 16) * 1.15).toFixed(1))
+      );
+      const dynamicProximityGuard = Math.max(3, Number(((market.atrPips || 16) * 0.35).toFixed(1)));
+
       if (
         !metrics.isInProfit &&
         metrics.pipsDistanceAboveSl > 0 &&
-        metrics.pipsDistanceAboveSl <= 5.0 &&
+        metrics.pipsDistanceAboveSl <= dynamicProximityGuard &&
         !this.orderMilestoneAlerts.has(`${order.id}:SL_PROXIMITY`)
       ) {
         this.orderMilestoneAlerts.add(`${order.id}:SL_PROXIMITY`);
@@ -6905,22 +7712,42 @@ class GlobalLiveMarketStreamEngine {
         });
       }
 
+      // Structural BOS Flip Protection on Active Orders
+      const bosOpposesOpenOrder = Boolean(
+        market.bosAnalysis?.brokenStructure &&
+          ((order.direction === 'BUY' &&
+            (market.bosAnalysis.bosDirection === 'BEARISH_BOS' ||
+              market.bosAnalysis.bosDirection === 'BEARISH_CHOCH')) ||
+            (order.direction === 'SELL' &&
+              (market.bosAnalysis.bosDirection === 'BULLISH_BOS' ||
+                market.bosAnalysis.bosDirection === 'BULLISH_CHOCH')))
+      );
+      if (bosOpposesOpenOrder && !this.orderMilestoneAlerts.has(`${order.id}:BOS_FLIP`)) {
+        this.orderMilestoneAlerts.add(`${order.id}:BOS_FLIP`);
+        this.pushNotification({
+          pair: order.pair,
+          type: 'SL_WARNING',
+          title: `STRUCTURE FLIP ALERT · ${order.pair} ${order.direction}`,
+          message: `Opposing ${market.bosAnalysis?.bosDirection.replace('_', ' ')} triggered @ ${market.bosAnalysis?.bosTriggerLevel}. Tighten SL or lock profit now.`
+        });
+      }
+
       let nextSl = order.stopLoss;
       let nextSlCount = order.slUpdatesCount;
       let nextTp2 = order.tp2;
       let nextTp3 = order.tp3;
 
-      // When Auto-Trail Profit Lock is ON and trade has gained >= 8 pips in profit, lock SL forward!
-      if (order.autoTrailEnabled && metrics.floatingPips >= 8) {
+      // Dynamic ATR-Scaled Auto-Breakeven & 55% Profit Lock
+      if (order.autoTrailEnabled && metrics.floatingPips >= dynamicBeTrigger) {
         const isBuy = order.direction === 'BUY';
         const improvedSl =
-          metrics.floatingPips >= 18 ? metrics.suggestedLockProfitSl : metrics.suggestedBreakevenSl;
+          metrics.floatingPips >= dynamicLockTrigger ? metrics.suggestedLockProfitSl : metrics.suggestedBreakevenSl;
         if ((isBuy && improvedSl > nextSl) || (!isBuy && improvedSl < nextSl)) {
           nextSl = improvedSl;
           nextSlCount += 1;
           anyChanged = true;
         }
-        if (metrics.pipsRemainingToTp2 <= 6 && metrics.floatingPips >= 16) {
+        if (metrics.pipsRemainingToTp2 <= dynamicProximityGuard && metrics.floatingPips >= dynamicLockTrigger) {
           if (
             (isBuy && metrics.suggestedExpandedTp2 > nextTp2) ||
             (!isBuy && metrics.suggestedExpandedTp2 < nextTp2)
@@ -6998,7 +7825,7 @@ class GlobalLiveMarketStreamEngine {
     if (!market) return null;
 
     const broker = params.broker || this.activeBroker;
-    const timeframe = params.timeframe || this.customTimeframes[market.pair] || market.recommendedTf || 'M15';
+    const timeframe = params.timeframe || this.customTimeframes[market.pair] || market.recommendedTf || 'H1';
     const pctMap: Partial<Record<CurrencyPair, number>> = {};
     this.markets.forEach((m) => {
       pctMap[m.pair] = m.change24hPct;
@@ -7023,6 +7850,7 @@ class GlobalLiveMarketStreamEngine {
       rsi: market.rsi,
       atrPips: market.atrPips,
       candles: market.candles,
+      h1Candles: market.h1Candles,
       swingLow: swings.swingLow,
       swingHigh: swings.swingHigh,
       macro,
@@ -7525,7 +8353,7 @@ class GlobalLiveMarketStreamEngine {
     const m = this.markets.find((x) => x.pair === resolvedPair) || this.markets[0];
     if (!m) return null;
 
-    const activeTf = tf || this.customTimeframes[resolvedPair] || m.recommendedTf || 'M15';
+    const activeTf = tf || this.customTimeframes[resolvedPair] || m.recommendedTf || 'H1';
     const activeBroker = broker || this.activeBroker;
     this.isDeepVerifyingPair[resolvedPair] = true;
     this.broadcast();
@@ -7558,6 +8386,7 @@ class GlobalLiveMarketStreamEngine {
         rsi: m.rsi,
         atrPips: m.atrPips,
         candles: activeCandles,
+        h1Candles: m.h1Candles,
         swingLow: swings.swingLow,
         swingHigh: swings.swingHigh,
         macro,
@@ -7631,11 +8460,13 @@ class GlobalLiveMarketStreamEngine {
                 macdBias: computed.macdBias,
                 macdHistogram: computed.macdHistogram,
                 candlePattern: computed.candlePattern,
-                recentM15Candles: (m.candles || []).slice(-18),
-                recentH1Candles: (m.h1Candles || []).slice(-10)
+                advisoryEntryPrice: computed.advisoryEntryPrice,
+                institutionalTelemetry: computed.institutionalTelemetry,
+                recentM15Candles: (m.candles || []).slice(-20),
+                recentH1Candles: (m.h1Candles || []).slice(-12)
               })
             },
-            9500
+            13500
           );
 
           if (res && res.ok) {
@@ -7797,7 +8628,7 @@ class GlobalLiveMarketStreamEngine {
         { price: number; pct?: number; dailyOpen?: number; candles?: OhlcCandle[]; h1Candles?: OhlcCandle[] }
       >
     >,
-    scanMode: 'auto_1s' | 'scan_all' | 'rescan' | 'deep_ai' = 'auto_1s',
+    scanMode: 'auto_1s' | 'scan_all' | 'rescan' | 'deep_ai' | 'precision_ai' = 'auto_1s',
     feedOk = this.liveFeedConnected
   ) {
     const prevMeta = new Map<
@@ -7815,7 +8646,8 @@ class GlobalLiveMarketStreamEngine {
       pctSnapshot[m.pair] = priceUpdates?.[m.pair]?.pct ?? m.change24hPct;
     });
 
-    const isExplicitFreshScan = scanMode === 'scan_all' || scanMode === 'rescan' || scanMode === 'deep_ai';
+    const isExplicitFreshScan =
+      scanMode === 'scan_all' || scanMode === 'rescan' || scanMode === 'deep_ai' || scanMode === 'precision_ai';
     const nowMs = Date.now();
     const liveMacro = getCurrentMacroContext(pctSnapshot);
     const tickStr = this.formatNowEat();
@@ -8075,11 +8907,11 @@ class GlobalLiveMarketStreamEngine {
     } catch {}
   }
 
-  private async pollLiveExchangeRest(scanMode: 'auto_1s' | 'scan_all' | 'rescan' | 'deep_ai' = 'auto_1s') {
+  private async pollLiveExchangeRest(scanMode: 'auto_1s' | 'scan_all' | 'rescan' | 'deep_ai' | 'precision_ai' = 'auto_1s') {
     if (this.isFetchingRest) return;
     this.isFetchingRest = true;
     try {
-      const force = scanMode === 'rescan' || scanMode === 'deep_ai';
+      const force = scanMode === 'rescan' || scanMode === 'deep_ai' || scanMode === 'precision_ai';
       const snap = await fetchLiveMarketSnapshot(this.markets, force);
       const updates: Partial<
         Record<
@@ -8104,7 +8936,7 @@ class GlobalLiveMarketStreamEngine {
     }
   }
 
-  public async runBatchAiScan(mode: 'scan_all' | 'rescan' | 'deep_ai' = 'deep_ai') {
+  public async runBatchAiScan(mode: 'scan_all' | 'rescan' | 'deep_ai' | 'precision_ai' = 'deep_ai') {
     const pctMap: Partial<Record<CurrencyPair, number>> = {};
     this.markets.forEach((item) => {
       pctMap[item.pair] = item.change24hPct;
@@ -8149,7 +8981,10 @@ class GlobalLiveMarketStreamEngine {
           candlePattern: m.candlePattern,
           bullScorePct: m.bullScorePct,
           bearScorePct: m.bearScorePct,
-          atrPips: m.atrPips
+          atrPips: m.atrPips,
+          advisoryEntryPrice: m.advisoryEntryPrice,
+          drawdownSavingsPips: m.advisoryDiscountPips,
+          institutionalTelemetry: m.institutionalTelemetry
         };
       });
 
@@ -8169,7 +9004,7 @@ class GlobalLiveMarketStreamEngine {
             markets: payloadMarkets
           })
         },
-        8500
+        10500
       );
 
       if (res && res.ok) {
@@ -8243,22 +9078,35 @@ class GlobalLiveMarketStreamEngine {
     return this.getState();
   }
 
-  public async triggerScan(mode: 'scan_all' | 'rescan' | 'deep_ai') {
-    if (mode === 'scan_all' || mode === 'rescan' || mode === 'deep_ai') {
+  public async triggerScan(mode: 'scan_all' | 'rescan' | 'deep_ai' | 'precision_ai') {
+    if (mode === 'scan_all' || mode === 'rescan' || mode === 'deep_ai' || mode === 'precision_ai') {
       this.lockedPairs = {};
     }
-    await refreshBackgroundRealOhlcCandles(true);
-    await this.pollLiveExchangeRest(mode);
-    await this.runBatchAiScan(mode);
-    if (mode === 'deep_ai') {
-      const target = this.selectedPair || this.markets[0]?.pair;
-      if (target) {
-        await this.verifyMarketDeepScan(target);
-      }
+
+    // Step 1 (<1s): Single parallelized live quote + OHLC sync, rebuilding & broadcasting quant radar immediately
+    await Promise.allSettled([
+      this.pollLiveExchangeRest(mode),
+      cachedBackgroundCandles['GBP/USD'] ? Promise.resolve() : refreshBackgroundRealOhlcCandles(false)
+    ]);
+
+    // Identify top precision setups immediately after quant rebuild
+    const precisionRanked = sortMarketsByTopPercent(this.markets, 'PRECISION');
+    const deepTargets = new Set<CurrencyPair>();
+    if (mode === 'precision_ai' || mode === 'deep_ai') {
+      precisionRanked.slice(0, 2).forEach((m) => deepTargets.add(m.pair));
+      if (this.selectedPair) deepTargets.add(this.selectedPair);
     }
-    if (this.selectedPair && this.superAiAutoEnabled) {
-      void this.fetchSuperAiNoteForPair(this.selectedPair, true);
+
+    // Step 2: Fire Batch AI Scan + Top-Candidate Deep Audits in parallel instead of a slow sequential waterfall
+    const aiTasks: Promise<unknown>[] = [this.runBatchAiScan(mode)];
+    deepTargets.forEach((pair) => {
+      aiTasks.push(this.verifyMarketDeepScan(pair));
+    });
+    if (this.selectedPair && this.superAiAutoEnabled && !deepTargets.has(this.selectedPair)) {
+      aiTasks.push(this.fetchSuperAiNoteForPair(this.selectedPair, true));
     }
+
+    await Promise.allSettled(aiTasks);
     return this.getState();
   }
 

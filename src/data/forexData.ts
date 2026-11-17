@@ -1215,7 +1215,7 @@ export const MASTER_STRATEGIES: MasterclassStrategy[] = [
   },
   {
     id: 'strat-6',
-    name: 'BOS/CHoCH + 11-Factor Zero-Mistake Protocol',
+    name: 'BOS/CHoCH + 12-Factor Zero-Mistake Protocol',
     tagline: 'Detects real-time Break of Structure, Change of Character, and Bar/Consensus alignment before any BUY or SELL order.',
     winRate: 82,
     timeframe: 'M15 / H1',
@@ -1227,8 +1227,8 @@ export const MASTER_STRATEGIES: MasterclassStrategy[] = [
         'Confirm candle/bar close sits cleanly inside Value Zone or Barchart/Investing consensus >= 67% (avoid Inside Bar coils or extended wicks).',
         'Match the canonical TradingView symbol (e.g. OANDA:XAUUSD, FX:EURUSD, BINANCE:BTCUSDT) so Entry Price, SL, and TP2 match 1:1.'
       ],
-      stopLoss: 'Anchored beyond protected M15/H1 swing structure with ATR & spread clearance.',
-      takeProfit: 'TP1 at 1.65x risk (Breakeven Lock), TP2 at 2.85x+ risk (or custom USD Target Profit).'
+      stopLoss: 'Anchored beyond protected H1/M15 swing structure with 1.8x ATR & spread clearance.',
+      takeProfit: 'TP1 at 1.35x risk (Breakeven Lock), TP2 at 2.25x risk (or custom USD Target Profit).'
     },
     gilgilLore: 'Engineered to eliminate counter-trend losses caused by stale quotes, CHoCH reversals, or extended entries on Gold and Majors.'
   },

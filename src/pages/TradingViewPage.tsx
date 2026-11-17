@@ -43,7 +43,7 @@ export const TradingViewPage: React.FC<TradingViewPageProps> = ({
   onAwardXp,
 }) => {
   const [pair, setPair] = useState<CurrencyPair>('EUR/USD');
-  const [timeframe, setTimeframe] = useState<Timeframe>('M15');
+  const [timeframe, setTimeframe] = useState<Timeframe>('H1');
   const [showEma20, setShowEma20] = useState(true);
   const [showEma50, setShowEma50] = useState(true);
   const [showRsi, setShowRsi] = useState(true);

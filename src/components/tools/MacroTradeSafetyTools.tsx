@@ -416,7 +416,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
           const focusedSwings = computeCandleSwingLevels(focusedMarket.candles);
           const computed = computeRealChartTradeParams({
             targetPair: focusedCard.pair,
-            targetTf: focusedMarket.recommendedTf || 'M15',
+            targetTf: focusedMarket.recommendedTf || 'H1',
             targetBroker: selectedBroker,
             price: focusedCard.livePrice,
             keyLevel: focusedMarket.keyLevel,
@@ -424,12 +424,19 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
             ema50: focusedCard.ema50,
             rsi: focusedCard.rsi,
             atrPips: focusedMarket.atrPips,
+            adxStrength: focusedMarket.adxStrength,
+            macdBias: focusedMarket.macdBias,
+            macdHistogram: focusedMarket.macdHistogram,
+            candlePattern: focusedMarket.candlePattern,
+            candles: focusedMarket.candles,
+            h1Candles: focusedMarket.h1Candles,
             swingLow: focusedSwings.swingLow,
             swingHigh: focusedSwings.swingHigh,
             change24hPct: focusedCard.change24hPct,
             biasOverride: inspectedSide === 'AUTO' ? undefined : inspectedSide,
             previousTrendDirection: focusedMarket.trendDirection,
             h1TrendDirection: focusedMarket.h1TrendDirection,
+            bosAnalysis: focusedMarket.bosAnalysis,
             riskConfig
           });
 
@@ -475,7 +482,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                   mode="full"
                   pair={focusedCard.pair}
                   direction={effectiveSide}
-                  timeframe={focusedMarket.recommendedTf || 'M15'}
+                  timeframe={focusedMarket.recommendedTf || 'H1'}
                   broker={selectedBroker}
                 />
 
@@ -599,7 +606,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                 {/* Live Interactive Candlestick Chart (Synced 24/7 + Interactive Tick Controls) */}
                 <LiveInteractiveCandleChart
                   pair={focusedMarket.pair}
-                  timeframe={focusedMarket.recommendedTf || 'M15'}
+                  timeframe={focusedMarket.recommendedTf || 'H1'}
                   candles={focusedMarket.candles || []}
                   livePrice={focusedMarket.price}
                   ema20={focusedMarket.ema20}
@@ -750,7 +757,7 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
               const cardSwings = computeCandleSwingLevels(rawMkt?.candles);
               const computed = computeRealChartTradeParams({
                 targetPair: card.pair,
-                targetTf: rawMkt?.recommendedTf || 'M15',
+                targetTf: rawMkt?.recommendedTf || 'H1',
                 targetBroker: selectedBroker,
                 price: card.livePrice,
                 keyLevel: rawMkt?.keyLevel,
@@ -758,10 +765,17 @@ export const MacroTradeSafetyTools: React.FC<MacroTradeSafetyToolsProps> = ({
                 ema50: card.ema50,
                 rsi: card.rsi,
                 atrPips: rawMkt?.atrPips,
+                adxStrength: rawMkt?.adxStrength,
+                macdBias: rawMkt?.macdBias,
+                macdHistogram: rawMkt?.macdHistogram,
+                candlePattern: rawMkt?.candlePattern,
+                candles: rawMkt?.candles,
+                h1Candles: rawMkt?.h1Candles,
                 swingLow: cardSwings.swingLow,
                 swingHigh: cardSwings.swingHigh,
                 change24hPct: card.change24hPct,
                 h1TrendDirection: rawMkt?.h1TrendDirection,
+                bosAnalysis: rawMkt?.bosAnalysis,
                 riskConfig
               });
               const pctPos = card.change24hPct >= 0;

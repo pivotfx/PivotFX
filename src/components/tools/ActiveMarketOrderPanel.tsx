@@ -893,6 +893,7 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
     ema50: activeMarket.ema50,
     rsi: activeMarket.rsi,
     atrPips: activeMarket.atrPips,
+    candles: activeMarket.candles,
     swingLow: swings.swingLow,
     swingHigh: swings.swingHigh,
     macro: liveMacro,

@@ -384,7 +384,7 @@ export const DynamicPositionSizeCalculator: React.FC<DynamicPositionSizeCalculat
               ? `Locked to +$${riskPlan.targetProfitUsd.toFixed(2)} Net TP2 (${Math.round(
                   riskPlan.targetProfitUsd * 130
                 ).toLocaleString()} KES)`
-              : 'Auto Structural R:R Mode (1:2.85)'}
+              : 'Auto Structural R:R Mode (1:2.25)'}
           </span>
         </div>
 

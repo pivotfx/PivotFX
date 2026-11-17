@@ -146,8 +146,8 @@ export const LessonExpoundedMastery: React.FC<LessonExpoundedMasteryProps> = ({
       retailTrap =
         'Trying to catch a falling knife by placing BUY orders right after a Bearish Break of Structure simply because the price "looks cheap".';
       institutionalEdge =
-        'Demand MTF alignment (H1 + M15) plus 11-Factor confirmation (including OHLC Bar Close & Consensus), entering pullbacks into Fair Value Gaps or 20 EMA value zones.';
-      brokerNote = 'Smart Money Structure · 8-Point Pre-Flight Verified';
+        'Demand MTF alignment (H1 + M15) plus 12-Factor confirmation (OHLC Bar Close, Consensus, Floor Pivots & Z-Score), entering pullbacks into Fair Value Gaps or 20 EMA value zones.';
+      brokerNote = 'Smart Money Structure · 10-Point Pre-Flight Verified';
     } else if (combined.includes('jpy') || num === '02' || combined.includes('bank') || combined.includes('session')) {
       pair = 'USD/JPY';
       displayPair = 'USD/JPY (Ninja)';

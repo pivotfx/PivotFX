@@ -170,7 +170,7 @@ export const ScannerInteractiveTools: React.FC<ScannerInteractiveToolsProps> = (
   const [showTradingView, setShowTradingView] = useState<boolean>(false);
   const [analysisExecutionMode, setAnalysisExecutionMode] = useState<'standard' | 'deep_ai'>('deep_ai');
   const [copiedManualEa, setCopiedManualEa] = useState<boolean>(false);
-  const [timeframe, setTimeframe] = useState<Timeframe>('M15');
+  const [timeframe, setTimeframe] = useState<Timeframe>(initialMarketMatch?.recommendedTf || 'H1');
   const [biasOverride, setBiasOverride] = useState<'AUTO' | 'BUY' | 'SELL'>('AUTO');
   const [session, setSession] = useState<'London Open (10:00 EAT)' | 'New York AM (15:30 EAT)' | 'Asian Range (03:00 EAT)' | 'London Close (18:30 EAT)'>('London Open (10:00 EAT)');
   const [patternType, setPatternType] = useState<'Tower Top Liquidity Sweep' | '20/50 EMA Trend Bounce' | 'Asian Liquidity Sweep' | 'Fair Value Gap Re-test' | 'Bearish Order Block Mitigation'>(
@@ -1900,6 +1900,10 @@ InpMagicNumber=777129
           ema50: ema50,
           rsi: rsi,
           atrPips: activeMarketObj.atrPips,
+          adxStrength: activeMarketObj.adxStrength,
+          macdBias: activeMarketObj.macdBias,
+          macdHistogram: activeMarketObj.macdHistogram,
+          candles: chartCandles,
           swingLow: favorableSwings.swingLow,
           swingHigh: favorableSwings.swingHigh,
           change24hPct: activeMarketObj.change24hPct,
@@ -2260,7 +2264,20 @@ InpMagicNumber=777129
                   </h3>
                 </div>
 
-                <div className="flex items-center gap-2.5 font-mono text-xs">
+                <div className="flex items-center gap-2 flex-wrap font-mono text-xs">
+                  {favorableComputed.institutionalTelemetry && (
+                    <span
+                      className={`px-3 py-1.5 rounded-xl font-black border ${
+                        favorableComputed.institutionalTelemetry.roboticVerdict.startsWith('PRIME')
+                          ? 'bg-[#00C261] text-black border-[#00C261]'
+                          : favorableComputed.institutionalTelemetry.roboticVerdict.startsWith('SNIPER')
+                          ? 'bg-amber-400 text-black border-amber-400'
+                          : 'bg-red-500/25 text-red-200 border-red-500/50'
+                      }`}
+                    >
+                      {favorableComputed.institutionalTelemetry.roboticVerdict.replace(/_/g, ' ')} ({favorableComputed.institutionalTelemetry.estimatedWinProbPct}% Prob · +{favorableComputed.institutionalTelemetry.expectedRMultiple}R)
+                    </span>
+                  )}
                   <span className="px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold">
                     {favorableComputed.confidence}% Confidence · Max Risk: ${favorableComputed.actualRiskUsd.toFixed(2)} ({Math.round(favorableComputed.actualRiskUsd * 130)} KES)
                   </span>
@@ -2330,6 +2347,33 @@ InpMagicNumber=777129
                 broker={broker}
               />
 
+              {favorableComputed.institutionalTelemetry && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-[11px] font-mono">
+                  <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block">Sniper Limit EP (OTE/FVG)</span>
+                    <strong className="text-[#D4AF37]">{favorableComputed.advisoryEntryPrice}</strong>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block">Floor Pivots (S1 / P / R1)</span>
+                    <strong className="text-cyan-300">
+                      {favorableComputed.institutionalTelemetry.pivotLevels.s1} / {favorableComputed.institutionalTelemetry.pivotLevels.pivot} / {favorableComputed.institutionalTelemetry.pivotLevels.r1}
+                    </strong>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block">Z-Score &amp; BB Squeeze</span>
+                    <strong className={Math.abs(favorableComputed.institutionalTelemetry.zScore) > 1.85 ? 'text-amber-300' : 'text-[#00C261]'}>
+                      Z={favorableComputed.institutionalTelemetry.zScore}σ{favorableComputed.institutionalTelemetry.squeezeActive ? ' · SQUEEZE' : ''}
+                    </strong>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block">Stoch(14,3,3) · CCI(20)</span>
+                    <strong className="text-white">
+                      {favorableComputed.institutionalTelemetry.stochK}/{favorableComputed.institutionalTelemetry.stochD} · {favorableComputed.institutionalTelemetry.cci20}
+                    </strong>
+                  </div>
+                </div>
+              )}
+
               {/* Grid of 5 Essential Numerical Execution Values */}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-1">
@@ -2365,12 +2409,12 @@ InpMagicNumber=777129
                 </div>
               </div>
 
-              {/* 5-Factor All-Confluence BUY / SELL Judgment Scorecard */}
+              {/* 12-Factor Institutional BUY / SELL Judgment Scorecard */}
               <div className="p-4 rounded-2xl bg-slate-950/95 border border-[#D4AF37]/35 space-y-2.5 text-xs font-mono">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
                   <span className="text-[#D4AF37] font-bold flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>All-Factor AI BUY/SELL Judgment ({favorableComputed.orderType})</span>
+                    <span>{favorableComputed.totalFactorsCount}-Factor AI BUY/SELL Judgment ({favorableComputed.orderType})</span>
                   </span>
                   <span className="font-black">
                     <span className="text-[#00C261]">BULL {favorableComputed.bullScorePct}%</span>
@@ -2378,7 +2422,7 @@ InpMagicNumber=777129
                     <span className="text-red-400">BEAR {favorableComputed.bearScorePct}%</span>
                   </span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                   {favorableComputed.factorVerdicts.map((fv) => (
                     <div
                       key={fv.name}

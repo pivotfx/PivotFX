@@ -94,7 +94,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
   const [pair, setPair] = useState<CurrencyPair>(
     () => globalLiveStream.getState().selectedPair || 'GBP/USD'
   );
-  const [timeframe, setTimeframe] = useState<Timeframe>('M15');
+  const [timeframe, setTimeframe] = useState<Timeframe>('H1');
   const [price, setPrice] = useState<string>('1.35100');
   const [ema20, setEma20] = useState<string>('1.35180');
   const [ema50, setEma50] = useState<string>('1.35320');
@@ -212,6 +212,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
               ema50: match.ema50,
               rsi: match.rsi,
               atrPips: match.atrPips,
+              candles: matchCandles,
               swingLow: matchSwings.swingLow,
               swingHigh: matchSwings.swingHigh,
               change24hPct: match.change24hPct,
@@ -1153,6 +1154,19 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                           ? `CHOSEN SIDE: ${displayedTicket.direction}`
                           : displayedTicket.trendDirection}
                       </span>
+                      {displayedTicket.institutionalTelemetry && (
+                        <span
+                          className={`text-[10px] font-mono font-black px-2 py-0.5 rounded uppercase ${
+                            displayedTicket.institutionalTelemetry.roboticVerdict.startsWith('PRIME')
+                              ? 'bg-[#00C261] text-black'
+                              : displayedTicket.institutionalTelemetry.roboticVerdict.startsWith('SNIPER')
+                              ? 'bg-amber-400 text-black'
+                              : 'bg-red-500/25 text-red-200 border border-red-500/40'
+                          }`}
+                        >
+                          {displayedTicket.institutionalTelemetry.roboticVerdict.replace(/_/g, ' ')} · {displayedTicket.institutionalTelemetry.estimatedWinProbPct}% Prob
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={() =>
@@ -1226,6 +1240,29 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                   </div>
                 </div>
 
+                {displayedTicket.institutionalTelemetry && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10px] font-mono">
+                    <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-2">
+                      <span className="text-slate-400">Sniper Limit EP:</span>
+                      <strong className="text-[#D4AF37]">
+                        {(displayedTicket.advisoryEntryPrice ?? displayedTicket.entryPrice).toFixed(dec)}
+                      </strong>
+                    </div>
+                    <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-2">
+                      <span className="text-slate-400">Pivots S1/P/R1:</span>
+                      <strong className="text-cyan-300">
+                        {displayedTicket.institutionalTelemetry.pivotLevels.s1.toFixed(dec)} / {displayedTicket.institutionalTelemetry.pivotLevels.pivot.toFixed(dec)} / {displayedTicket.institutionalTelemetry.pivotLevels.r1.toFixed(dec)}
+                      </strong>
+                    </div>
+                    <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-2">
+                      <span className="text-slate-400">Z-Score / CCI:</span>
+                      <strong className="text-white">
+                        {displayedTicket.institutionalTelemetry.zScore}σ · CCI {displayedTicket.institutionalTelemetry.cci20}
+                      </strong>
+                    </div>
+                  </div>
+                )}
+
                 {/* 3-Stage Multi-Horizon Trajectory Projection Cards (1H–48H) */}
                 <div className="pt-1 space-y-1.5">
                   <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
@@ -1286,12 +1323,12 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                 </div>
               </div>
 
-              {/* 5-Factor Institutional BUY / SELL Judgment Scorecard */}
+              {/* 12-Factor Institutional BUY / SELL Judgment Scorecard */}
               <div className="p-4 rounded-2xl bg-slate-900/90 border border-[#D4AF37]/35 space-y-2.5 text-xs font-mono">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
                   <span className="text-[#D4AF37] font-bold flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>All-Factor AI BUY/SELL Judgment ({displayedTicket.orderType})</span>
+                    <span>{displayedTicket.totalFactorsCount}-Factor AI BUY/SELL Judgment ({displayedTicket.orderType})</span>
                   </span>
                   <span className="font-black">
                     <span className="text-[#00C261]">BULL {displayedTicket.bullScorePct}%</span>
@@ -1299,7 +1336,7 @@ export const SuperAnalysisPage: React.FC<SuperAnalysisPageProps> = ({
                     <span className="text-red-400">BEAR {displayedTicket.bearScorePct}%</span>
                   </span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                   {displayedTicket.factorVerdicts.map((fv) => (
                     <div
                       key={fv.name}

@@ -126,10 +126,29 @@ interface BatchMarketSnapshotInput {
   bullScorePct?: number;
   bearScorePct?: number;
   atrPips?: number;
+  advisoryEntryPrice?: number;
+  drawdownSavingsPips?: number;
+  institutionalTelemetry?: {
+    zScore?: number;
+    squeezeActive?: boolean;
+    roboticVerdict?: string;
+    roboticScore?: number;
+    estimatedWinProbPct?: number;
+    expectedRMultiple?: number;
+    drawdownSavingsPct?: number;
+    pivotWallClear?: boolean;
+    climaxWickSafe?: boolean;
+    spreadEfficiencyPct?: number;
+    pivotLevels?: {
+      pivot?: number;
+      r1?: number;
+      s1?: number;
+    };
+  };
 }
 
 interface BatchScanRequest {
-  mode?: 'scan_all' | 'rescan' | 'deep_ai';
+  mode?: 'scan_all' | 'rescan' | 'deep_ai' | 'precision_ai';
   dxyPressurePct?: number;
   riskRegime?: string;
   eatTimeString?: string;
@@ -193,6 +212,36 @@ interface DeepVerifyRequest {
   candlePattern?: string;
   recentM15Candles?: OhlcBar[];
   recentH1Candles?: OhlcBar[];
+  advisoryEntryPrice?: number;
+  institutionalTelemetry?: {
+    zScore?: number;
+    bbWidthPct?: number;
+    squeezeActive?: boolean;
+    stochK?: number;
+    stochD?: number;
+    cci20?: number;
+    pivotLevels?: {
+      pivot?: number;
+      r1?: number;
+      r2?: number;
+      r3?: number;
+      s1?: number;
+      s2?: number;
+      s3?: number;
+    };
+    oteZoneMid?: number;
+    fvgZone?: {
+      low?: number;
+      high?: number;
+      mid?: number;
+      bias?: string;
+    };
+    roboticVerdict?: string;
+    roboticScore?: number;
+    roboticSummary?: string;
+    estimatedWinProbPct?: number;
+    expectedRMultiple?: number;
+  };
 }
 
 interface PositionCoachRequest {
@@ -251,7 +300,8 @@ async function fetchBinanceSpotKlines(
   symbol: 'BTCUSDT' | 'ETHUSDT',
   interval: '15m' | '1h'
 ): Promise<OhlcBar[]> {
-  const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=75`;
+  const limit = interval === '1h' ? 120 : 75;
+  const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
   const res = await fetch(url, { signal: AbortSignal.timeout(1800) });
   if (!res.ok) return [];
   const rows: any = await res.json();
@@ -285,7 +335,7 @@ function formatEatNow(): string {
 async function fetchYahooChartCandles(
   yahooSymbol: string,
   interval: '15m' | '1h',
-  range: '2d' | '5d',
+  range: '2d' | '5d' | '1mo',
   decimals: number
 ): Promise<{
   regularMarketPrice?: number;
@@ -390,7 +440,7 @@ async function fetchYahooChartCandles(
   return {
     regularMarketPrice: regPrice,
     previousClose,
-    candles: candles.slice(-75),
+    candles: candles.slice(interval === '1h' ? -120 : -75),
   };
 }
 
@@ -432,7 +482,7 @@ async function aggregateAllLiveMarkets(): Promise<CachedLiveMarketsPayload> {
     ),
     Promise.allSettled(
       YAHOO_PAIR_SPECS.map((spec) =>
-        fetchYahooChartCandles(spec.yahooSymbol, '1h', '5d', spec.decimals)
+        fetchYahooChartCandles(spec.yahooSymbol, '1h', '1mo', spec.decimals)
       )
     ),
     Promise.allSettled([
@@ -1091,7 +1141,30 @@ function buildDeterministicBatchScan(body: BatchScanRequest) {
   const buyCount = normalizedMarkets.filter((m) => m.direction === 'BUY').length;
   const sellCount = normalizedMarkets.length - buyCount;
   const readyCount = normalizedMarkets.filter((m) => m.executionReadiness === 'READY_ENTER').length;
-  const topMarket = normalizedMarkets[0];
+  const sniperCount = normalizedMarkets.filter(
+    (m) =>
+      m.institutionalTelemetry?.roboticVerdict === 'SNIPER_LIMIT_BUY' ||
+      m.institutionalTelemetry?.roboticVerdict === 'SNIPER_LIMIT_SELL'
+  ).length;
+  const precisionRanked = [...normalizedMarkets].sort((a, b) => {
+    const tier = (x: typeof a) => {
+      const rv = x.institutionalTelemetry?.roboticVerdict;
+      if (x.executionReadiness === 'NO_TRADE_CLOSED') return 0;
+      if (rv === 'PRIME_BUY' || rv === 'PRIME_SELL') return 4;
+      if (rv === 'SNIPER_LIMIT_BUY' || rv === 'SNIPER_LIMIT_SELL') return 3;
+      if (x.executionReadiness === 'READY_ENTER') return 2;
+      if (x.executionReadiness === 'WAIT_PULLBACK') return 1;
+      return 0;
+    };
+    const tDiff = tier(b) - tier(a);
+    if (tDiff !== 0) return tDiff;
+    return (b.institutionalTelemetry?.roboticScore ?? b.confidence) - (a.institutionalTelemetry?.roboticScore ?? a.confidence);
+  });
+  const topMarket = body.mode === 'precision_ai' ? precisionRanked[0] || normalizedMarkets[0] : normalizedMarkets[0];
+  const topPrecisionNames = precisionRanked
+    .slice(0, 3)
+    .map((m) => `${m.pair} (${m.institutionalTelemetry?.roboticScore ?? m.confidence}/100 · ${m.institutionalTelemetry?.estimatedWinProbPct ?? m.confidence}% WinP)`)
+    .join(', ');
 
   const favoredBiasText =
     dxy <= -0.1
@@ -1099,11 +1172,15 @@ function buildDeterministicBatchScan(body: BatchScanRequest) {
       : dxy >= 0.1
       ? `TODAY & THIS HOUR: FAVOURABLE SELLING EUR/GBP/AUD · BUYING USD PAIRS (DXY Strength +${dxy}%)`
       : buyCount >= sellCount
-      ? `TODAY & THIS HOUR: SELECTIVE BUY BIAS ON TOP % LEADERS (${buyCount} BUY vs ${sellCount} SELL Setups)`
-      : `TODAY & THIS HOUR: SELECTIVE SELL BIAS ON USD Strength (${sellCount} SELL vs ${buyCount} BUY Setups)`;
+      ? `TODAY & THIS HOUR: SELECTIVE BUY BIAS ON TOP CONFLUENCE LEADERS (${buyCount} BUY vs ${sellCount} SELL Setups)`
+      : `TODAY & THIS HOUR: SELECTIVE SELL BIAS ON USD STRENGTH (${sellCount} SELL vs ${buyCount} BUY Setups)`;
 
   const topSummary = topMarket
-    ? `#1 Leader ${topMarket.pair} (${topMarket.change24hPct >= 0 ? `+${topMarket.change24hPct}%` : `${topMarket.change24hPct}%`}) locks ${topMarket.trendDirection} -> ${topMarket.direction} @ ${topMarket.price} (${topMarket.executionReadiness || 'SYNCED'}).`
+    ? `#1 Leader ${topMarket.pair} (${topMarket.change24hPct >= 0 ? `+${topMarket.change24hPct}%` : `${topMarket.change24hPct}%`}) locks ${topMarket.trendDirection} -> ${topMarket.direction} @ ${
+        topMarket.advisoryEntryPrice && (topMarket.drawdownSavingsPips ?? 0) > 0
+          ? `${topMarket.advisoryEntryPrice} Sniper Limit (saves ${topMarket.drawdownSavingsPips}p)`
+          : topMarket.price
+      } (${topMarket.institutionalTelemetry?.roboticVerdict || topMarket.executionReadiness || 'SYNCED'}).`
     : 'All 15 institutional instruments synchronized.';
 
   const sampleLot = Number(topMarket?.lotSize ?? 0.01).toFixed(2);
@@ -1112,7 +1189,7 @@ function buildDeterministicBatchScan(body: BatchScanRequest) {
   const dailyMacroDirective = {
     headline: favoredBiasText,
     overallSafety: daySafety,
-    hourlyOutlook: `${sessionName} (${body.eatTimeString || 'EAT'}): ${topSummary} ${readyCount} setup(s) READY_ENTER; enforce your risk plan (${sampleLot} lots · $${sampleRisk} risk cap).`,
+    hourlyOutlook: `${sessionName} (${body.eatTimeString || 'EAT'}): ${topSummary} ${readyCount} PRIME/READY + ${sniperCount} SNIPER LIMIT setups; Top Precision: ${topPrecisionNames || 'Calibrating'}. Enforce ${sampleLot} lots ($${sampleRisk} risk cap).`,
     catalystSummary: `Global Macro Regime: ${regime} · USD Basket Index: ${dxy >= 0 ? `+${dxy}%` : `${dxy}%`} · ${buyCount} Bullish / ${sellCount} Bearish H1-M15 structures locked.`,
     syncedAt: new Date().toISOString(),
   };
@@ -1128,7 +1205,7 @@ function buildDeterministicBatchScan(body: BatchScanRequest) {
   > = {};
 
   for (const m of markets) {
-    perPair[m.pair] = buildDeterministicSuperNote({
+    const baseNote = buildDeterministicSuperNote({
       pair: m.pair,
       timeframe: m.timeframe,
       price: m.price,
@@ -1152,12 +1229,25 @@ function buildDeterministicBatchScan(body: BatchScanRequest) {
       executionReadinessReason: m.executionReadinessReason,
       windowHeadline: `${sessionName}${m.windowStatus ? ` (${m.windowStatus})` : ''}`,
     });
+    const tel = m.institutionalTelemetry;
+    if (tel && (m.drawdownSavingsPips ?? 0) > 0 && m.advisoryEntryPrice) {
+      baseNote.note = `${baseNote.note} Precision Stage: ${tel.roboticVerdict || m.executionReadiness} (${tel.roboticScore ?? m.confidence}/100 · ${tel.estimatedWinProbPct ?? m.confidence}% WinP) — stage Sniper Limit @ ${m.advisoryEntryPrice} to save ${m.drawdownSavingsPips}p drawdown.`;
+    }
+    perPair[m.pair] = baseNote;
   }
 
   return {
     source: 'quantitative-engine',
     dailyMacroDirective,
     perPair,
+    precisionRanking: precisionRanked.slice(0, 5).map((m) => ({
+      pair: m.pair,
+      verdict: m.institutionalTelemetry?.roboticVerdict || m.executionReadiness || 'SYNCED',
+      roboticScore: m.institutionalTelemetry?.roboticScore ?? m.confidence,
+      estimatedWinProbPct: m.institutionalTelemetry?.estimatedWinProbPct ?? m.confidence,
+      advisoryEntryPrice: m.advisoryEntryPrice ?? m.price,
+      drawdownSavingsPips: m.drawdownSavingsPips ?? 0,
+    })),
     syncedAt: new Date().toISOString(),
   };
 }
@@ -1309,6 +1399,13 @@ function buildDeterministicDeepVerify(body: DeepVerifyRequest) {
   const structureState = (bos.bosDirection as string) || 'RANGING';
   const bosLevel = Number(bos.bosTriggerLevel || livePrice);
 
+  const spec = YAHOO_PAIR_SPECS.find((s) => s.pair === pair);
+  const dec = spec?.decimals ?? (pair.includes('JPY') ? 3 : pair === 'XAU/USD' || pair.includes('BTC') || pair.includes('ETH') || pair === 'USOIL' ? 2 : pair === 'US30' || pair === 'NAS100' || pair === 'GER40' ? 1 : 5);
+  const tp3 = Number(body.tp3 || tp2);
+  const tel = body.institutionalTelemetry;
+  const zScoreVal = tel?.zScore;
+  const piv = tel?.pivotLevels;
+
   const rawChecks: DeepVerifyCheckInput[] = Array.isArray(body.checks) && body.checks.length > 0
     ? body.checks
     : [
@@ -1371,6 +1468,21 @@ function buildDeterministicDeepVerify(body: DeepVerifyRequest) {
           passed: !body.isExtendedZone,
           detail: body.isExtendedZone ? 'Extended from 20 EMA — stage Limit order' : 'Inside 20/50 EMA value zone',
         },
+        {
+          id: 'STATISTICAL_ZSCORE_OK',
+          label: 'Statistical Z-Score & Squeeze Envelope',
+          passed: zScoreVal === undefined || Math.abs(zScoreVal) <= 2.15,
+          detail:
+            zScoreVal === undefined
+              ? 'Within normal volatility band'
+              : `Z=${zScoreVal}σ${tel?.squeezeActive ? ' · BB Squeeze Breakout Coil' : ''}`,
+        },
+        {
+          id: 'PIVOT_CONFLUENCE_VALID',
+          label: 'Floor Pivot S1/P/R1 Path Clear',
+          passed: piv?.pivot === undefined ? true : isBuy ? livePrice >= (piv.s1 ?? livePrice) : livePrice <= (piv.r1 ?? livePrice),
+          detail: piv?.pivot !== undefined ? `P=${piv.pivot} · S1=${piv.s1} · R1=${piv.r1}` : 'Pivot corridor aligned',
+        },
       ];
 
   const failedCounterBos = rawChecks.some((c) => c.id === 'NO_COUNTER_BOS' && !c.passed);
@@ -1408,36 +1520,67 @@ function buildDeterministicDeepVerify(body: DeepVerifyRequest) {
   const confidenceScore = Number(
     Math.min(
       97,
-      Math.max(42, 46 + passedCount * 6.4 - (failedCounterBos ? 22 : 0))
+      Math.max(38, 40 + passedCount * 5.7 - (failedCounterBos ? 22 : 0))
     ).toFixed(1)
   );
+
+  const roboticGrade =
+    verdict === 'CONFIRMED_BUY' || verdict === 'CONFIRMED_SELL'
+      ? passedCount >= 9 && (tel?.roboticScore ?? 78) >= 75
+        ? `A+ PRIME ${verifiedDirection}`
+        : `A CONFLUENCE ${verifiedDirection}`
+      : verdict === 'WAIT_PULLBACK'
+      ? `B+ SNIPER LIMIT ${proposedDirection}`
+      : verdict === 'BOS_REVERSAL_FLIP'
+      ? `COUNTER-BOS VETO (ALIGN ${verifiedDirection})`
+      : 'NO EDGE · STAND ASIDE';
+
+  const baseEntry = Number(body.entryPrice || livePrice);
+  const limitEp = Number(body.advisoryEntryPrice || baseEntry);
+  const useSniperEp =
+    verdict === 'WAIT_PULLBACK' &&
+    limitEp > 0 &&
+    ((isBuy && limitEp < baseEntry && limitEp > sl) || (!isBuy && limitEp > baseEntry && limitEp < sl));
+  const refinedEp = Number((useSniperEp ? limitEp : baseEntry).toFixed(dec));
+  const slDist = Math.abs(baseEntry - sl);
+  const tp1Dist = Math.abs(tp1 - baseEntry);
+  const tp2Dist = Math.abs(tp2 - baseEntry);
+  const tp3Dist = Math.abs(tp3 - baseEntry);
+  const refinedSl = Number((useSniperEp ? sl : isBuy ? refinedEp - slDist : refinedEp + slDist).toFixed(dec));
+  const refinedTp1 = Number((isBuy ? refinedEp + tp1Dist : refinedEp - tp1Dist).toFixed(dec));
+  const refinedTp2 = Number((isBuy ? refinedEp + tp2Dist : refinedEp - tp2Dist).toFixed(dec));
+  const refinedTp3 = Number((isBuy ? refinedEp + tp3Dist : refinedEp - tp3Dist).toFixed(dec));
+
+  const validRefinedGeometry = isBuy
+    ? refinedSl < refinedEp && refinedEp < refinedTp1 && refinedTp1 < refinedTp2
+    : refinedTp2 < refinedTp1 && refinedTp1 < refinedEp && refinedEp < refinedSl;
 
   const deepAuditHeadline =
     verdict === 'BOS_REVERSAL_FLIP'
       ? `BOS REVERSAL GUARD: ${proposedDirection} VETOED ON ${pair} (${structureState.replace(/_/g, ' ')})`
       : verdict === 'STAND_ASIDE_TRAP'
-      ? `STAND ASIDE: ${pair} FAILED PRE-FLIGHT CHECKS (${passedCount}/${rawChecks.length})`
+      ? `STAND ASIDE: ${pair} FAILED QUANT GATES (${passedCount}/${rawChecks.length})`
       : verdict === 'WAIT_PULLBACK'
-      ? `WAIT PULLBACK ON ${pair} (${timeframe}) — DO NOT CHASE @ ${livePrice}`
-      : `VERIFIED ${verifiedDirection} TRAJECTORY ON ${pair} (${timeframe}) · ${passedCount}/${rawChecks.length} CHECKS PASSED`;
+      ? `SNIPER LIMIT ON ${pair} (${timeframe}) — STAGE @ ${refinedEp} (DO NOT CHASE @ ${livePrice})`
+      : `PRIME ${verifiedDirection} VERIFIED ON ${pair} (${timeframe}) · ${passedCount}/${rawChecks.length} GATES PASSED`;
 
   const deepAuditSummary =
     verdict === 'BOS_REVERSAL_FLIP'
       ? `${bos.bosVetoReason || `${structureState.replace(/_/g, ' ')} broke key level ${bosLevel}`}. Buying/selling against an active structural break traps entries into drawdown — align strictly with ${verifiedDirection} or stand aside.`
       : verdict === 'STAND_ASIDE_TRAP'
-      ? `${body.executionReadinessReason || 'Higher-timeframe or session gate blocked'}. Preserve capital until M15 + H1 + BOS agree cleanly.`
+      ? `${body.executionReadinessReason || 'Higher-timeframe or session gate blocked'}. Preserve capital until M15 + H1 + ADX + BOS agree cleanly.`
       : verdict === 'WAIT_PULLBACK'
-      ? `Structure favors ${proposedDirection} (${structureState.replace(/_/g, ' ')}), but price (${livePrice}) is stretched from 20 EMA (${ema20}) or ATR exceeds SL. Wait for pullback limit entry with SL @ ${sl}.`
-      : `Live OHLC candles, 1H (${body.h1TrendDirection}) + ${timeframe} trajectory, EMA20/50 (${ema20}/${ema50}), RSI ${rsi}, and BOS (${structureState.replace(/_/g, ' ')}) all confirm ${verifiedDirection} from ${livePrice} toward TP1 ${tp1} / TP2 ${tp2} with swing-protected SL ${sl}.`;
+      ? `Structure favors ${proposedDirection} (${structureState.replace(/_/g, ' ')}), but price (${livePrice}) is stretched from value (Z=${zScoreVal ?? 0}σ / EMA20 ${ema20}). Stage Sniper Limit @ ${refinedEp} with SL ${refinedSl} -> TP1 ${refinedTp1} -> TP2 ${refinedTp2}.`
+      : `OHLC structure, H1 (${body.h1TrendDirection}) + ${timeframe} alignment, EMA20/50 (${ema20}/${ema50}), ADX ${body.adxStrength ?? 21}, Z=${zScoreVal ?? 0}σ, and BOS (${structureState.replace(/_/g, ' ')}) all confirm ${verifiedDirection} @ ${refinedEp} -> TP1 ${refinedTp1} -> TP2 ${refinedTp2} with sweep-proof SL ${refinedSl}.`;
 
   const trajectoryVerdict =
     verdict === 'BOS_REVERSAL_FLIP'
       ? `Structural reversal toward ${verifiedDirection} side; avoid counter-BOS ${proposedDirection}.`
       : verdict === 'STAND_ASIDE_TRAP'
-      ? `Chop / closed market — await clean structural breakout past ${bosLevel}.`
+      ? `Chop / closed market — await clean structural displacement past ${bosLevel}.`
       : isBuy
-      ? `Bullish trajectory holding above protected swing ${bos.protectedSwingLow ?? sl} -> TP1 ${tp1} -> TP2 ${tp2}.`
-      : `Bearish trajectory capped below protected swing ${bos.protectedSwingHigh ?? sl} -> TP1 ${tp1} -> TP2 ${tp2}.`;
+      ? `Bullish trajectory holding above protected swing ${bos.protectedSwingLow ?? refinedSl} -> TP1 ${refinedTp1} -> TP2 ${refinedTp2}.`
+      : `Bearish trajectory capped below protected swing ${bos.protectedSwingHigh ?? refinedSl} -> TP1 ${refinedTp1} -> TP2 ${refinedTp2}.`;
 
   return {
     pair,
@@ -1448,8 +1591,9 @@ function buildDeterministicDeepVerify(body: DeepVerifyRequest) {
     proposedDirection,
     structureState,
     confidenceScore,
+    roboticGrade,
     bosLevel,
-    invalidationLevel: sl,
+    invalidationLevel: refinedSl,
     deepAuditHeadline,
     deepAuditSummary,
     trajectoryVerdict,
@@ -1458,6 +1602,18 @@ function buildDeterministicDeepVerify(body: DeepVerifyRequest) {
     passedCount,
     totalChecks: rawChecks.length,
     syncedAt: formatEatNow(),
+    refinedLevels: validRefinedGeometry
+      ? {
+          entryPrice: refinedEp,
+          stopLoss: refinedSl,
+          tp1: refinedTp1,
+          tp2: refinedTp2,
+          tp3: refinedTp3,
+          rationale: useSniperEp
+            ? `Sniper Limit anchored to 20 EMA / OTE / FVG discount zone (${refinedEp}) protecting R:R and trimming chase risk.`
+            : `Structure-anchored levels beyond BOS swing + ATR sweep shield (SL ${refinedSl}) targeting Floor Pivot confluence (TP1 ${refinedTp1} / TP2 ${refinedTp2}).`,
+        }
+      : undefined,
   };
 }
 
@@ -1730,19 +1886,25 @@ async function startServer() {
     try {
       const marketCount = body.markets.length;
       const marketSummaryLines = body.markets
-        .map(
-          (m, i) =>
-            `#${i + 1} ${m.pair} (${m.timeframe}${m.tvSymbol ? ` · ${m.tvSymbol}` : ''}): Price=${m.price}, 24h=${m.change24hPct}%, Trend=${m.trendDirection}, BOS=${m.bosDirection || 'RANGING'}, Strategy=${m.recommendedStrategy || '10-Factor EMA/BOS'}, Order=${m.direction}, Bull/Bear=${m.bullScorePct ?? 50}%/${m.bearScorePct ?? 50}%, ADX=${m.adxStrength ?? 20}, MACD=${m.macdBias || 'FLAT'}, Pattern=${m.candlePattern || 'NONE'}, Gate=${m.executionReadiness || 'READY_ENTER'}, Lot=${Number(m.lotSize ?? 0.01).toFixed(2)}, Risk=$${Number(m.actualRiskUsd ?? 2.5).toFixed(2)}, EMA20=${m.ema20}, EMA50=${m.ema50}, RSI=${m.rsi}, ATR=${m.atrPips ?? 18}p, SL=${m.stopLoss}, TP1=${m.tp1}, TP2=${m.tp2}, TP3=${m.tp3}, Extended=${Boolean(
-              m.isExtendedZone
-            )}, Window=${m.windowStatus}`
-        )
+        .map((m, i) => {
+          const tel = m.institutionalTelemetry;
+          const telStr = tel
+            ? `, Verdict=${tel.roboticVerdict || 'N/A'}, Score=${tel.roboticScore ?? 'N/A'}/100, WinP=${tel.estimatedWinProbPct ?? 'N/A'}%, ExpR=${tel.expectedRMultiple ?? 'N/A'}R, Z=${tel.zScore ?? 'N/A'}σ, Squeeze=${Boolean(
+                tel.squeezeActive
+              )}, PivotClear=${tel.pivotWallClear ?? true}, WickSafe=${tel.climaxWickSafe ?? true}, SpreadEff=${tel.spreadEfficiencyPct ?? 90}%, SniperEP=${m.advisoryEntryPrice ?? m.price} (Saves=${m.drawdownSavingsPips ?? 0}p)`
+            : '';
+          return `#${i + 1} ${m.pair} (${m.timeframe}${m.tvSymbol ? ` · ${m.tvSymbol}` : ''}): Price=${m.price}, 24h=${m.change24hPct}%, Trend=${m.trendDirection}, BOS=${m.bosDirection || 'RANGING'}, Strategy=${m.recommendedStrategy || '12-Factor Matrix'}, Order=${m.direction}, Bull/Bear=${m.bullScorePct ?? 50}%/${m.bearScorePct ?? 50}%, ADX=${m.adxStrength ?? 20}, MACD=${m.macdBias || 'FLAT'}, Pattern=${m.candlePattern || 'NONE'}, Gate=${m.executionReadiness || 'READY_ENTER'}, Lot=${Number(m.lotSize ?? 0.01).toFixed(2)}, Risk=$${Number(m.actualRiskUsd ?? 2.5).toFixed(2)}, EMA20=${m.ema20}, EMA50=${m.ema50}, RSI=${m.rsi}, ATR=${m.atrPips ?? 18}p, SL=${m.stopLoss}, TP1=${m.tp1}, TP2=${m.tp2}, TP3=${m.tp3}, Extended=${Boolean(
+            m.isExtendedZone
+          )}, Window=${m.windowStatus}${telStr}`;
+        })
         .join('\n');
 
       const prompt = [
+        `Scan Mode: ${body.mode || 'precision_ai'}`,
         `Session Context: Nairobi EAT=${body.eatTimeString || 'Active'}, Window=${body.sessionWindowName || 'Global Liquidity'}, Safety=${body.overallDaySafety || 'FAVOURABLE'}`,
         `Macro Context: DXY Basket=${body.dxyPressurePct ?? 0}%, Regime=${body.riskRegime || 'BALANCED'}`,
-        `${marketCount} Markets Sorted Top % to Least:\n${marketSummaryLines}`,
-        `Generate a clear today & current-hour macro directive (favouring BUY vs SELL) and a crisp 2-sentence institutional execution note for each of the ${marketCount} pairs referencing their exact price, BOS/CHoCH structure, ADX(14)/MACD(12/26/9) momentum, Execution Readiness Gate (READY_ENTER vs WAIT_PULLBACK vs NO_TRADE_CHOP/NO_TRADE_CLOSED), SL, TP2, and configured lot discipline.`,
+        `${marketCount} Markets:\n${marketSummaryLines}`,
+        `Generate a sharp macro directive highlighting the highest-probability, lowest-drawdown instruments RIGHT NOW, plus a crisp 2-sentence precision execution note for each of the ${marketCount} pairs referencing their Robotic Verdict (PRIME vs SNIPER_LIMIT vs STAND_ASIDE), WinP%/ExpR, Z-Score, Pivot clearance, Sniper Limit EP vs Market EP drawdown savings, SL, TP2, and risk discipline.`,
       ].join('\n\n');
 
       const response = await aiClient.models.generateContent({
@@ -1750,7 +1912,7 @@ async function startServer() {
         contents: prompt,
         config: {
           systemInstruction:
-            'You are the Chief Currency Strategist at an institutional prop trading desk in Nairobi. Output strict JSON matching the schema with decisive, institutional actionable execution analysis and zero markdown.',
+            'You are the Chief Quantitative Currency Strategist at an institutional prop trading desk in Nairobi. Output strict JSON matching the schema with crisp, disciplined precision-entry guidance emphasizing minimum drawdown, Sniper Limit retracements when Z-Score or Pivot walls block chasing, and zero markdown.',
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           responseMimeType: 'application/json',
           responseSchema: {
@@ -1771,7 +1933,7 @@ async function startServer() {
               },
             },
           },
-          abortSignal: AbortSignal.timeout(6800),
+          abortSignal: AbortSignal.timeout(8800),
         },
       });
 
@@ -1814,41 +1976,67 @@ async function startServer() {
     }
 
     try {
+      const pairSpec = YAHOO_PAIR_SPECS.find((s) => s.pair === baseline.pair);
+      const decimals =
+        pairSpec?.decimals ??
+        (baseline.pair.includes('JPY')
+          ? 3
+          : baseline.pair === 'XAU/USD' || baseline.pair.includes('BTC') || baseline.pair.includes('ETH') || baseline.pair === 'USOIL'
+          ? 2
+          : baseline.pair === 'US30' || baseline.pair === 'NAS100' || baseline.pair === 'GER40'
+          ? 1
+          : 5);
+
       const m15Str = (body.recentM15Candles || [])
-        .slice(-16)
+        .slice(-20)
         .map((c, idx) => `${idx + 1}:O=${c.open},H=${c.high},L=${c.low},C=${c.close}`)
         .join(' | ');
       const h1Str = (body.recentH1Candles || [])
-        .slice(-10)
+        .slice(-12)
         .map((c, idx) => `${idx + 1}:O=${c.open},H=${c.high},L=${c.low},C=${c.close}`)
         .join(' | ');
       const checksStr = baseline.checks
         .map((c) => `[${c.passed ? 'PASS' : 'BLOCK'}] ${c.label}: ${c.detail}`)
         .join('\n');
 
+      const tel = body.institutionalTelemetry;
+      const piv = tel?.pivotLevels;
+      const quantTelemetryStr = tel
+        ? [
+            `Robotic Gate=${tel.roboticVerdict || 'N/A'} (Score=${tel.roboticScore ?? 'N/A'}/100, EstWinProb=${tel.estimatedWinProbPct ?? 'N/A'}%, ExpectedR=${tel.expectedRMultiple ?? 'N/A'}R)`,
+            `Volatility & Mean-Reversion: Z-Score=${tel.zScore ?? 'N/A'}σ, BBWidth=${tel.bbWidthPct ?? 'N/A'}%, Squeeze=${Boolean(tel.squeezeActive)}`,
+            `Oscillators: Stoch(14,3,3)=${tel.stochK ?? 'N/A'}/${tel.stochD ?? 'N/A'}, CCI(20)=${tel.cci20 ?? 'N/A'}`,
+            piv ? `Floor Pivots: S2=${piv.s2}, S1=${piv.s1}, P=${piv.pivot}, R1=${piv.r1}, R2=${piv.r2}` : '',
+            `Liquidity Zones: 0.65 OTE=${tel.oteZoneMid ?? 'N/A'}${tel.fvgZone ? `, FVG(${tel.fvgZone.bias})=${tel.fvgZone.low}-${tel.fvgZone.high} (mid ${tel.fvgZone.mid})` : ''}`,
+          ]
+            .filter(Boolean)
+            .join('\n')
+        : '';
+
       const prompt = [
         `Instrument: ${baseline.pair} (${baseline.timeframe}) on ${body.broker || 'FXPESA'}`,
         `Live Price: ${body.livePrice}, EMA20: ${body.ema20}, EMA50: ${body.ema50}, RSI(14): ${body.rsi}, ATR: ${body.atrPips}p${body.adxStrength !== undefined ? `, ADX(14): ${body.adxStrength}` : ''}${body.macdBias ? `, MACD: ${body.macdBias}` : ''}${body.candlePattern ? `, Pattern: ${body.candlePattern}` : ''}`,
         `Proposed Direction: ${baseline.proposedDirection}, MTF: Active=${body.trendDirection}, H1=${body.h1TrendDirection}, Gate=${body.executionReadiness} (${body.executionReadinessReason || ''})`,
         `BOS/CHoCH Quantitative State: ${baseline.structureState}, Trigger=${baseline.bosLevel}, ProtectedSwingLow=${body.bosAnalysis?.protectedSwingLow}, ProtectedSwingHigh=${body.bosAnalysis?.protectedSwingHigh}`,
-        `Proposed Levels: EP=${body.entryPrice}, SL=${body.stopLoss}, TP1=${body.tp1}, TP2=${body.tp2}, TP3=${body.tp3}, R:R=${body.riskReward}, Lot=${Number(body.lotSize ?? 0.01).toFixed(2)}, Risk=$${Number(body.actualRiskUsd ?? 2).toFixed(2)}`,
+        `Proposed Market Levels: EP=${body.entryPrice}, Sniper Limit EP=${body.advisoryEntryPrice ?? body.entryPrice}, SL=${body.stopLoss}, TP1=${body.tp1}, TP2=${body.tp2}, TP3=${body.tp3}, R:R=${body.riskReward}, Lot=${Number(body.lotSize ?? 0.01).toFixed(2)}, Risk=$${Number(body.actualRiskUsd ?? 2).toFixed(2)}`,
         `Macro: DXY=${body.dxyPressurePct ?? 0}%, Regime=${body.riskRegime || 'BALANCED'}`,
+        quantTelemetryStr ? `Institutional Telemetry:\n${quantTelemetryStr}` : '',
         m15Str ? `Recent M15 Candles (oldest->newest): ${m15Str}` : '',
         h1Str ? `Recent H1 Candles (oldest->newest): ${h1Str}` : '',
-        `8-Point Quantitative Pre-Flight Checks:\n${checksStr}`,
-        `Baseline Quantitative Verdict: ${baseline.verdict} (${baseline.verifiedDirection})`,
-        `Audit raw M15 + H1 candlesticks, ADX trend strength, MACD histogram momentum, and candlestick price-action patterns for Break of Structure (BOS), Change of Character (CHoCH), liquidity sweeps, and trajectory alignment. Ensure zero false BUY in downtrend/Bearish BOS and zero false SELL in uptrend/Bullish BOS.`,
+        `${baseline.totalChecks}-Point Quantitative Pre-Flight Checks:\n${checksStr}`,
+        `Baseline Quantitative Verdict: ${baseline.verdict} (${baseline.verifiedDirection}) · Grade=${baseline.roboticGrade}`,
+        `Perform an institutional quant + Smart Money audit across all M15/H1 bars, Z-Score, Floor Pivots, OTE/FVG liquidity, ADX, MACD, and BOS/CHoCH. Optionally refine numeric refinedEp, refinedSl, refinedTp1, refinedTp2 ONLY if they tighten drawdown or lock cleaner liquidity/pivot alignment while strictly respecting MT4 geometry (BUY: SL < EP < TP1 < TP2; SELL: TP2 < TP1 < EP < SL).`,
       ]
         .filter(Boolean)
         .join('\n\n');
 
-      const response = await aiClient.models.generateContent({
+      const auditPromise = aiClient.models.generateContent({
         model: 'gemini-4-hydrogen',
         contents: prompt,
         config: {
           systemInstruction:
-            'You are a Chief Quantitative Market Structure Auditor (Smart Money Concepts: BOS/CHoCH, Liquidity Sweeps, FVG/EMA structure, and Strict Risk Preservation). Output strict JSON matching the schema. Be ruthlessly honest: if M15/H1 candles show an opposing Break of Structure or liquidity trap or chop, warn against entering.',
-          thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+            'You are a Chief Quantitative Market Structure & Institutional Execution Auditor (Smart Money Concepts: BOS/CHoCH, Liquidity Sweeps, FVG/OTE retracements, Floor Pivots, Z-Score volatility, ADX/MACD confluence). Output strict JSON matching the schema. Be ruthlessly honest: never confirm a weak/chop/counter-BOS setup. When issuing refinedEp/refinedSl/refinedTp1/refinedTp2, ensure mathematically valid MT4 order hierarchy with >= 1:1.8 R:R.',
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -1867,65 +2055,162 @@ async function startServer() {
               deepAuditSummary: { type: Type.STRING },
               trajectoryVerdict: { type: Type.STRING },
               invalidationNote: { type: Type.STRING },
+              refinedEp: { type: Type.NUMBER },
+              refinedSl: { type: Type.NUMBER },
+              refinedTp1: { type: Type.NUMBER },
+              refinedTp2: { type: Type.NUMBER },
+              refinedRationale: { type: Type.STRING },
             },
           },
-          abortSignal: AbortSignal.timeout(8500),
+          abortSignal: AbortSignal.timeout(11200),
         },
       });
 
-      const raw = response.text?.trim();
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        // Zero-Mistake Clamp: Quantitative BOS, closed-window, or chop blocks CANNOT be overridden to CONFIRMED
-        const quantLocked =
-          baseline.verdict === 'BOS_REVERSAL_FLIP' ||
-          baseline.verdict === 'STAND_ASIDE_TRAP';
-        const finalVerdict = quantLocked
-          ? baseline.verdict
-          : parsed?.verdict === 'WAIT_PULLBACK' ||
-            parsed?.verdict === 'BOS_REVERSAL_FLIP' ||
-            parsed?.verdict === 'STAND_ASIDE_TRAP'
-          ? parsed.verdict
-          : baseline.verdict;
+      const newsPrompt = `Summarize in 2 crisp factual sentences the top active macro catalyst, central bank rate bias, or high-impact economic release today moving ${baseline.pair}. Highlight any immediate headline risk for intraday FX/commodity traders. Plain prose only.`;
+      const newsPromise = aiClient.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: newsPrompt,
+        config: {
+          tools: [{ googleSearch: {} }],
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          abortSignal: AbortSignal.timeout(6000),
+        },
+      });
 
-        const finalVerifiedDir: 'BUY' | 'SELL' | 'STAND_ASIDE' =
-          finalVerdict === 'CONFIRMED_BUY'
-            ? 'BUY'
-            : finalVerdict === 'CONFIRMED_SELL'
-            ? 'SELL'
-            : finalVerdict === 'BOS_REVERSAL_FLIP'
-            ? baseline.proposedDirection === 'BUY'
-              ? 'SELL'
-              : 'BUY'
-            : finalVerdict === 'STAND_ASIDE_TRAP'
-            ? 'STAND_ASIDE'
-            : baseline.proposedDirection;
+      const [auditSettled, newsSettled] = await Promise.allSettled([auditPromise, newsPromise]);
 
-        res.json({
-          ...baseline,
-          source: 'gemini-4-hydrogen',
-          verdict: finalVerdict,
-          verifiedDirection: finalVerifiedDir,
-          deepAuditHeadline:
-            parsed?.deepAuditHeadline && parsed.deepAuditHeadline.length > 10
-              ? parsed.deepAuditHeadline
-              : baseline.deepAuditHeadline,
-          deepAuditSummary:
-            parsed?.deepAuditSummary && parsed.deepAuditSummary.length > 20
-              ? parsed.deepAuditSummary
-              : baseline.deepAuditSummary,
-          trajectoryVerdict:
-            parsed?.trajectoryVerdict && parsed.trajectoryVerdict.length > 10
-              ? parsed.trajectoryVerdict
-              : baseline.trajectoryVerdict,
-          riskChecklist:
-            parsed?.invalidationNote && parsed.invalidationNote.length > 10
-              ? [...baseline.riskChecklist, `AI Watch: ${parsed.invalidationNote}`]
-              : baseline.riskChecklist,
-        });
-        return;
+      let macroNewsSummary: string | undefined;
+      let groundingSources: Array<{ title: string; uri: string }> | undefined;
+
+      if (newsSettled.status === 'fulfilled') {
+        const newsResp = newsSettled.value;
+        const newsText = newsResp.text?.trim();
+        if (newsText && newsText.length > 20) {
+          macroNewsSummary = newsText;
+        }
+        const chunks = newsResp.candidates?.[0]?.groundingMetadata?.groundingChunks;
+        if (Array.isArray(chunks)) {
+          const seen = new Set<string>();
+          const links: Array<{ title: string; uri: string }> = [];
+          for (const ch of chunks) {
+            const uri = ch?.web?.uri;
+            const title = ch?.web?.title;
+            if (typeof uri === 'string' && uri.startsWith('http') && !seen.has(uri)) {
+              seen.add(uri);
+              links.push({ title: typeof title === 'string' && title.trim() ? title.trim() : uri, uri });
+              if (links.length >= 3) break;
+            }
+          }
+          if (links.length > 0) groundingSources = links;
+        }
       }
-      res.json(baseline);
+
+      if (auditSettled.status === 'fulfilled') {
+        const raw = auditSettled.value.text?.trim();
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          // Zero-Mistake Clamp: Quantitative BOS, closed-window, or chop blocks CANNOT be overridden to CONFIRMED
+          const quantLocked =
+            baseline.verdict === 'BOS_REVERSAL_FLIP' ||
+            baseline.verdict === 'STAND_ASIDE_TRAP';
+          const finalVerdict = quantLocked
+            ? baseline.verdict
+            : parsed?.verdict === 'WAIT_PULLBACK' ||
+              parsed?.verdict === 'BOS_REVERSAL_FLIP' ||
+              parsed?.verdict === 'STAND_ASIDE_TRAP'
+            ? parsed.verdict
+            : baseline.verdict;
+
+          const finalVerifiedDir: 'BUY' | 'SELL' | 'STAND_ASIDE' =
+            finalVerdict === 'CONFIRMED_BUY'
+              ? 'BUY'
+              : finalVerdict === 'CONFIRMED_SELL'
+              ? 'SELL'
+              : finalVerdict === 'BOS_REVERSAL_FLIP'
+              ? baseline.proposedDirection === 'BUY'
+                ? 'SELL'
+                : 'BUY'
+              : finalVerdict === 'STAND_ASIDE_TRAP'
+              ? 'STAND_ASIDE'
+              : baseline.proposedDirection;
+
+          // Validate AI-calibrated refined levels against strict MT4 geometry + 1.5% envelope
+          const refPrice = Number(body.livePrice || body.entryPrice || 1);
+          let nextRefinedLevels = baseline.refinedLevels;
+          if (
+            finalVerifiedDir !== 'STAND_ASIDE' &&
+            typeof parsed?.refinedEp === 'number' &&
+            typeof parsed?.refinedSl === 'number' &&
+            typeof parsed?.refinedTp1 === 'number' &&
+            typeof parsed?.refinedTp2 === 'number' &&
+            Number.isFinite(parsed.refinedEp) &&
+            Number.isFinite(parsed.refinedSl) &&
+            Number.isFinite(parsed.refinedTp1) &&
+            Number.isFinite(parsed.refinedTp2) &&
+            parsed.refinedEp > 0 &&
+            Math.abs(parsed.refinedEp - refPrice) / Math.max(1e-6, refPrice) < 0.015
+          ) {
+            const ep = Number(parsed.refinedEp.toFixed(decimals));
+            const slR = Number(parsed.refinedSl.toFixed(decimals));
+            const tp1R = Number(parsed.refinedTp1.toFixed(decimals));
+            const tp2R = Number(parsed.refinedTp2.toFixed(decimals));
+            const dirIsBuy = finalVerifiedDir === 'BUY';
+            const geometryOk = dirIsBuy
+              ? slR < ep && ep < tp1R && tp1R < tp2R
+              : tp2R < tp1R && tp1R < ep && ep < slR;
+            const riskD = Math.abs(ep - slR);
+            const rewardD = Math.abs(tp2R - ep);
+            if (geometryOk && riskD > 0 && rewardD / riskD >= 1.5) {
+              nextRefinedLevels = {
+                entryPrice: ep,
+                stopLoss: slR,
+                tp1: tp1R,
+                tp2: tp2R,
+                tp3:
+                  baseline.refinedLevels?.tp3 ??
+                  Number((dirIsBuy ? tp2R + riskD * 1.4 : tp2R - riskD * 1.4).toFixed(decimals)),
+                rationale:
+                  typeof parsed?.refinedRationale === 'string' && parsed.refinedRationale.length > 12
+                    ? parsed.refinedRationale
+                    : 'Gemini AI structural refinement calibrated inside liquidity & Floor Pivot corridor.',
+              };
+            }
+          }
+
+          res.json({
+            ...baseline,
+            source: 'gemini-4-hydrogen',
+            verdict: finalVerdict,
+            verifiedDirection: finalVerifiedDir,
+            deepAuditHeadline:
+              parsed?.deepAuditHeadline && parsed.deepAuditHeadline.length > 10
+                ? parsed.deepAuditHeadline
+                : baseline.deepAuditHeadline,
+            deepAuditSummary:
+              parsed?.deepAuditSummary && parsed.deepAuditSummary.length > 20
+                ? parsed.deepAuditSummary
+                : baseline.deepAuditSummary,
+            trajectoryVerdict:
+              parsed?.trajectoryVerdict && parsed.trajectoryVerdict.length > 10
+                ? parsed.trajectoryVerdict
+                : baseline.trajectoryVerdict,
+            riskChecklist:
+              parsed?.invalidationNote && parsed.invalidationNote.length > 10
+                ? [...baseline.riskChecklist, `AI Watch: ${parsed.invalidationNote}`]
+                : baseline.riskChecklist,
+            refinedLevels: nextRefinedLevels,
+            ...(macroNewsSummary ? { macroNewsSummary } : {}),
+            ...(groundingSources ? { groundingSources } : {}),
+          });
+          return;
+        }
+      }
+
+      res.json({
+        ...baseline,
+        ...(macroNewsSummary ? { macroNewsSummary } : {}),
+        ...(groundingSources ? { groundingSources } : {}),
+      });
     } catch {
       res.json(baseline);
     }

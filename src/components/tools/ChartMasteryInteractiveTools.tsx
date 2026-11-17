@@ -58,7 +58,7 @@ interface ChartToolElement {
 export const ChartMasteryInteractiveTools: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'live-chart' | 'tv-basics' | 'tv-school' | 'mt4-school'>('live-chart');
   const [selectedPair, setSelectedPair] = useState<CurrencyPair>('EUR/USD');
-  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('M15');
+  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('H1');
   const [activeToolId, setActiveToolId] = useState<string>('trendline');
   const [mt4ActiveId, setMt4ActiveId] = useState<string>('crosshair');
 

@@ -103,7 +103,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
     () => globalLiveStream.getState().customTimeframes
   );
   const [activeScanMode, setActiveScanMode] = useState<
-    'auto_1s' | 'scan_all' | 'rescan' | 'deep_ai' | 'h1_trend_lock'
+    'auto_1s' | 'scan_all' | 'rescan' | 'deep_ai' | 'h1_trend_lock' | 'precision_ai'
   >(() => globalLiveStream.getState().lastScanMode);
   const [superAiAuto, setSuperAiAuto] = useState<boolean>(
     () => globalLiveStream.getState().superAiAutoEnabled
@@ -124,7 +124,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
   const [isRescanningCard, setIsRescanningCard] = useState(false);
   const [isReanalysingCardAi, setIsReanalysingCardAi] = useState(false);
   const [filterBias, setFilterBias] = useState<
-    'ALL' | 'READY' | 'GRADE_A' | 'PCT_MOVERS' | 'BUY' | 'SELL' | 'FLIPPED'
+    'ALL' | 'PRECISION' | 'READY' | 'GRADE_A' | 'PCT_MOVERS' | 'BUY' | 'SELL' | 'FLIPPED'
   >('ALL');
   const [assetCategory, setAssetCategory] = useState<
     'ALL' | 'CRYPTO' | 'FOREX' | 'INDICES' | 'COMMODITIES'
@@ -236,11 +236,13 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
     }
   };
 
-  // Global Scan All Markets / Rescan / Deep AI / 1H Trend-Lock Scan
-  const handleRunScan = async (mode: 'scan_all' | 'rescan' | 'deep_ai' | 'h1_trend_lock') => {
+  // Global Scan All Markets / Rescan / Deep AI / 1H Trend-Lock / Super Precision AI Scan
+  const handleRunScan = async (
+    mode: 'scan_all' | 'rescan' | 'deep_ai' | 'h1_trend_lock' | 'precision_ai'
+  ) => {
     setIsScanning(true);
     setActiveScanMode(mode);
-    setFilterBias(mode === 'h1_trend_lock' ? 'GRADE_A' : 'ALL');
+    setFilterBias(mode === 'precision_ai' ? 'PRECISION' : mode === 'h1_trend_lock' ? 'GRADE_A' : 'ALL');
     setSelectedPair(null);
     globalLiveStream.setSelectedPair(null);
 
@@ -256,9 +258,12 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
     );
     setIsScanning(false);
 
-    const leader = updatedState.markets[0];
+    const precisionSorted = sortMarketsByTopPercent(updatedState.markets, 'PRECISION');
+    const leader = mode === 'precision_ai' ? precisionSorted[0] : updatedState.markets[0];
     const modeLabel =
-      mode === 'h1_trend_lock'
+      mode === 'precision_ai'
+        ? 'SUPER PRECISION AI SCAN (LOWEST-DRAWDOWN RANK)'
+        : mode === 'h1_trend_lock'
         ? '1H INSTITUTIONAL TREND-LOCK SCAN'
         : mode === 'deep_ai'
         ? `DEEP AI SCAN (ALL ${updatedState.markets.length} MARKETS)`
@@ -271,16 +276,31 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
       const pctStr = leader.change24hPct >= 0 ? `+${leader.change24hPct}%` : `${leader.change24hPct}%`;
       const netUsd = leader.netProfitUsd ?? Number((leader.projectedPips * 0.1).toFixed(2));
       const netKes = leader.netProfitKes ?? Math.round(netUsd * 130);
+      const tel = leader.institutionalTelemetry;
+      const epInfo =
+        leader.advisoryEntryPrice && (leader.advisoryDiscountPips ?? 0) > 0
+          ? `Sniper EP @ ${leader.advisoryEntryPrice} (trims ${leader.advisoryDiscountPips}p DD)`
+          : `@ ${leader.price}`;
       setScanBanner(
-        mode === 'h1_trend_lock'
+        mode === 'precision_ai'
+          ? `${modeLabel} (${updatedState.syncedAt}) · #1 Highest Edge: ${leader.pair} ${dirWord} (${tel?.roboticVerdict || leader.executionReadiness} · ${tel?.roboticScore ?? leader.confidence}/100 · ${tel?.estimatedWinProbPct ?? leader.confidence}% WinP · ${tel?.expectedRMultiple ?? '+0.8'}R) · ${epInfo} · SL ${leader.suggestedSL} · TP2 ${leader.suggestedTP2}`
+          : mode === 'h1_trend_lock'
           ? `1H TREND-LOCK ACTIVE ✓ · All ${updatedState.markets.length} pairs anchored to 1H 20/50 EMA structure · Pullback candles classified as Retracements (Sell Rally in Downtrend / Buy Dip in Uptrend) · Top Setup: ${leader.pair} ${dirWord} @ ${leader.price}`
           : `${modeLabel} (${updatedState.syncedAt}) · #1 Top % Leader: ${leader.pair} (${pctStr}) · ${leader.trendDirection} · ORDER ${dirWord} @ ${leader.price} · Est. Net +$${netUsd.toFixed(2)} (+${netKes} KES) · SL ${leader.suggestedSL} · TP ${leader.suggestedTP2}`
       );
-      setTimeout(() => setScanBanner(null), 6500);
+      setTimeout(() => setScanBanner(null), 7000);
     }
 
     playRadarBeep(
-      mode === 'h1_trend_lock' ? 1320 : mode === 'deep_ai' ? 1220 : mode === 'rescan' ? 1120 : 1020
+      mode === 'precision_ai'
+        ? 1380
+        : mode === 'h1_trend_lock'
+        ? 1320
+        : mode === 'deep_ai'
+        ? 1220
+        : mode === 'rescan'
+        ? 1120
+        : 1020
     );
   };
 
@@ -387,6 +407,9 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
       }
       return true;
     });
+    if (filterBias === 'PRECISION') {
+      return sortMarketsByTopPercent(base, 'PRECISION');
+    }
     if (filterBias === 'PCT_MOVERS') {
       return sortMarketsByTopPercent(base, 'PCT_ABS');
     }
@@ -617,6 +640,21 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
           >
             <ShieldCheck className={`w-3.5 h-3.5 ${isScanning && activeScanMode === 'h1_trend_lock' ? 'animate-spin' : ''}`} />
             <span>1H Trend-Lock Scan</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleRunScan('precision_ai')}
+            disabled={isScanning}
+            title="High-speed Precision AI Scan: filters Pivot walls, climax wicks & toxic spreads, ranks highest win-probability & Sniper Limit setups, and auto-audits Top-2 edges"
+            className={`px-4 py-2.5 rounded-xl font-mono font-black text-xs uppercase tracking-wider flex items-center gap-1.5 transition whitespace-nowrap shrink-0 border ${
+              activeScanMode === 'precision_ai'
+                ? 'bg-[#00C261] text-black border-[#00C261] shadow-lg shadow-[#00C261]/25'
+                : 'bg-emerald-950/70 hover:bg-emerald-900/70 text-[#00C261] border-[#00C261]/60'
+            }`}
+          >
+            <Zap className={`w-3.5 h-3.5 ${isScanning && activeScanMode === 'precision_ai' ? 'animate-spin' : ''}`} />
+            <span>Precision AI Scan</span>
           </button>
 
           <button
@@ -949,6 +987,19 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                       >
                         {computed.orderType}
                       </span>
+                      {computed.institutionalTelemetry && (
+                        <span
+                          className={`px-2.5 py-0.5 rounded-lg font-black text-[11px] border ${
+                            computed.institutionalTelemetry.roboticVerdict.startsWith('PRIME')
+                              ? 'bg-[#00C261] text-black border-[#00C261]'
+                              : computed.institutionalTelemetry.roboticVerdict.startsWith('SNIPER')
+                              ? 'bg-amber-400 text-black border-amber-400'
+                              : 'bg-red-500/25 text-red-200 border-red-500/50'
+                          }`}
+                        >
+                          {computed.institutionalTelemetry.roboticVerdict.replace(/_/g, ' ')} · {computed.institutionalTelemetry.estimatedWinProbPct}% Prob (+{computed.institutionalTelemetry.expectedRMultiple}R)
+                        </span>
+                      )}
                       <span className="text-[#00C261] font-black">{computed.confidence}% AI Confidence</span>
                       <span className="text-slate-500">·</span>
                       <span className="text-cyan-300 font-bold">{computed.recommendedStrategy}</span>
@@ -1094,6 +1145,11 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                       <span className="text-slate-300 font-sans text-xs">
                         12H Est: <strong className="text-[#00C261]">+${computed.netProfitUsd.toFixed(2)}</strong> ({computed.lotSize.toFixed(2)} Lots · ${computed.actualRiskUsd.toFixed(2)} risk)
                       </span>
+                      {computed.institutionalTelemetry && (
+                        <span className="px-2 py-0.5 rounded-lg bg-slate-900 border border-cyan-500/35 text-cyan-300 text-[10px] font-bold">
+                          Sniper EP {computed.advisoryEntryPrice} · Pivots S1 {computed.institutionalTelemetry.pivotLevels.s1} / P {computed.institutionalTelemetry.pivotLevels.pivot} / R1 {computed.institutionalTelemetry.pivotLevels.r1} · Z={computed.institutionalTelemetry.zScore}σ
+                        </span>
+                      )}
                     </div>
 
                     <button
@@ -1598,6 +1654,35 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                           </div>
                         </div>
 
+                        {computed.institutionalTelemetry && (
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                            <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                              <span className="text-[10px] text-slate-400 block">Floor Pivots (S1 / P / R1)</span>
+                              <strong className="text-cyan-300 text-xs">
+                                {computed.institutionalTelemetry.pivotLevels.s1} / {computed.institutionalTelemetry.pivotLevels.pivot} / {computed.institutionalTelemetry.pivotLevels.r1}
+                              </strong>
+                            </div>
+                            <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                              <span className="text-[10px] text-slate-400 block">Z-Score &amp; BB Squeeze</span>
+                              <strong className={`text-xs ${Math.abs(computed.institutionalTelemetry.zScore) > 1.85 ? 'text-amber-300' : 'text-[#00C261]'}`}>
+                                Z={computed.institutionalTelemetry.zScore}σ{computed.institutionalTelemetry.squeezeActive ? ' · SQUEEZE' : ` · BB ${computed.institutionalTelemetry.bbWidthPct}%`}
+                              </strong>
+                            </div>
+                            <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                              <span className="text-[10px] text-slate-400 block">Stoch(14,3,3) · CCI(20)</span>
+                              <strong className="text-white text-xs">
+                                {computed.institutionalTelemetry.stochK}/{computed.institutionalTelemetry.stochD} · CCI {computed.institutionalTelemetry.cci20}
+                              </strong>
+                            </div>
+                            <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                              <span className="text-[10px] text-slate-400 block">Robotic Gate &amp; Expectancy</span>
+                              <strong className={`text-xs ${computed.institutionalTelemetry.roboticVerdict.startsWith('PRIME') ? 'text-[#00C261]' : computed.institutionalTelemetry.roboticVerdict.startsWith('SNIPER') ? 'text-amber-300' : 'text-red-400'}`}>
+                                {computed.institutionalTelemetry.roboticVerdict.replace(/_/g, ' ')} ({computed.institutionalTelemetry.estimatedWinProbPct}% · +{computed.institutionalTelemetry.expectedRMultiple}R)
+                              </strong>
+                            </div>
+                          </div>
+                        )}
+
                         <div className="w-full h-2.5 rounded-full bg-red-950/70 overflow-hidden flex border border-slate-800">
                           <div className="h-full bg-[#00C261] transition-all duration-300" style={{ width: `${computed.bullScorePct}%` }} />
                           <div className="h-full bg-red-500 transition-all duration-300" style={{ width: `${computed.bearScorePct}%` }} />
@@ -2032,6 +2117,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
               <span className="text-xs font-mono text-slate-400 font-bold mr-1">Order / Filter:</span>
               {([
                 { id: 'ALL', label: `Top % → Least (#1–#${filteredMarkets.length})` },
+                { id: 'PRECISION', label: 'Precision Rank (Lowest DD)' },
                 { id: 'READY', label: 'Ready Now' },
                 { id: 'GRADE_A', label: 'Grade A+ Edge' },
                 { id: 'PCT_MOVERS', label: 'Largest |%| Swing' },
@@ -2296,25 +2382,40 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-1 text-[10px]">
                       <span className="text-[#D4AF37] font-black">
-                        #{rank} · {activeTf} · {computed.confidence}% AI
+                        #{rank} · {activeTf} · {computed.institutionalTelemetry ? `${computed.institutionalTelemetry.estimatedWinProbPct}% WinP` : `${computed.confidence}% AI`}
                       </span>
                       <span
                         className={`px-2 py-0.5 rounded font-black ${
-                          computed.executionReadiness === 'READY_ENTER'
+                          computed.institutionalTelemetry?.roboticVerdict.startsWith('PRIME')
+                            ? isBuy
+                              ? 'bg-[#00C261]/25 text-[#00C261] border border-[#00C261]/40'
+                              : 'bg-red-500/25 text-red-300 border border-red-500/40'
+                            : computed.institutionalTelemetry?.roboticVerdict.startsWith('SNIPER') ||
+                              computed.executionReadiness === 'WAIT_PULLBACK'
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                            : computed.executionReadiness === 'READY_ENTER'
                             ? isBuy
                               ? 'bg-[#00C261]/20 text-[#00C261]'
                               : 'bg-red-500/20 text-red-300'
-                            : computed.executionReadiness === 'WAIT_PULLBACK'
-                            ? 'bg-amber-500/20 text-amber-300'
                             : 'bg-slate-800 text-slate-300 border border-slate-700'
                         }`}
                       >
-                        {computed.executionReadiness === 'READY_ENTER'
+                        {computed.executionReadiness === 'NO_TRADE_CLOSED'
+                          ? 'CLOSED'
+                          : computed.institutionalTelemetry
+                          ? computed.institutionalTelemetry.roboticVerdict === 'PRIME_BUY'
+                            ? 'PRIME BUY'
+                            : computed.institutionalTelemetry.roboticVerdict === 'PRIME_SELL'
+                            ? 'PRIME SELL'
+                            : computed.institutionalTelemetry.roboticVerdict === 'SNIPER_LIMIT_BUY'
+                            ? 'SNIPER BUY'
+                            : computed.institutionalTelemetry.roboticVerdict === 'SNIPER_LIMIT_SELL'
+                            ? 'SNIPER SELL'
+                            : 'STAND ASIDE'
+                          : computed.executionReadiness === 'READY_ENTER'
                           ? `READY: ${computed.direction}`
                           : computed.executionReadiness === 'WAIT_PULLBACK'
                           ? 'WAIT PULLBACK'
-                          : computed.executionReadiness === 'NO_TRADE_CLOSED'
-                          ? 'CLOSED'
                           : 'STAND ASIDE'}
                       </span>
                     </div>
@@ -2424,17 +2525,19 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                     {computed.advisoryDiscountPips && computed.advisoryDiscountPips > 0 ? (
                       <div className="px-2.5 py-1.5 rounded-xl bg-amber-950/30 border border-amber-500/40 text-[10px] space-y-0.5">
                         <div className="flex items-center justify-between text-amber-300 font-bold">
-                          <span>1H Advisory Entry:</span>
+                          <span>Sniper Limit EP:</span>
                           <strong className="text-white">@ {computed.advisoryEntryPrice}</strong>
                         </div>
                         <span className="text-slate-400 block text-[9px]">
-                          Wait pullback to 20 EMA (saves {computed.advisoryDiscountPips}p drawdown)
+                          Saves {computed.advisoryDiscountPips}p{computed.institutionalTelemetry?.drawdownSavingsPct ? ` (${computed.institutionalTelemetry.drawdownSavingsPct}% DD cut)` : ' drawdown'} · Avoid chasing
                         </span>
                       </div>
                     ) : (
                       <div className="px-2.5 py-1.5 rounded-xl bg-slate-900/60 border border-slate-800 text-[10px] flex items-center justify-between text-slate-300">
-                        <span>1H Entry:</span>
-                        <strong className="text-[#00C261]">@ {m.price} (Pullback Confirmed)</strong>
+                        <span>Entry Corridor:</span>
+                        <strong className="text-[#00C261]">
+                          @ {m.price} {deepAudits[m.pair] ? '· Deep Audited ✓' : '(Prime Value)'}
+                        </strong>
                       </div>
                     )}
                   </div>
@@ -2593,22 +2696,31 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                         <ExternalLink className="w-3 h-3" />
                       </a>
 
-                      {!loadedOrder && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleQuickLoadCardOrder(m.pair, computed.direction, activeTf)
-                          }
-                          className={`px-2 py-1.5 rounded-lg font-black text-[10px] transition whitespace-nowrap ${
-                            isBuy
-                              ? 'bg-[#00C261] hover:bg-[#00dc6e] text-black'
-                              : 'bg-red-600 hover:bg-red-500 text-white'
-                          }`}
-                          title={`Notify PivotFx: Placed ${computed.direction} Order With My Broker`}
-                        >
-                          Placed {computed.direction}
-                        </button>
-                      )}
+                      {!loadedOrder &&
+                        (computed.executionReadiness === 'NO_TRADE_CHOP' ||
+                        computed.executionReadiness === 'NO_TRADE_CLOSED' ? (
+                          <span
+                            className="px-2 py-1.5 rounded-lg bg-slate-900 text-slate-400 border border-slate-700 font-bold text-[10px] whitespace-nowrap"
+                            title={computed.executionReadinessReason}
+                          >
+                            {computed.executionReadiness === 'NO_TRADE_CLOSED' ? 'Closed' : 'Stand Aside'}
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleQuickLoadCardOrder(m.pair, computed.direction, activeTf)
+                            }
+                            className={`px-2 py-1.5 rounded-lg font-black text-[10px] transition whitespace-nowrap ${
+                              isBuy
+                                ? 'bg-[#00C261] hover:bg-[#00dc6e] text-black'
+                                : 'bg-red-600 hover:bg-red-500 text-white'
+                            }`}
+                            title={`Notify PivotFx: Placed ${computed.direction} Order With My Broker`}
+                          >
+                            Placed {computed.direction}
+                          </button>
+                        ))}
 
                       <button
                         type="button"
