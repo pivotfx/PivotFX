@@ -26,7 +26,7 @@ interface LiveInteractiveCandleChartProps {
   tp2: number;
   advisoryEntryPrice?: number;
   direction: 'BUY' | 'SELL';
-  change24hPct: number;
+  change24hPct?: number;
   lotSize?: number;
   riskUsd?: number;
   executionReadiness?: 'READY_ENTER' | 'WAIT_PULLBACK' | 'NO_TRADE_CHOP' | 'NO_TRADE_CLOSED';
@@ -49,8 +49,8 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   tp1,
   tp2,
   advisoryEntryPrice,
-  direction,
-  change24hPct,
+  direction = 'BUY',
+  change24hPct = 0,
   lotSize,
   riskUsd,
   executionReadiness,
@@ -61,6 +61,10 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   onResetToLiveStream,
 }) => {
   const { decimals, pipMultiplier } = getPairSpecs(pair);
+  const safeLivePrice = Number.isFinite(livePrice) && livePrice > 0 ? livePrice : Number.isFinite(entryPrice) && entryPrice > 0 ? entryPrice : 1;
+  const safeChange24hPct = Number.isFinite(change24hPct) ? change24hPct : 0;
+  const safeEma20 = Number.isFinite(ema20) && ema20 > 0 ? ema20 : safeLivePrice;
+  const safeEma50 = Number.isFinite(ema50) && ema50 > 0 ? ema50 : safeLivePrice;
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [showEma20, setShowEma20] = useState<boolean>(true);
   const [showEma50, setShowEma50] = useState<boolean>(true);
@@ -69,7 +73,7 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   const [showBosLine, setShowBosLine] = useState<boolean>(true);
   const [showProjection, setShowProjection] = useState<boolean>(true);
 
-  const safeLive = livePrice > 0 ? livePrice : entryPrice > 0 ? entryPrice : 1;
+  const safeLive = safeLivePrice;
   const synthesizedFallback: OhlcCandle[] = React.useMemo(() => {
     if (candles && candles.length >= 5) return [];
     const stepBase = Math.max(2 / pipMultiplier, Math.abs(tp1 - safeLive) * 0.14 || safeLive * 0.0012);
@@ -450,19 +454,19 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
             }`}
           >
             <span>{lastCandleBull ? '▲' : '▼'}</span>
-            <span className="text-white">@ {livePrice.toFixed(decimals)}</span>
+            <span className="text-white">@ {safeLive.toFixed(decimals)}</span>
           </span>
           <span
             className={`inline-flex items-center gap-0.5 font-bold ${
-              change24hPct >= 0 ? 'text-[#00C261]' : 'text-red-400'
+              safeChange24hPct >= 0 ? 'text-[#00C261]' : 'text-red-400'
             }`}
           >
-            {change24hPct >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-            {change24hPct >= 0 ? `+${change24hPct.toFixed(2)}%` : `${change24hPct.toFixed(2)}%`}
+            {safeChange24hPct >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+            {safeChange24hPct >= 0 ? `+${safeChange24hPct.toFixed(2)}%` : `${safeChange24hPct.toFixed(2)}%`}
           </span>
-          {lotSize !== undefined && (
+          {lotSize !== undefined && Number.isFinite(lotSize) && (
             <span className="px-2 py-0.5 rounded bg-[#D4AF37]/15 border border-[#D4AF37]/40 text-[#D4AF37] text-[10px] font-black">
-              {lotSize.toFixed(2)} Lots{riskUsd !== undefined ? ` · $${riskUsd.toFixed(2)} Risk` : ''}
+              {lotSize.toFixed(2)} Lots{riskUsd !== undefined && Number.isFinite(riskUsd) ? ` · $${riskUsd.toFixed(2)} Risk` : ''}
             </span>
           )}
         </div>
@@ -486,7 +490,7 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
                 : 'bg-slate-900 text-slate-500 border-slate-800'
             }`}
           >
-            20 EMA ({ema20.toFixed(decimals)})
+            20 EMA ({safeEma20.toFixed(decimals)})
           </button>
           <button
             type="button"
@@ -497,7 +501,7 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
                 : 'bg-slate-900 text-slate-500 border-slate-800'
             }`}
           >
-            50 EMA ({ema50.toFixed(decimals)})
+            50 EMA ({safeEma50.toFixed(decimals)})
           </button>
           <button
             type="button"

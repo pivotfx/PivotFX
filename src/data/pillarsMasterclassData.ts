@@ -1234,8 +1234,8 @@ With Magnet Mode Enabled (Ctrl/Cmd Key):
     route: '/strategy-vault',
     number: '03',
     title: 'Strategy Vault Masterclass',
-    subtitle: '15 Core Institutional Setups, ICT Masterclasses & Execution Playbooks',
-    oneLineHook: 'Master 15 high-win-rate setups including ICT Order Blocks, FVGs, Liquidity Pools, and OTE Killzones.',
+    subtitle: '19 Core Institutional Setups, Bar Charts, Investing.com & ICT Playbooks',
+    oneLineHook: 'Master high-win-rate setups including Western OHLC Bar Charts, Barchart & Investing.com consensus, ICT Order Blocks, FVGs, and Killzones.',
     badge: 'Edge Playbook',
     category: 'Strategy',
     overview: 'The institutional strategy vault contains 15 flagship quantitative, ICT (Inner Circle Trader), and price-action setups tested over thousands of trading hours. Master Order Blocks, Fair Value Gaps, Liquidity Pools (BSL/SSL), Market Structure Shifts, and OTE Fibonacci Killzone execution.',
@@ -2070,6 +2070,59 @@ Step 4 (16:00 - 16:30 EAT): Algorithmic Delivery & Take Profit
           'Mark the Daily Opening Price (00:00 UTC / 03:00 EAT) with a distinct blue horizontal ray.',
           'If your daily bias is bullish, only consider buy setups that form BELOW the blue open line.',
           'If your daily bias is bearish, only consider sell setups that form ABOVE the blue open line.'
+        ]
+      },
+      {
+        id: 'sv-19',
+        number: '19',
+        title: 'Western OHLC Bar Charts, Barchart.com Opinion % & Investing.com Technical Matrix',
+        levelTag: 'Intermediate',
+        duration: '22 mins',
+        summary: 'Read raw institutional OHLC Bar Charts cleanly and validate setups with Barchart.com Technical Opinion % and Investing.com MA/Oscillator & Pivot Summary matrices (integrated live as Factor 11).',
+        concept: 'While Japanese candlesticks highlight wide colored bodies, Western OHLC Bar Charts (Open-High-Low-Close bars) expose raw auction strength with zero visual distortion: the Left Horizontal Tick is the Open, the Vertical Spine is the High–Low volatility range, and the Right Horizontal Tick is the Close. Institutional floor traders track three classic bar signatures: (1) Close Position Ratio — closing in the top 25% of the vertical bar confirms real buyer control, while closing in the bottom 25% confirms seller dominance; (2) Outside Key Reversal Bars — sweeping above/below the prior bar before snapping back to close beyond the opposite side; and (3) Inside Bar Volatility Coils — narrower range contained inside the mother bar prior to London/NY breakout. To eliminate directional guesswork, pair OHLC Bar Charts with multi-indicator external consensus dashboards: Barchart.com Technical Opinion % evaluates Short, Medium, and Long moving-average trend alignment into a % Strong Buy / Strong Sell score, while Investing.com Technical Summary synthesizes Moving Averages (MA5–MA200), Oscillators (RSI, MACD, ADX, Stochastic), Classic/Camarilla Pivot Levels (S1–R3), and the 3-Bull Red-Folder Economic Calendar. PivotFX automatically calculates this combined Bar Close + Barchart/Investing Consensus live as Factor 11 inside every pair audit.',
+        bulletPoints: [
+          'OHLC Bar Anatomy: Left Tick = Open Price | Vertical Line = Session High to Low | Right Tick = Close Price.',
+          'Close Commitment Law: Only trust breakouts when the Right Tick (Close) finishes inside the top 25% (Bullish) or bottom 25% (Bearish) of the bar range.',
+          'Inside Bar Coil Warning: When High <= Prior High and Low >= Prior Low, Factor 11 switches to CAUTION — never anticipate before the range breaks.',
+          'Barchart.com Technical Opinion %: Cross-check Short/Med/Long trend consensus (>= 67% Buy or Sell) so you never trade against dominant momentum.',
+          'Investing.com 3-Part Check: Confirm Technical Summary (Moving Averages + Oscillators agree), map Classic Pivot Targets (R1/R2 or S1/S2), and avoid 3-Bull High-Impact News spikes.'
+        ],
+        illustration: {
+          type: 'diagram',
+          title: 'Western OHLC Bar Signatures & Barchart / Investing.com 3-Gate Matrix',
+          caption: 'How Institutional Bar Close Geometry + Multi-Indicator Consensus Filter Bad Entries',
+          content: `   1. WESTERN OHLC BAR SIGNATURES (ZERO BODY CLUTTER):
+      Bullish Bar (Upper 25% Close)     Outside Key Bearish Reversal       Inside Bar Coil (WAIT)
+            ┬  High                             ┬  Liquidity Sweep Top             ┬
+            │─ Close (Top 25%)                  │                          Mother  │  ┬ High <= Prior H
+        Open─│                               Open─│                            Bar  │ ─┤─ Inside Range
+            │                                   │                          (Range) │  ┴ Low >= Prior L
+            ┴  Low                              │─ Close (Below Prior Low!)        ┴
+                                                ┴                          (Wait Breakout -> Do Not Guess)
+
+   2. BARCHART.COM & INVESTING.COM LIVE CONSENSUS MATRIX (FACTOR 11 IN PIVOTFX):
+      ┌──────────────────────────┬─────────────────────────────┬──────────────────────────────────┐
+      │ Indicator / Bar Input    │ Bullish Vote                │ Bearish Vote                     │
+      ├──────────────────────────┼─────────────────────────────┼──────────────────────────────────┤
+      │ 1. Price vs MA/EMA 20    │ Above 20 EMA                │ Below 20 EMA                     │
+      │ 2. MA Trend (EMA 20/50)  │ MA20 > MA50 (Golden)        │ MA20 < MA50 (Death)              │
+      │ 3. H1 Macro Structure    │ Higher Highs / Higher Lows  │ Lower Highs / Lower Lows         │
+      │ 4. Investing Oscillators │ RSI >= 52 & MACD +          │ RSI <= 48 & MACD -               │
+      │ 5. OHLC Bar Close Pos    │ Outside Bull / Top 25% Tick │ Outside Bear / Bottom 25% Tick   │
+      └──────────────────────────┴─────────────────────────────┴──────────────────────────────────┘
+      Rule: >= 67% Buy/Sell + ADX >= 20 -> Confirmed Trend | < 60% or Inside Bar -> CAUTION / STUDY`
+        },
+        realWorldExample: {
+          pair: 'EUR/USD & XAU/USD (H1)',
+          context: 'At 15:30 EAT NY Open, EUR/USD printed an Inside Bar coil while Investing.com Technical Summary flashed "Neutral" and 3-Bull US CPI was 10 minutes away.',
+          setup: 'Factor 11 flagged "Inside Bar Volatility Coil — Caution". After CPI settled at 15:45 EAT, EUR/USD printed a clean Outside Bullish Reversal Bar closing in the upper 18% of its range while Barchart/Investing consensus flipped to 83% STRONG BUY.',
+          outcome: 'Clean BUY entry on the 20 EMA retest delivered +48 pips straight to Investing.com R1 Pivot (+$4.80 on 0.01 micro lot) with zero drawdown.',
+          keyTakeaway: 'Combining Western OHLC Bar close precision with Barchart/Investing multi-indicator consensus prevents impulse trades inside choppy Inside Bar coils.'
+        },
+        actionableChecklist: [
+          'Toggle your charting view to OHLC Bars periodically to verify true Close Position without wide candle bodies masking weak closes.',
+          'Check Factor 11 ("11. Bar Charts & Barchart/Investing") inside Pillar 04 Market Radar before pressing Buy or Sell.',
+          'Always verify Investing.com Economic Calendar for 3-Bull red events and map Classic Pivot S1/R1 levels for realistic TP1/TP2 targets.'
         ]
       }
     ]

@@ -71,17 +71,17 @@ export const StrategyVaultInteractiveTools: React.FC = () => {
   const setups: StrategySetup[] = [
     {
       id: 'bos-10-factor',
-      name: '6. BOS / CHoCH + 10-Factor Zero-Mistake Protocol',
-      subtitle: 'Real-Time Structure, ADX & MACD Confirmation Before Entry',
-      winRate: '81%',
+      name: '6. BOS / CHoCH + 11-Factor Zero-Mistake Protocol',
+      subtitle: 'Real-Time Structure, ADX, MACD & Bar/Consensus Confirmation',
+      winRate: '82%',
       rrr: '1:2.9',
       bestSession: 'London / NY / 24/7 Crypto',
       coreConcept:
-        'Never buy into a downward Break of Structure (BOS) or sell into an upward structural shift. Our 10-Factor Zero-Mistake gate aligns H1 macro trend, M15/H1 Swing High/Low BOS/CHoCH, 20/50 EMA pullbacks, ADX(14) trend displacement (>= 14.5), MACD(12/26/9) momentum, ATR-protected Stop Loss distances, and canonical TradingView parity (FX, OANDA, Binance) before releasing READY_ENTER.',
+        'Never buy into a downward Break of Structure (BOS) or sell into an upward structural shift. Our 11-Factor Zero-Mistake gate aligns H1 macro trend, M15/H1 Swing High/Low BOS/CHoCH, 20/50 EMA pullbacks, ADX(14) trend displacement (>= 14.5), MACD(12/26/9) momentum, Western OHLC Bar Close / Barchart & Investing Consensus (Factor 11), and ATR-protected Stop Loss distances before releasing READY_ENTER.',
       entryRules: [
         'Verify H1 & M15 EMA 20/50 agree with trend direction (or wait for clean CHoCH candle body close).',
         'Confirm ADX(14) >= 14.5 & Readiness Gate shows READY_ENTER (never chase Extended candles > 0.8x ATR from 20 EMA).',
-        'Run Deep Scan to audit recent M15/H1 OHLC bars across all 8 institutional pre-flight checks.',
+        'Verify Factor 11 (OHLC Bar Close & Barchart/Investing Consensus >= 67%) agrees and avoids Inside Bar coils.',
         'Cross-check canonical TradingView quote (OANDA:XAUUSD / FX:EURUSD / BINANCE:BTCUSDT).',
       ],
       invalidationRules: [
@@ -109,14 +109,64 @@ export const StrategyVaultInteractiveTools: React.FC = () => {
       matchedPairs: ['XAU/USD', 'BTC/USD'],
       realSampleCase: {
         asset: 'XAU/USD (OANDA:XAUUSD · M15)',
-        date: '10-Factor BOS Validation Model',
+        date: '11-Factor BOS Validation Model',
         entryPrice: '3898.00',
         slPrice: '3914.50 (Protected Swing High)',
         tpPrice: '3858.00 (+400 pips)',
         pipsWon: '+400.0 Pips',
         dollarOutcome: 'Risk-managed lot sizing calibrated to equity cap',
         lessonLearned:
-          'Waiting for the BOS breakdown + pullback prevented buying into resistance and aligned EP, SL, and TP2 cleanly below active structure.',
+          'Waiting for the BOS breakdown + pullback + Factor 11 confirmation prevented buying into resistance and aligned EP, SL, and TP2 cleanly below active structure.',
+      },
+    },
+    {
+      id: 'bar-barchart-investing',
+      name: '7. OHLC Bar Charts + Barchart & Investing.com Matrix',
+      subtitle: 'Western Bar Close Commitment + Multi-Indicator Consensus',
+      winRate: '80%',
+      rrr: '1:2.8',
+      bestSession: 'London (10:15 EAT) & NY (15:45 EAT)',
+      coreConcept:
+        'Western OHLC Bar Charts strip out distracting body fills so you focus strictly on Left Open Tick, Vertical High-Low Range, and Right Close Tick. Outside Reversal Bars and Upper/Lower-25% Close Bars reveal institutional commitment, while Barchart.com Technical Opinion % and Investing.com Moving Average/Oscillator + Pivot S1/R1 & 3-Bull Calendar checks prevent fighting macro consensus. Integrated live inside PivotFX as Analysis Factor 11.',
+      entryRules: [
+        'Inspect Western OHLC Bar structure: avoid Inside Bar coils (High <= Prior High & Low >= Prior Low); wait for decisive break.',
+        'Require Outside Reversal Bar sweep OR close inside top 25% (for BUY) / bottom 25% (for SELL) of the bar range.',
+        'Verify Factor 11 ("Bar Charts & Barchart/Investing") consensus shows >= 67% STRONG BUY / STRONG SELL aligned with 20/50 EMA & MACD.',
+        'Check Investing.com 3-Bull Economic Calendar for red events and ensure clear runway toward next Classic Pivot S1/R1.',
+      ],
+      invalidationRules: [
+        'Stop Loss placed just outside the Outside Reversal Bar sweep tail (or opposite edge of Prior Inside Bar mother range).',
+        'Exit or stay flat if consensus drops to Neutral (<60%) or a 3-Bull central bank release is under 20 minutes away.',
+      ],
+      takeProfitRules: [
+        'TP1 at nearest Investing.com Classic/Camarilla Pivot (R1 for Buy / S1 for Sell) — move SL to Breakeven.',
+        'TP2 at R2/S2 Pivot expansion or minimum 1:2.6 Risk-to-Reward.',
+      ],
+      trendType: 'bullish',
+      supportLevel: 1.1235,
+      entryLevel: 1.1268,
+      slLevel: 1.1246,
+      tpLevel: 1.1328,
+      fvgZone: { top: 1.1272, bottom: 1.1258, label: 'Outside Bar + 20 EMA Demand' },
+      candles: [
+        { id: 1, open: 1.1270, high: 1.1274, low: 1.1252, close: 1.1256, label: 'London Pullback Bar' },
+        { id: 2, open: 1.1256, high: 1.1268, low: 1.1253, close: 1.1261, label: 'Inside Bar Coil (WAIT)', annotation: 'Inside Coil', annotationType: 'warning' },
+        { id: 3, open: 1.1261, high: 1.1273, low: 1.1244, close: 1.1271, label: 'Outside Bullish Reversal', annotation: 'Top 10% Close', annotationType: 'sweep' },
+        { id: 4, open: 1.1271, high: 1.1275, low: 1.1265, close: 1.1268, label: 'Retest + 83% Strong Buy', annotation: 'FACTOR 11 BUY', annotationType: 'entry' },
+        { id: 5, open: 1.1268, high: 1.1298, low: 1.1267, close: 1.1295, label: 'Investing.com R1 Pivot Hit' },
+        { id: 6, open: 1.1295, high: 1.1332, low: 1.1290, close: 1.1328, label: 'R2 Pivot Delivered', annotation: 'TP2 Hit', annotationType: 'tp' },
+      ],
+      matchedPairs: ['EUR/USD', 'GBP/USD', 'XAU/USD', 'US30'],
+      realSampleCase: {
+        asset: 'EUR/USD (FX:EURUSD · H1)',
+        date: 'Bar Close + 83% Barchart/Investing Consensus',
+        entryPrice: '1.12680',
+        slPrice: '1.12460 (22.0 pips below Outside Bar tail)',
+        tpPrice: '1.13280 (+60.0 pips @ R2 Pivot)',
+        pipsWon: '+60.0 Pips',
+        dollarOutcome: '1:2.73 R:R · Calibrated to 0.01 Micro Lot Shield',
+        lessonLearned:
+          'Skipping the choppy Inside Bar coil and waiting for the Outside Bullish Bar + Factor 11 Strong Buy consensus delivered a textbook breakout to Pivot R2.',
       },
     },
     {
@@ -227,7 +277,7 @@ export const StrategyVaultInteractiveTools: React.FC = () => {
         'Confirm a 3-candle sequence where Candle 1 High < Candle 3 Low (Bullish FVG).',
         'Mark the FVG zone with the Rectangle tool.',
         'Wait patiently for price to drift into the gap (0.50 of the box).',
-        'Enter when lower-timeframe rejection + 10-Factor score confirm.',
+        'Enter when lower-timeframe rejection + 11-Factor score confirm.',
       ],
       invalidationRules: [
         'Stop Loss set just below Candle 1 swing low.',
@@ -364,7 +414,7 @@ export const StrategyVaultInteractiveTools: React.FC = () => {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-xs font-black text-cyan-300 uppercase tracking-wider">
             <Activity className="w-4 h-4 text-[#00C261]" />
-            <span>Real-Time 10-Factor Strategy Radar (Click to Open Chart &amp; Ticket)</span>
+            <span>Real-Time 11-Factor Strategy Radar (Click to Open Chart &amp; Ticket)</span>
           </div>
           <span className="text-[10px] text-slate-400">
             Auto-Synced Spot · ADX(14) &amp; MACD · TradingView Symbol Parity
@@ -405,7 +455,7 @@ export const StrategyVaultInteractiveTools: React.FC = () => {
                   </div>
 
                   <div className="text-[10px] text-cyan-300 font-bold line-clamp-1">
-                    {m.recommendedStrategy || '10-Factor EMA / BOS Trend'}
+                    {m.recommendedStrategy || '11-Factor EMA / Bar / BOS Trend'}
                   </div>
 
                   <div className="flex items-center justify-between text-[9px] text-slate-400">

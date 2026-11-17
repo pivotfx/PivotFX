@@ -444,7 +444,7 @@ export function selectOptimalTradingStrategy(params: {
         ? 'NY Silver Bullet BOS + FVG Continuation'
         : isLondonWindow
         ? 'London BOS + Institutional FVG Sniper'
-        : 'BOS/CHoCH 10-Factor Trend Continuation',
+        : 'BOS/CHoCH 11-Factor Trend Continuation',
       winRateLabel: '78% Historical Edge',
       rationale: `${pair} confirmed ${bosAnalysis.bosDirection.replace('_', ' ')} while holding EMA 20/50 alignment and non-extended pullback room.`
     };
@@ -2128,7 +2128,7 @@ export function buildZeroMistakeChecklist(p: {
 }
 
 /**
- * Evaluates ALL 10 Institutional Trading Factors simultaneously to judge BUY vs SELL:
+ * Evaluates ALL 11 Institutional Trading Factors simultaneously to judge BUY vs SELL:
  * 1. Live Candlestick Price Action & Liquidity Sweep
  * 2. 20/50 EMA Dynamic Trend Stack & Pullback Timing Guard
  * 3. 14-Period Wilder RSI Momentum & Exhaustion
@@ -2139,6 +2139,7 @@ export function buildZeroMistakeChecklist(p: {
  * 8. Volatility Compression & ATR Exhaustion Guard
  * 9. Market Structure Break of Structure (BOS / CHoCH) Anti-Reversal Shield
  * 10. MACD (12/26/9) Momentum & ADX (14) Trend Velocity Filter
+ * 11. Western OHLC Bar Geometry & Barchart / Investing.com MA+Oscillator Consensus
  */
 export function evaluateAllTradeFactors(p: {
   pair: CurrencyPair;
@@ -2162,6 +2163,7 @@ export function evaluateAllTradeFactors(p: {
   macdBias?: 'BULLISH' | 'BEARISH' | 'FLAT';
   macdHistogram?: number;
   candlePattern?: CandlePatternSignal;
+  candles?: OhlcCandle[];
 }): {
   isBuy: boolean;
   bullScorePct: number;
@@ -2853,6 +2855,101 @@ export function evaluateAllTradeFactors(p: {
     });
   }
 
+  // FACTOR 11: Western OHLC Bar Geometry & Barchart / Investing.com MA+Oscillator Consensus (16 pts max)
+  const bars = p.candles && p.candles.length >= 2 ? p.candles : null;
+  const activeBar = bars ? bars[bars.length - 1] : null;
+  const priorBar = bars ? bars[bars.length - 2] : null;
+  let barLabel = 'Mid-Range Bar';
+  let barDirVote: 1 | -1 | 0 = 0;
+  let isInsideBarCoil = false;
+
+  if (activeBar && priorBar) {
+    const barRange = Math.max(1e-9, activeBar.high - activeBar.low);
+    const closePos = (activeBar.close - activeBar.low) / barRange;
+    if (activeBar.high <= priorBar.high && activeBar.low >= priorBar.low) {
+      isInsideBarCoil = true;
+      barLabel = 'Inside Bar Volatility Coil';
+      barDirVote = 0;
+    } else if (activeBar.low < priorBar.low && activeBar.close > priorBar.high) {
+      barLabel = 'Outside Bullish Reversal Bar';
+      barDirVote = 1;
+    } else if (activeBar.high > priorBar.high && activeBar.close < priorBar.low) {
+      barLabel = 'Outside Bearish Reversal Bar';
+      barDirVote = -1;
+    } else if (closePos >= 0.68 && activeBar.close >= activeBar.open) {
+      barLabel = 'Upper-25% Bullish Bar Close';
+      barDirVote = 1;
+    } else if (closePos <= 0.32 && activeBar.close <= activeBar.open) {
+      barLabel = 'Lower-25% Bearish Bar Close';
+      barDirVote = -1;
+    } else {
+      barLabel = closePos >= 0.5 ? 'Constructive Bar Close' : 'Soft Bar Close';
+      barDirVote = closePos >= 0.56 ? 1 : closePos <= 0.44 ? -1 : 0;
+    }
+  } else {
+    barLabel = p.livePrice > p.ema20 ? 'Price Above 20 EMA Bar' : p.livePrice < p.ema20 ? 'Price Below 20 EMA Bar' : 'Balanced Bar';
+    barDirVote = p.livePrice > p.ema20 ? 1 : p.livePrice < p.ema20 ? -1 : 0;
+  }
+
+  let buyConsensusVotes = 0;
+  let sellConsensusVotes = 0;
+  if (p.livePrice > p.ema20) buyConsensusVotes += 1;
+  else if (p.livePrice < p.ema20) sellConsensusVotes += 1;
+  if (p.ema20 > p.ema50) buyConsensusVotes += 1;
+  else if (p.ema20 < p.ema50) sellConsensusVotes += 1;
+  if (effectiveH1 === 'UPTREND') buyConsensusVotes += 1;
+  else if (effectiveH1 === 'DOWNTREND') sellConsensusVotes += 1;
+  if (p.rsi >= 52) buyConsensusVotes += 1;
+  else if (p.rsi <= 48) sellConsensusVotes += 1;
+  if (resolvedMacdBias === 'BULLISH') buyConsensusVotes += 1;
+  else if (resolvedMacdBias === 'BEARISH') sellConsensusVotes += 1;
+  if (barDirVote > 0) buyConsensusVotes += 1;
+  else if (barDirVote < 0) sellConsensusVotes += 1;
+
+  const totalVotes = Math.max(1, buyConsensusVotes + sellConsensusVotes);
+  const consensusBuyPct = Math.round((buyConsensusVotes / totalVotes) * 100);
+  const consensusSellPct = 100 - consensusBuyPct;
+
+  if (isInsideBarCoil || Math.abs(consensusBuyPct - consensusSellPct) < 20) {
+    bullWeight += 6;
+    bearWeight += 6;
+    verdicts.push({
+      name: '11. Bar Charts & Barchart/Investing',
+      signal: 'CAUTION',
+      weight: '12%',
+      detail: isInsideBarCoil
+        ? `Barchart/Investing: ${consensusBuyPct}% Buy / ${consensusSellPct}% Sell · Inside Bar Coil — Wait Breakout`
+        : `Barchart/Investing Consensus: ${consensusBuyPct}% Buy / ${consensusSellPct}% Sell (Neutral) · ${barLabel}`
+    });
+  } else if (consensusBuyPct >= 66 && barDirVote >= 0) {
+    const f11Pts = consensusBuyPct >= 83 && resolvedAdx >= 20 ? 16 : 12;
+    bullWeight += f11Pts;
+    verdicts.push({
+      name: '11. Bar Charts & Barchart/Investing',
+      signal: 'BUY',
+      weight: `${f11Pts}%`,
+      detail: `Barchart/Investing Consensus: ${consensusBuyPct}% ${consensusBuyPct >= 83 ? 'STRONG BUY' : 'BUY'} · ${barLabel}`
+    });
+  } else if (consensusSellPct >= 66 && barDirVote <= 0) {
+    const f11Pts = consensusSellPct >= 83 && resolvedAdx >= 20 ? 16 : 12;
+    bearWeight += f11Pts;
+    verdicts.push({
+      name: '11. Bar Charts & Barchart/Investing',
+      signal: 'SELL',
+      weight: `${f11Pts}%`,
+      detail: `Barchart/Investing Consensus: ${consensusSellPct}% ${consensusSellPct >= 83 ? 'STRONG SELL' : 'SELL'} · ${barLabel}`
+    });
+  } else {
+    bullWeight += 6;
+    bearWeight += 6;
+    verdicts.push({
+      name: '11. Bar Charts & Barchart/Investing',
+      signal: 'CAUTION',
+      weight: '10%',
+      detail: `Barchart/Investing Mixed (${consensusBuyPct}% Buy vs ${barLabel}) — wait alignment`
+    });
+  }
+
   const total = Math.max(1, bullWeight + bearWeight);
   const bullScorePct = Math.round((bullWeight / total) * 100);
   const bearScorePct = 100 - bullScorePct;
@@ -3150,7 +3247,8 @@ export function evaluateCandleSeriesAndTick(p: {
     adxStrength: adxData.adx,
     macdBias: macdData.bias,
     macdHistogram: macdData.histogram,
-    candlePattern
+    candlePattern,
+    candles
   });
 
   // Counter-impulse candle guard: block blind entries directly into an opposing strong breakdown/breakout candle
@@ -3198,7 +3296,8 @@ export function evaluateCandleSeriesAndTick(p: {
         adxStrength: adxData.adx,
         macdBias: macdData.bias,
         macdHistogram: macdData.histogram,
-        candlePattern
+        candlePattern,
+        candles
       })
     : prelimEval;
 
@@ -3789,7 +3888,8 @@ export function computeRealChartTradeParams(p: {
     adxStrength: derivedAdx,
     macdBias: derivedMacd.bias,
     macdHistogram: derivedMacd.histogram,
-    candlePattern: derivedPattern
+    candlePattern: derivedPattern,
+    candles: p.candles
   });
 
   const isBuy = allFactorEval.isBuy;
@@ -6087,7 +6187,13 @@ export function computeDailyMacroSafetyReport(
       atrPips: m.atrPips,
       keyLevel: m.keyLevel,
       h1TrendDirection: m.h1TrendDirection,
-      macro: liveMacro
+      macro: liveMacro,
+      bosAnalysis: m.bosAnalysis,
+      adxStrength: m.adxStrength,
+      macdBias: m.macdBias,
+      macdHistogram: m.macdHistogram,
+      candlePattern: m.candlePattern,
+      candles: m.candles
     });
 
     const timingPenalty = kenyaTiming.isFavorableTime ? 0 : 14;

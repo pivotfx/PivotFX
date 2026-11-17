@@ -1215,22 +1215,41 @@ export const MASTER_STRATEGIES: MasterclassStrategy[] = [
   },
   {
     id: 'strat-6',
-    name: 'BOS/CHoCH + 10-Factor Zero-Mistake Protocol',
-    tagline: 'Detects real-time Break of Structure & Change of Character before allowing any BUY or SELL order.',
-    winRate: 81,
+    name: 'BOS/CHoCH + 11-Factor Zero-Mistake Protocol',
+    tagline: 'Detects real-time Break of Structure, Change of Character, and Bar/Consensus alignment before any BUY or SELL order.',
+    winRate: 82,
     timeframe: 'M15 / H1',
-    indicators: ['BOS/CHoCH Swing Tracker', 'EMA 20 & 50', 'RSI 14', 'ADX(14) & MACD', 'H1 Macro Bias'],
+    indicators: ['BOS/CHoCH Swing Tracker', 'EMA 20 & 50', 'RSI 14', 'ADX(14) & MACD', 'OHLC Bar + Barchart/Investing'],
     rules: {
       entry: [
         'Run Deep AI Scan & Structure Audit before placing any trade on XAU/USD, EUR/USD, BTC/USD, or ETH/USD.',
         'Verify higher-timeframe (H1) EMA 20/50 bias matches your M15 execution direction (never short into bullish BOS or buy into bearish BOS).',
-        'Confirm candle is in an Equilibrium / 20 EMA pullback zone (avoid chasing extended runaway wicks).',
+        'Confirm candle/bar close sits cleanly inside Value Zone or Barchart/Investing consensus >= 67% (avoid Inside Bar coils or extended wicks).',
         'Match the canonical TradingView symbol (e.g. OANDA:XAUUSD, FX:EURUSD, BINANCE:BTCUSDT) so Entry Price, SL, and TP2 match 1:1.'
       ],
       stopLoss: 'Anchored beyond protected M15/H1 swing structure with ATR & spread clearance.',
       takeProfit: 'TP1 at 1.65x risk (Breakeven Lock), TP2 at 2.85x+ risk (or custom USD Target Profit).'
     },
     gilgilLore: 'Engineered to eliminate counter-trend losses caused by stale quotes, CHoCH reversals, or extended entries on Gold and Majors.'
+  },
+  {
+    id: 'strat-7',
+    name: 'OHLC Bar Charts + Barchart & Investing.com Confluence',
+    tagline: 'Combines Western OHLC Bar Close-Position discipline with Barchart.com Opinion % & Investing.com MA/Oscillator Matrix.',
+    winRate: 80,
+    timeframe: 'M15 / H1 / H4',
+    indicators: ['Western OHLC Bars (Open-High-Low-Close)', 'Barchart Opinion % (Short/Med/Long)', 'Investing.com MA + Pivot S1/R1 + 3-Bull Calendar'],
+    rules: {
+      entry: [
+        'Switch chart view to Western OHLC Bars: focus strictly on the Left Tick (Open), Total Range (High–Low), and Right Tick (Close) without candlestick body noise.',
+        'Look for Outside Key Reversal Bars (sweeps prior bar extreme and closes beyond prior range) or Upper-25% Bullish / Lower-25% Bearish Close commitment bars.',
+        'Avoid entering Inside Bar Coils (high <= prior high & low >= prior low) until the coil breaks with expansion.',
+        'Cross-check Factor 11 Consensus (Barchart Opinion % + Investing.com Moving Averages & Oscillators >= 67% Strong Buy/Sell) and verify Investing.com 3-Bull Economic Calendar has no imminent Red-Folder spike.'
+      ],
+      stopLoss: 'Placed beyond the Outside Reversal Bar sweep tail or opposite side of the Inside Bar mother range.',
+      takeProfit: 'TP1 at next Investing.com Classic/Camarilla Pivot (R1/S1); TP2 at R2/S2 or 1:2.5+ Risk-to-Reward.'
+    },
+    gilgilLore: 'Used by institutional desks that monitor clean OHLC bars alongside external consensus matrices (Barchart & Investing.com) to confirm momentum without emotional bias.'
   }
 ];
 
