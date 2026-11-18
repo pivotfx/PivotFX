@@ -40,8 +40,20 @@ export const DeepScanVerificationPanel: React.FC<DeepScanVerificationPanelProps>
   const { decimals } = getPairSpecs(pair);
   const bos = computed.bosAnalysis;
   const tel = computed.institutionalTelemetry;
+  const liveBlocked =
+    computed.executionReadiness === 'NO_TRADE_CHOP' ||
+    computed.executionReadiness === 'NO_TRADE_CLOSED';
+  const staleConfirmedOverride =
+    liveBlocked &&
+    deepAudit &&
+    (deepAudit.verdict === 'CONFIRMED_BUY' ||
+      deepAudit.verdict === 'CONFIRMED_SELL' ||
+      deepAudit.verdict === 'WAIT_PULLBACK');
   const matchedAudit =
-    deepAudit && deepAudit.timeframe === timeframe && deepAudit.proposedDirection === computed.direction
+    deepAudit &&
+    deepAudit.timeframe === timeframe &&
+    deepAudit.proposedDirection === computed.direction &&
+    !staleConfirmedOverride
       ? deepAudit
       : null;
 
@@ -220,12 +232,16 @@ export const DeepScanVerificationPanel: React.FC<DeepScanVerificationPanelProps>
       )}
 
       {/* AI-Calibrated Sniper EP / SL / TP Levels (When Issued & Geometry-Validated) */}
-      {matchedAudit?.refinedLevels && (
+      {matchedAudit?.refinedLevels && !isDanger && (
         <div className="p-3 rounded-xl bg-slate-950/90 border border-[#D4AF37]/45 space-y-1.5 text-[11px]">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-[#D4AF37] font-black inline-flex items-center gap-1.5">
               <Target className="w-3.5 h-3.5" />
-              <span>AI-Calibrated Precision Order Levels ({matchedAudit.verifiedDirection})</span>
+              <span>
+                {isWait
+                  ? `AI-Calibrated Sniper Limit Levels (STAGE LIMIT ${matchedAudit.verifiedDirection})`
+                  : `AI-Calibrated Precision Order Levels (${matchedAudit.verifiedDirection})`}
+              </span>
             </span>
             <div className="flex flex-wrap items-center gap-2.5 text-xs font-black">
               <span className="text-white">EP {matchedAudit.refinedLevels.entryPrice.toFixed(decimals)}</span>

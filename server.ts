@@ -1433,13 +1433,13 @@ function buildDeterministicDeepVerify(body: DeepVerifyRequest) {
         {
           id: 'ADX_TREND_STRENGTH',
           label: 'ADX(14) Trend Velocity Filter',
-          passed: body.adxStrength === undefined || body.adxStrength >= 14.5,
+          passed: body.adxStrength === undefined || body.adxStrength >= 18.5,
           detail:
             body.adxStrength === undefined
               ? 'Trend momentum active'
-              : body.adxStrength >= 14.5
-              ? `ADX(14) = ${body.adxStrength.toFixed(1)} (>= 14.5 trending displacement)`
-              : `ADX(14) = ${body.adxStrength.toFixed(1)} (< 14.5 dead chop zone — stand aside)`,
+              : body.adxStrength >= 18.5
+              ? `ADX(14) = ${body.adxStrength.toFixed(1)} (>= 18.5 trending displacement)`
+              : `ADX(14) = ${body.adxStrength.toFixed(1)} (< 18.5 dead chop zone — stand aside)`,
         },
         {
           id: 'MACD_MOMENTUM_SYNC',
@@ -1546,7 +1546,7 @@ function buildDeterministicDeepVerify(body: DeepVerifyRequest) {
   const tp1Dist = Math.abs(tp1 - baseEntry);
   const tp2Dist = Math.abs(tp2 - baseEntry);
   const tp3Dist = Math.abs(tp3 - baseEntry);
-  const refinedSl = Number((useSniperEp ? sl : isBuy ? refinedEp - slDist : refinedEp + slDist).toFixed(dec));
+  const refinedSl = Number((isBuy ? refinedEp - slDist : refinedEp + slDist).toFixed(dec));
   const refinedTp1 = Number((isBuy ? refinedEp + tp1Dist : refinedEp - tp1Dist).toFixed(dec));
   const refinedTp2 = Number((isBuy ? refinedEp + tp2Dist : refinedEp - tp2Dist).toFixed(dec));
   const refinedTp3 = Number((isBuy ? refinedEp + tp3Dist : refinedEp - tp3Dist).toFixed(dec));
@@ -1602,18 +1602,19 @@ function buildDeterministicDeepVerify(body: DeepVerifyRequest) {
     passedCount,
     totalChecks: rawChecks.length,
     syncedAt: formatEatNow(),
-    refinedLevels: validRefinedGeometry
-      ? {
-          entryPrice: refinedEp,
-          stopLoss: refinedSl,
-          tp1: refinedTp1,
-          tp2: refinedTp2,
-          tp3: refinedTp3,
-          rationale: useSniperEp
-            ? `Sniper Limit anchored to 20 EMA / OTE / FVG discount zone (${refinedEp}) protecting R:R and trimming chase risk.`
-            : `Structure-anchored levels beyond BOS swing + ATR sweep shield (SL ${refinedSl}) targeting Floor Pivot confluence (TP1 ${refinedTp1} / TP2 ${refinedTp2}).`,
-        }
-      : undefined,
+    refinedLevels:
+      verdict !== 'STAND_ASIDE_TRAP' && verifiedDirection !== 'STAND_ASIDE' && validRefinedGeometry
+        ? {
+            entryPrice: refinedEp,
+            stopLoss: refinedSl,
+            tp1: refinedTp1,
+            tp2: refinedTp2,
+            tp3: refinedTp3,
+            rationale: useSniperEp
+              ? `Sniper Limit anchored to 20 EMA / OTE / FVG discount zone (${refinedEp}) protecting R:R and trimming chase risk.`
+              : `Structure-anchored levels beyond BOS swing + ATR sweep shield (SL ${refinedSl}) targeting Floor Pivot confluence (TP1 ${refinedTp1} / TP2 ${refinedTp2}).`,
+          }
+        : undefined,
   };
 }
 
@@ -2136,7 +2137,10 @@ async function startServer() {
 
           // Validate AI-calibrated refined levels against strict MT4 geometry + 1.5% envelope
           const refPrice = Number(body.livePrice || body.entryPrice || 1);
-          let nextRefinedLevels = baseline.refinedLevels;
+          let nextRefinedLevels =
+            finalVerdict === 'STAND_ASIDE_TRAP' || finalVerifiedDir === 'STAND_ASIDE'
+              ? undefined
+              : baseline.refinedLevels;
           if (
             finalVerifiedDir !== 'STAND_ASIDE' &&
             typeof parsed?.refinedEp === 'number' &&
@@ -2160,7 +2164,21 @@ async function startServer() {
               : tp2R < tp1R && tp1R < ep && ep < slR;
             const riskD = Math.abs(ep - slR);
             const rewardD = Math.abs(tp2R - ep);
-            if (geometryOk && riskD > 0 && rewardD / riskD >= 1.5) {
+            const pipMult =
+              baseline.pair.includes('JPY') || baseline.pair === 'USOIL'
+                ? 100
+                : baseline.pair === 'XAU/USD'
+                ? 10
+                : baseline.pair === 'US30' ||
+                  baseline.pair === 'NAS100' ||
+                  baseline.pair === 'GER40' ||
+                  baseline.pair.includes('BTC') ||
+                  baseline.pair.includes('ETH')
+                ? 1
+                : 10000;
+            const atrInPrice = Math.max(0, Number(body.atrPips || 0)) / Math.max(1, pipMult);
+            const minAtrProtectedRisk = atrInPrice > 0 ? atrInPrice * 1.45 : 0;
+            if (geometryOk && riskD > 0 && riskD >= minAtrProtectedRisk && rewardD / riskD >= 1.5) {
               nextRefinedLevels = {
                 entryPrice: ep,
                 stopLoss: slR,

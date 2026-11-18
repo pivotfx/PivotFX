@@ -863,16 +863,18 @@ export function computeDynamicPositionRiskPlan(params: {
   const targetRiskKes = Math.round(targetRiskUsd * 130);
 
   const structuralSlPips = Math.max(4, Number(params.structuralSlPips.toFixed(1)));
-  const atrShieldFloor = params.atrPips ? params.atrPips * 1.05 + params.brokerSpread : 0;
+  // Preserve structural 1.65x+ ATR swing clearance so micro-account caps NEVER crush SL inside normal H1 wick noise
+  const atrShieldFloor = params.atrPips ? params.atrPips * 1.65 + params.brokerSpread : structuralSlPips * 0.9;
   const minClearancePips = Number(
     Math.max(
       params.brokerSpread * 2.4,
       atrShieldFloor,
-      isGold ? 16 : isBtc ? 140 : isEth ? 14 : isIndex ? 28 : isOil ? 18 : 8
+      isGold ? 22 : isBtc ? 180 : isEth ? 18 : isIndex ? 36 : isOil ? 24 : 11
     ).toFixed(1)
   );
-  const maxSafeStructuralSlPips = Number(Math.max(minClearancePips, structuralSlPips * 1.45).toFixed(1));
-  const minSafeRiskUsd = Number((minClearancePips * pipValPerMicroLot).toFixed(2));
+  const minComfortSl = Number(Math.max(minClearancePips, structuralSlPips * 0.92).toFixed(1));
+  const maxSafeStructuralSlPips = Number(Math.max(minComfortSl, structuralSlPips * 1.35).toFixed(1));
+  const minSafeRiskUsd = Number((minComfortSl * pipValPerMicroLot).toFixed(2));
 
   const rawLotsAtStructural = targetRiskUsd / Math.max(0.0001, structuralSlPips * pipValPerStandardLot);
   let lotSize = Math.max(0.01, Math.floor(rawLotsAtStructural * 100) / 100);
@@ -883,17 +885,16 @@ export function computeDynamicPositionRiskPlan(params: {
       lotSize = 0.01;
       const exactMicroSl = targetRiskUsd / Math.max(0.0001, pipValPerMicroLot);
       calibratedSlPips = Number(
-        Math.min(maxSafeStructuralSlPips, Math.max(minClearancePips, exactMicroSl)).toFixed(1)
+        Math.min(maxSafeStructuralSlPips, Math.max(minComfortSl, exactMicroSl)).toFixed(1)
       );
     } else {
       const exactSlForLot = targetRiskUsd / Math.max(0.0001, lotSize * pipValPerStandardLot);
-      const minComfortSl = Math.max(minClearancePips, structuralSlPips * 0.88);
       calibratedSlPips = Number(
         Math.min(maxSafeStructuralSlPips, Math.max(minComfortSl, exactSlForLot)).toFixed(1)
       );
     }
   } else {
-    calibratedSlPips = Number(Math.max(minClearancePips, structuralSlPips).toFixed(1));
+    calibratedSlPips = Number(Math.max(minComfortSl, structuralSlPips).toFixed(1));
   }
 
   const pipValPerPositionUsd = Number((lotSize * pipValPerStandardLot).toFixed(4));
@@ -4424,9 +4425,11 @@ export function computeRealChartTradeParams(p: {
   const spreadBuffer = brokerSpread * 1.3;
   const sweepShieldPips = effectiveAtr * 0.45;
   const minSlFloor = isGold ? 22 : isBtc ? 180 : isEth ? 18 : isIndex ? 36 : isOil ? 24 : 11;
+  // Cap structural SL to empirical 1.75x-2.65x ATR + spread envelope so 3-day swing outliers never bloat TP2 to unreachable 4.7x ATR distances
+  const atrEnvelopeMax = Math.max(minSlFloor * 1.4, effectiveAtr * 2.65 + spreadBuffer);
   const maxStructuralSlCap = activeRiskCfg.enabled
-    ? Math.max(hardSlCapPips, baseSlPips * 2.4, effectiveAtr * 2.85 + spreadBuffer)
-    : Math.max(hardSlCapPips, effectiveAtr * 2.55 + spreadBuffer);
+    ? Math.max(minSlFloor, Math.min(atrEnvelopeMax, Math.max(hardSlCapPips, baseSlPips * 2.2, effectiveAtr * 2.65 + spreadBuffer)))
+    : Math.max(minSlFloor, Math.min(atrEnvelopeMax, Math.max(hardSlCapPips, effectiveAtr * 2.65 + spreadBuffer)));
 
   // Proven WIDE_TREND SL clearance (1.75x ATR + spread floor up to swing protection) to prevent intraday wicks shaking out winning trends
   const rawTargetSlPips =
@@ -4438,7 +4441,7 @@ export function computeRealChartTradeParams(p: {
       : Math.min(effectiveAtr * 1.85 + spreadBuffer, maxStructuralSlCap);
 
   const structuralSlPips = Number(
-    Math.min(maxStructuralSlCap, Math.max(minSlFloor, rawTargetSlPips, baseSlPips)).toFixed(1)
+    Math.min(maxStructuralSlCap, Math.max(minSlFloor, rawTargetSlPips)).toFixed(1)
   );
 
   // Dynamic Position Sizing & Real-World SL/TP Calibration
@@ -4914,22 +4917,57 @@ export function computeRealChartTradeParams(p: {
   })();
   const climaxWickSafe = !climaxWickAgainstSide;
 
-  // 4) Closed-Candle Confirmation & ADX/DI + MACD Cross-Examination Gate
-  // Prevents firing READY BUY right after a bearish candle closed below 20 EMA, or READY SELL right after a bullish close above 20 EMA.
+  // 4) Closed-Candle Confirmation, Cross-TF H1 RSI Shield, H4 Macro Check & ADX/DI + MACD Cross-Examination Gate
+  // Matches walk-forward backtest rule: never fire READY BUY on a bearish closed candle (unless strong bullish lower-wick pin rejection),
+  // and never fire READY SELL on a bullish closed candle (unless strong bearish upper-wick pin rejection) — defer to Sniper Limit E.P.
   const latestClosedCandle =
     effectiveCandles && effectiveCandles.length >= 2 ? effectiveCandles[effectiveCandles.length - 2] : undefined;
-  const closedCandleOpposing = Boolean(
-    latestClosedCandle &&
-      ((isBuy && latestClosedCandle.close < latestClosedCandle.open && latestClosedCandle.close < ema20Val) ||
-        (!isBuy && latestClosedCandle.close > latestClosedCandle.open && latestClosedCandle.close > ema20Val))
-  );
+  const closedCandleOpposing = (() => {
+    if (!latestClosedCandle) return false;
+    const lcRange = Math.max(1e-9, latestClosedCandle.high - latestClosedCandle.low);
+    const lcUpperWick = Math.max(0, latestClosedCandle.high - Math.max(latestClosedCandle.open, latestClosedCandle.close));
+    const lcLowerWick = Math.max(0, Math.min(latestClosedCandle.open, latestClosedCandle.close) - latestClosedCandle.low);
+    const hasBullPinRejection = lcLowerWick / lcRange >= 0.42;
+    const hasBearPinRejection = lcUpperWick / lcRange >= 0.42;
+    if (isBuy) {
+      return latestClosedCandle.close < latestClosedCandle.open && !hasBullPinRejection;
+    }
+    return latestClosedCandle.close > latestClosedCandle.open && !hasBearPinRejection;
+  })();
+
+  // Cross-Timeframe H1 RSI Exhaustion Shield (prevents M5/M15 from chasing bottoms/tops when H1 is already exhausted)
+  const h1Safe = resolvedH1Candles || [];
+  const h1RsiVal =
+    h1Safe.length >= 16 ? computeRealRsi(h1Safe.map((c) => c.close), 14) : rsiVal;
+  const h1RsiExhausted =
+    (p.targetTf === 'M5' || p.targetTf === 'M15') &&
+    h1Safe.length >= 16 &&
+    (isBuy ? h1RsiVal >= 68 : h1RsiVal <= 32);
+
+  // H4 Macro Structure Guard (built directly from real 4-hour aggregated H1 bars when >= 48 H1 bars exist)
+  const h4ConflictDetected = (() => {
+    if (h1Safe.length < 48) return false;
+    const h4Closes: number[] = [];
+    for (let k = 0; k + 3 < h1Safe.length; k += 4) {
+      h4Closes.push(h1Safe[k + 3].close);
+    }
+    if (h4Closes.length < 12) return false;
+    const h4Ema10 = computeRealEma(h4Closes, 10);
+    const h4Ema20 = computeRealEma(h4Closes, Math.min(20, h4Closes.length));
+    if (isBuy) {
+      return h4Ema10 < h4Ema20 && p.price < h4Ema10;
+    }
+    return h4Ema10 > h4Ema20 && p.price > h4Ema10;
+  })();
+
   const diAligned = isBuy ? adxStats.diSpread >= 1.8 : adxStats.diSpread <= -1.8;
   const macdAligned = isBuy ? derivedMacd.bias === 'BULLISH' : derivedMacd.bias === 'BEARISH';
   const weakTrendOrConflict =
-    derivedAdx < 17.5 ||
+    derivedAdx < 18.5 ||
     !diAligned ||
     (!macdAligned && derivedMacd.bias !== 'FLAT') ||
-    !h1AlignedWithOrder;
+    !h1AlignedWithOrder ||
+    h4ConflictDetected;
 
   const liveBacktest = runLiveCandleBacktest({
     pair: p.targetPair,
@@ -4941,7 +4979,24 @@ export function computeRealChartTradeParams(p: {
   });
   const backtestNegativeRegime = liveBacktest.sampleTrades >= 2 && liveBacktest.netExpectancyR <= 0;
 
+  const ema20DistPipsAbs = Math.abs(anchoredEntry - ema20Val) * pipMultiplier;
+  const ema20DistAtr = ema20DistPipsAbs / Math.max(1, effectiveAtr);
+  const stretchedFromValueCorridor =
+    ema20DistAtr > 0.72 || Math.abs(quantMetricsBase.zScore) > 1.15;
+
   const livePriceOnWrongSideOfEma20 = isBuy ? p.price < ema20Val : p.price > ema20Val;
+  const rsiExhausted = isBuy ? rsiVal >= 67 : rsiVal <= 33;
+  const rsiExtremeTrap = (isBuy ? rsiVal >= 69 : rsiVal <= 31) && Math.abs(quantMetricsBase.zScore) >= 1.5;
+  const offPeakSessionCaution = pairTiming.windowStatusCode === 'OPENING_SOON' || !pairTiming.isFavorableTime;
+  const hasLowEdgeOrChop =
+    bosConflictDetected ||
+    !spreadEfficient ||
+    allFactorEval.isFlatEmaChop ||
+    scoreMargin < 14 ||
+    allFactorEval.alignedFactorsCount < 6 ||
+    weakTrendOrConflict ||
+    rsiExtremeTrap ||
+    backtestNegativeRegime;
 
   let executionReadiness: ComputedTradeParams['executionReadiness'] = 'READY_ENTER';
   let executionReadinessReason = `${allFactorEval.alignedFactorsCount}/${allFactorEval.totalFactorsCount} factors, BOS structure, Closed Candle, ADX/DI (${derivedAdx.toFixed(1)}), MACD & 1H aligned inside value zone.`;
@@ -4962,31 +5017,48 @@ export function computeRealChartTradeParams(p: {
     scoreMargin < 14 ||
     allFactorEval.alignedFactorsCount < 6 ||
     weakTrendOrConflict ||
+    rsiExtremeTrap ||
     backtestNegativeRegime
   ) {
     executionReadiness = 'NO_TRADE_CHOP';
     executionReadinessReason = backtestNegativeRegime
       ? `Walk-forward regime shield: recent ${p.targetTf} candles show negative expectancy (${liveBacktest.netExpectancyR}R across ${liveBacktest.sampleTrades} trades) — stand aside until clean directional trend resumes.`
-      : allFactorEval.isFlatEmaChop || derivedAdx < 17.5
-      ? `Low-ADX chop compression (ADX ${derivedAdx.toFixed(1)} < 17.5 · RSI ${rsiVal.toFixed(1)}) — sideways trap, wait directional breakout.`
+      : h4ConflictDetected
+      ? `H4 macro structure opposes ${p.targetTf} ${isBuy ? 'BUY' : 'SELL'} (spot trapped below/above H4 10/20 EMA) — wait H4 alignment.`
+      : rsiExtremeTrap
+      ? `Extreme RSI exhaustion trap (${rsiVal.toFixed(1)} @ Z=${quantMetricsBase.zScore}σ) — bounce risk high, stand aside.`
+      : allFactorEval.isFlatEmaChop || derivedAdx < 18.5
+      ? `Low-ADX chop compression (ADX ${derivedAdx.toFixed(1)} < 18.5 · RSI ${rsiVal.toFixed(1)}) — sideways trap, wait directional breakout.`
       : !h1AlignedWithOrder
       ? `1H ${h1TrendDirection} conflicts with ${p.targetTf} ${isBuy ? 'BUY' : 'SELL'} — stand aside until multi-timeframe aligned.`
       : !macdAligned || !diAligned
       ? `Indicator cross-exam conflict (MACD ${derivedMacd.bias} · DI spread ${adxStats.diSpread}) — do not force entry.`
       : `Low edge (${allFactorEval.alignedFactorsCount}/${allFactorEval.totalFactorsCount} factors · ${allFactorEval.bullScorePct}% vs ${allFactorEval.bearScorePct}%) — wait clearer expansion.`;
   } else if (
+    offPeakSessionCaution ||
+    rsiExhausted ||
+    h1RsiExhausted ||
+    derivedAdx < 20.5 ||
     closedCandleOpposing ||
     livePriceOnWrongSideOfEma20 ||
     allFactorEval.isExtendedZone ||
-    Math.abs(quantMetricsBase.zScore) > 1.55 ||
+    stretchedFromValueCorridor ||
     Boolean(slVolatilityWarning) ||
     Boolean(p.opposingCandleWarning) ||
     pivotWallBlocked ||
     climaxWickAgainstSide
   ) {
     executionReadiness = 'WAIT_PULLBACK';
-    executionReadinessReason = closedCandleOpposing
-      ? `Latest closed candle closed ${isBuy ? 'bearish below 20 EMA' : 'bullish above 20 EMA'} — wait next closed-candle reversal confirmation or Sniper Limit @ ${advisoryEntryPrice}.`
+    executionReadinessReason = offPeakSessionCaution
+      ? `${pairTiming.bannerHeadline} — stage Sniper Limit @ ${advisoryEntryPrice} or wait peak liquidity.`
+      : h1RsiExhausted
+      ? `1H RSI (${h1RsiVal.toFixed(1)}) is already ${isBuy ? 'overbought (>= 68)' : 'oversold (<= 32)'} — do not chase ${p.targetTf} at extremes; stage Sniper Limit @ ${advisoryEntryPrice}.`
+      : rsiExhausted
+      ? `RSI ${rsiVal.toFixed(1)} is ${isBuy ? 'overbought (>= 67)' : 'oversold (<= 33)'} — do not chase exhaustion; stage Sniper Limit @ ${advisoryEntryPrice} on 20 EMA retest.`
+      : derivedAdx < 20.5
+      ? `Moderate ADX (${derivedAdx.toFixed(1)} < 20.5) — wait pullback Sniper Limit @ ${advisoryEntryPrice} rather than market execution.`
+      : closedCandleOpposing
+      ? `Latest closed candle closed ${isBuy ? 'bearish against BUY' : 'bullish against SELL'} without directional pin rejection — stage Sniper Limit @ ${advisoryEntryPrice} or wait confirmed close.`
       : livePriceOnWrongSideOfEma20
       ? `Price (${anchoredEntry}) is currently on wrong side of 20 EMA (${ema20Val.toFixed(decimals)}) — wait closed candle reclaim or Sniper Limit @ ${advisoryEntryPrice}.`
       : p.opposingCandleWarning
@@ -4995,10 +5067,8 @@ export function computeRealChartTradeParams(p: {
       ? `Climax rejection wick detected on latest closed candle — stage Sniper Limit @ ${advisoryEntryPrice} instead of buying/selling into the wick.`
       : pivotWallBlocked
       ? `Floor Pivot barrier (${isBuy ? `R1 ${quantMetricsBase.pivotLevels.r1}` : `S1 ${quantMetricsBase.pivotLevels.s1}`}) is only ${pivotObstacleDistPips.toFixed(1)}p away — stage Sniper Limit @ ${advisoryEntryPrice} for clean R:R headroom.`
-      : allFactorEval.isExtendedZone
-      ? `Price extended away from 20 EMA — stage Sniper Limit @ ${advisoryEntryPrice} rather than chasing.`
-      : Math.abs(quantMetricsBase.zScore) > 1.55
-      ? `Statistical stretch (Z=${quantMetricsBase.zScore}σ) away from value — stage Sniper Limit @ ${advisoryEntryPrice} rather than chasing.`
+      : allFactorEval.isExtendedZone || stretchedFromValueCorridor
+      ? `Price stretched ${ema20DistAtr.toFixed(2)}x ATR (Z=${quantMetricsBase.zScore}σ) from 20 EMA — stage Sniper Limit @ ${advisoryEntryPrice} rather than chasing.`
       : `Candle ATR (${effectiveAtr.toFixed(1)}p) exceeds your ${actualSlPips}p SL — wait tight retest or increase SL budget.`;
   }
 
@@ -5046,13 +5116,16 @@ export function computeRealChartTradeParams(p: {
     executionReadiness === 'READY_ENTER' &&
     allFactorEval.alignedFactorsCount >= 6 &&
     scoreMargin >= 16 &&
-    derivedAdx >= 17.5 &&
+    derivedAdx >= 20.5 &&
     diAligned &&
     macdAligned &&
+    !rsiExhausted &&
+    !h1RsiExhausted &&
+    !h4ConflictDetected &&
     !closedCandleOpposing &&
     !livePriceOnWrongSideOfEma20 &&
     !backtestNegativeRegime &&
-    Math.abs(quantMetricsBase.zScore) <= 1.55 &&
+    !stretchedFromValueCorridor &&
     pivotWallClear &&
     climaxWickSafe &&
     spreadEfficient &&
@@ -5062,14 +5135,17 @@ export function computeRealChartTradeParams(p: {
 
   const isWaitLimitCandidate =
     !strictHighConviction &&
+    !hasLowEdgeOrChop &&
     (executionReadiness === 'WAIT_PULLBACK' || executionReadiness === 'READY_ENTER') &&
     spreadEfficient &&
     !bosConflictDetected &&
     !backtestNegativeRegime &&
     h1AlignedWithOrder &&
+    !h4ConflictDetected &&
+    !rsiExtremeTrap &&
     diAligned &&
     macdAligned &&
-    derivedAdx >= 17.5 &&
+    derivedAdx >= 18.5 &&
     scoreMargin >= 14 &&
     allFactorEval.alignedFactorsCount >= 6 &&
     checksPassedCount >= 7;
@@ -5583,7 +5659,12 @@ export function buildCalibratedMarketItem(params: {
 
   // Unify direction strictly with computed.direction so MarketScanData.bias and SL/TP can NEVER contradict
   const isBuy = computed.direction === 'BUY';
-  const isNeutral = preliminaryNeutral || computed.executionReadiness === 'NO_TRADE_CHOP';
+  const lowFactorConviction =
+    computed.alignedFactorsCount < 6 ||
+    Math.abs(computed.bullScorePct - computed.bearScorePct) < 14 ||
+    (computed.adxStrength !== undefined && computed.adxStrength < 17.5) ||
+    computed.h1TrendDirection !== (isBuy ? 'UPTREND' : 'DOWNTREND');
+  const isNeutral = preliminaryNeutral || computed.executionReadiness === 'NO_TRADE_CHOP' || lowFactorConviction;
 
   const trendDirection: 'UPTREND' | 'DOWNTREND' | 'RANGING' = isNeutral
     ? 'RANGING'
@@ -6626,44 +6707,39 @@ export function evaluatePairKenyaTiming(pair: CurrencyPair, now: Date = new Date
     };
   }
 
-  // Pair-specific optimal execution windows in Nairobi EAT (seconds from midnight)
+  // Pair-specific liquid execution windows in Nairobi EAT (continuous weekday London + NY overlap — never marks London midday as Market Closed)
   const windowsByPair: Record<CurrencyPair, { name: string; startSec: number; endSec: number }[]> = {
     'USD/JPY': [
-      { name: 'Tokyo Liquid Morning (03:00–09:00 EAT)', startSec: 3 * 3600, endSec: 9 * 3600 },
-      { name: 'NY & London Overlap (15:30–20:00 EAT)', startSec: 15.5 * 3600, endSec: 20 * 3600 }
+      { name: 'Tokyo Liquid Morning (03:00–09:30 EAT)', startSec: 3 * 3600, endSec: 9.5 * 3600 },
+      { name: 'London / NY Active Liquidity (10:00–20:30 EAT)', startSec: 10 * 3600, endSec: 20.5 * 3600 }
     ],
     'GBP/USD': [
-      { name: 'London Open Killzone (10:00–13:00 EAT)', startSec: 10 * 3600, endSec: 13 * 3600 },
-      { name: 'London / NY Peak Overlap (15:30–19:00 EAT)', startSec: 15.5 * 3600, endSec: 19 * 3600 }
+      { name: 'London & NY Continuous Session (10:00–20:00 EAT)', startSec: 10 * 3600, endSec: 20 * 3600 }
     ],
     'EUR/USD': [
-      { name: 'Frankfurt & London Open (10:00–13:00 EAT)', startSec: 10 * 3600, endSec: 13 * 3600 },
-      { name: 'London / NY Peak Overlap (15:30–19:00 EAT)', startSec: 15.5 * 3600, endSec: 19 * 3600 }
+      { name: 'Frankfurt, London & NY Session (10:00–20:00 EAT)', startSec: 10 * 3600, endSec: 20 * 3600 }
     ],
     'XAU/USD': [
-      { name: 'London Morning Bullion Fix (10:30–13:00 EAT)', startSec: 10.5 * 3600, endSec: 13 * 3600 },
-      { name: 'NY COMEX Open & Expansion (15:30–20:30 EAT)', startSec: 15.5 * 3600, endSec: 20.5 * 3600 }
+      { name: 'Asian Gold Fix (03:00–08:30 EAT)', startSec: 3 * 3600, endSec: 8.5 * 3600 },
+      { name: 'London & NY COMEX Bullion (09:30–21:00 EAT)', startSec: 9.5 * 3600, endSec: 21 * 3600 }
     ],
     'GBP/JPY': [
-      { name: 'Tokyo Cross Volatility (03:00–06:00 EAT)', startSec: 3 * 3600, endSec: 6 * 3600 },
-      { name: 'London Dragon Open (10:00–13:00 EAT)', startSec: 10 * 3600, endSec: 13 * 3600 },
-      { name: 'New York Open Impulse (15:30–18:30 EAT)', startSec: 15.5 * 3600, endSec: 18.5 * 3600 }
+      { name: 'Tokyo Cross Volatility (03:00–08:30 EAT)', startSec: 3 * 3600, endSec: 8.5 * 3600 },
+      { name: 'London & NY Dragon Session (09:30–20:30 EAT)', startSec: 9.5 * 3600, endSec: 20.5 * 3600 }
     ],
     'USD/CHF': [
-      { name: 'Zurich & London Open (10:00–13:30 EAT)', startSec: 10 * 3600, endSec: 13.5 * 3600 },
-      { name: 'London / NY Overlap (15:30–19:30 EAT)', startSec: 15.5 * 3600, endSec: 19.5 * 3600 }
+      { name: 'Zurich, London & NY Session (10:00–20:00 EAT)', startSec: 10 * 3600, endSec: 20 * 3600 }
     ],
     'EUR/JPY': [
-      { name: 'Tokyo Morning Cross (03:00–06:30 EAT)', startSec: 3 * 3600, endSec: 6.5 * 3600 },
-      { name: 'Frankfurt & London Cross (10:00–13:00 EAT)', startSec: 10 * 3600, endSec: 13 * 3600 },
-      { name: 'New York Overlap Impulse (15:30–19:00 EAT)', startSec: 15.5 * 3600, endSec: 19 * 3600 }
+      { name: 'Tokyo Morning Cross (03:00–08:30 EAT)', startSec: 3 * 3600, endSec: 8.5 * 3600 },
+      { name: 'Frankfurt, London & NY Cross (09:30–20:30 EAT)', startSec: 9.5 * 3600, endSec: 20.5 * 3600 }
     ],
     'USD/CAD': [
-      { name: 'New York & Toronto Open (15:30–21:00 EAT)', startSec: 15.5 * 3600, endSec: 21 * 3600 }
+      { name: 'London Mid & NY/Toronto Session (11:00–21:00 EAT)', startSec: 11 * 3600, endSec: 21 * 3600 }
     ],
     'AUD/USD': [
-      { name: 'Sydney & Tokyo Session (02:30–08:30 EAT)', startSec: 2.5 * 3600, endSec: 8.5 * 3600 },
-      { name: 'New York USD Impulse (15:30–18:30 EAT)', startSec: 15.5 * 3600, endSec: 18.5 * 3600 }
+      { name: 'Sydney & Tokyo Session (02:30–09:30 EAT)', startSec: 2.5 * 3600, endSec: 9.5 * 3600 },
+      { name: 'London / NY USD Liquidity (10:00–20:00 EAT)', startSec: 10 * 3600, endSec: 20 * 3600 }
     ],
     'BTC/USD': [
       { name: 'Active 24/7 Institutional Crypto Flow', startSec: 0, endSec: 86400 }
@@ -6672,16 +6748,16 @@ export function evaluatePairKenyaTiming(pair: CurrencyPair, now: Date = new Date
       { name: 'Active 24/7 Global Ethereum Liquidity', startSec: 0, endSec: 86400 }
     ],
     'US30': [
-      { name: 'Wall Street Regular Session (16:30–23:00 EAT)', startSec: 16.5 * 3600, endSec: 23 * 3600 }
+      { name: 'Wall Street & Pre-NY Cash Session (15:00–23:00 EAT)', startSec: 15 * 3600, endSec: 23 * 3600 }
     ],
     'NAS100': [
-      { name: 'Nasdaq Tech Momentum Session (16:30–23:00 EAT)', startSec: 16.5 * 3600, endSec: 23 * 3600 }
+      { name: 'Nasdaq Tech & Pre-NY Cash Session (15:00–23:00 EAT)', startSec: 15 * 3600, endSec: 23 * 3600 }
     ],
     'GER40': [
-      { name: 'Frankfurt Morning DAX Open (10:00–18:30 EAT)', startSec: 10 * 3600, endSec: 18.5 * 3600 }
+      { name: 'Frankfurt DAX & London/NY Cash (10:00–20:30 EAT)', startSec: 10 * 3600, endSec: 20.5 * 3600 }
     ],
     'USOIL': [
-      { name: 'WTI NYMEX Session (16:00–21:30 EAT)', startSec: 16 * 3600, endSec: 21.5 * 3600 }
+      { name: 'London Energy & WTI NYMEX Session (10:00–21:30 EAT)', startSec: 10 * 3600, endSec: 21.5 * 3600 }
     ]
   };
 
@@ -6720,7 +6796,7 @@ export function evaluatePairKenyaTiming(pair: CurrencyPair, now: Date = new Date
       countdownFormatted: cd,
       countdownSeconds: secsLeft,
       reasonText: isEarlySettlePhase
-        ? `${pair} just opened inside ${activeWin.name}. Too early to rush — please wait ${Math.ceil(earlySettleSecondsLeft / 60)} min while spreads settle and study initial 15m price action.`
+        ? `${pair} just opened inside ${activeWin.name}. Too early to rush — please wait ${Math.ceil(earlySettleSecondsLeft / 60)} min while spreads settle and study initial price action.`
         : isClosingPhase
         ? `${pair} window closes in ${cd}. Please avoid opening fresh positions late in the session; protect open profits.`
         : `${pair} window OPEN inside ${activeWin.name} (${cd} remaining). Tight institutional spreads & active liquidity.`,
@@ -6742,22 +6818,26 @@ export function evaluatePairKenyaTiming(pair: CurrencyPair, now: Date = new Date
   }
 
   const cd = formatCountdownHms(secsUntil);
-  const openingSoon = secsUntil <= 2700;
+  const isRolloverDeadZone = !isCrypto247 && (secOfDay >= 23.75 * 3600 || secOfDay < 0.25 * 3600);
   return {
     isFavorableTime: false,
-    windowStatusCode: openingSoon ? 'OPENING_SOON' : 'CLOSED_WAIT',
-    statusLabel: openingSoon ? `OPENS SOON · IN ${cd}` : `WAIT · OPENS IN ${cd}`,
-    windowBadgeShort: openingSoon ? `OPENS IN ${cd}` : `WAIT · ${cd}`,
-    bannerHeadline: openingSoon
-      ? `TOO EARLY — OPENS IN ${cd} (${nextWin.name})`
-      : `NOT RIGHT TO ENTER NOW — OPENS IN ${cd} (${nextWin.name})`,
-    currentWindowName: secOfDay >= 22 * 3600 || secOfDay < 2.5 * 3600 ? 'Low-Liquidity Rollover Zone' : 'Off-Session / Consolidation Lull',
+    windowStatusCode: isRolloverDeadZone ? 'CLOSED_WAIT' : 'OPENING_SOON',
+    statusLabel: isRolloverDeadZone ? `ROLLOVER CLOSED · OPENS IN ${cd}` : `OFF-PEAK · PRIME IN ${cd}`,
+    windowBadgeShort: isRolloverDeadZone ? `CLOSED · ${cd}` : `WAIT · ${cd}`,
+    bannerHeadline: isRolloverDeadZone
+      ? `DAILY ROLLOVER SPREAD SPIKE — OPENS IN ${cd}`
+      : `OFF-PEAK SESSION — NEXT PRIME WINDOW IN ${cd} (${nextWin.name})`,
+    currentWindowName: isRolloverDeadZone
+      ? 'Daily Interbank Rollover Dead Zone (Wide Spreads)'
+      : 'Off-Peak Weekday Session (Selective Limit Orders Only)',
     nextWindowName: nextWin.name,
     countdownFormatted: cd,
     countdownSeconds: secsUntil,
-    reasonText: openingSoon
-      ? `Too early to enter ${pair} right now — ${nextWin.name} opens in ${cd}. Please wait and study 1H 20/50 EMA structure before entering.`
-      : `Oops — not the right time to enter ${pair}. Next clean window (${nextWin.name}) opens in ${cd}. Please wait and study higher-timeframe levels instead of forcing an off-session trade.`,
+    reasonText: isRolloverDeadZone
+      ? `Daily 23:45–00:15 EAT rollover causes extreme broker spread spikes on ${pair}. Please stand aside until ${nextWin.name} opens in ${cd}.`
+      : `${pair} is between peak cash sessions (${nextWin.name} in ${cd}). Avoid chasing market orders now — stage disciplined Sniper Limits or wait peak volume.`,
+    isEarlySettlePhase: false,
+    isClosingPhase: false,
     isWeekendClosed: false
   };
 }

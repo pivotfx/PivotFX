@@ -1013,7 +1013,12 @@ InpMagicNumber=777129
       });
       const currentMacro = getCurrentMacroContext(pctMap);
       const matchedMktForSwing = prefill || liveMarkets.find((m) => m.pair === activePair);
-      const swings = computeCandleSwingLevels(matchedMktForSwing?.candles);
+      const useH1Series = activeTf === 'H1' || activeTf === 'H4' || activeTf === 'D1';
+      const activeCandleSeries =
+        useH1Series && matchedMktForSwing?.h1Candles && matchedMktForSwing.h1Candles.length >= 12
+          ? matchedMktForSwing.h1Candles
+          : matchedMktForSwing?.candles;
+      const swings = computeCandleSwingLevels(activeCandleSeries);
 
       const computed = computeRealChartTradeParams({
         targetPair: activePair,
@@ -1025,6 +1030,8 @@ InpMagicNumber=777129
         ema50: targetEma50,
         rsi: targetRsi,
         atrPips: targetAtrPips ?? matchedMktForSwing?.atrPips,
+        candles: activeCandleSeries,
+        h1Candles: matchedMktForSwing?.h1Candles,
         swingLow: swings.swingLow,
         swingHigh: swings.swingHigh,
         change24hPct: matchedMktForSwing?.change24hPct,
@@ -1211,7 +1218,10 @@ InpMagicNumber=777129
     setAdvisorMessages((prev) => [...prev, userMsg]);
     setAdvisorLoading(false);
 
-    const chatSwings = computeCandleSwingLevels(m.candles);
+    const useH1Chat = timeframe === 'H1' || timeframe === 'H4' || timeframe === 'D1';
+    const chatSeries =
+      useH1Chat && m.h1Candles && m.h1Candles.length >= 12 ? m.h1Candles : m.candles;
+    const chatSwings = computeCandleSwingLevels(chatSeries);
     const pctMapChat: Partial<Record<CurrencyPair, number>> = {};
     liveMarkets.forEach((lm) => {
       pctMapChat[lm.pair] = lm.change24hPct;
@@ -1227,6 +1237,8 @@ InpMagicNumber=777129
       ema50: m.ema50,
       rsi: m.rsi,
       atrPips: m.atrPips,
+      candles: chatSeries,
+      h1Candles: m.h1Candles,
       swingLow: chatSwings.swingLow,
       swingHigh: chatSwings.swingHigh,
       change24hPct: m.change24hPct,
