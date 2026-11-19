@@ -17,6 +17,7 @@ import {
   GlobalStreamState,
   getTradingViewSymbol,
   getTradingViewExternalUrl,
+  resolveMarketDirection,
 } from '../../utils/liveMarketEngine';
 import { CurrencyPair } from '../../types';
 
@@ -423,7 +424,12 @@ export const StrategyVaultInteractiveTools: React.FC = () => {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5">
           {liveStrategyMatches.map((m) => {
-            const isBuy = m.bias !== 'STRONG_SELL';
+            const isChop =
+              m.bias === 'NEUTRAL_CHOP' ||
+              m.executionReadiness === 'NO_TRADE_CHOP' ||
+              m.executionReadiness === 'NO_TRADE_CLOSED';
+            const resolvedDir = resolveMarketDirection(m);
+            const isBuy = resolvedDir === 'BUY';
             const tvSym = m.tvSymbol || getTradingViewSymbol(m.pair);
             const isReady = m.executionReadiness === 'READY_ENTER';
             const isWait = m.executionReadiness === 'WAIT_PULLBACK';
@@ -437,15 +443,25 @@ export const StrategyVaultInteractiveTools: React.FC = () => {
                     <span className="text-xs font-black text-white">{m.pair}</span>
                     <span
                       className={`px-1.5 py-0.5 rounded text-[9px] font-black inline-flex items-center gap-0.5 ${
-                        isBuy ? 'bg-[#00C261]/20 text-[#00C261]' : 'bg-red-500/20 text-red-300'
+                        isChop
+                          ? 'bg-slate-800 text-amber-300 border border-slate-700'
+                          : isBuy
+                          ? 'bg-[#00C261]/20 text-[#00C261]'
+                          : 'bg-red-500/20 text-red-300'
                       }`}
                     >
-                      {isBuy ? (
+                      {isChop ? (
+                        <AlertTriangle className="w-2.5 h-2.5" />
+                      ) : isBuy ? (
                         <TrendingUp className="w-2.5 h-2.5" />
                       ) : (
                         <TrendingDown className="w-2.5 h-2.5" />
                       )}
-                      {isBuy ? 'BUY' : 'SELL'}
+                      {isChop
+                        ? m.executionReadiness === 'NO_TRADE_CLOSED'
+                          ? 'CLOSED'
+                          : 'CHOP'
+                        : resolvedDir}
                     </span>
                   </div>
 
@@ -680,9 +696,23 @@ export const StrategyVaultInteractiveTools: React.FC = () => {
                 </span>
                 <span>
                   Action{' '}
-                  <strong className={primaryLiveMarket.bias !== 'STRONG_SELL' ? 'text-[#00C261]' : 'text-red-400'}>
-                    {primaryLiveMarket.bias !== 'STRONG_SELL' ? 'BUY' : 'SELL'}
-                  </strong>
+                  {primaryLiveMarket.bias === 'NEUTRAL_CHOP' ||
+                  primaryLiveMarket.executionReadiness === 'NO_TRADE_CHOP' ||
+                  primaryLiveMarket.executionReadiness === 'NO_TRADE_CLOSED' ? (
+                    <strong className="text-amber-300">
+                      {primaryLiveMarket.executionReadiness === 'NO_TRADE_CLOSED' ? 'CLOSED' : 'HOLD (CHOP)'}
+                    </strong>
+                  ) : (
+                    <strong
+                      className={
+                        resolveMarketDirection(primaryLiveMarket) === 'BUY'
+                          ? 'text-[#00C261]'
+                          : 'text-red-400'
+                      }
+                    >
+                      {resolveMarketDirection(primaryLiveMarket)}
+                    </strong>
+                  )}
                 </span>
                 <span>SL {primaryLiveMarket.suggestedSL}</span>
                 <span className="text-[#00C261]">TP2 {primaryLiveMarket.suggestedTP2}</span>

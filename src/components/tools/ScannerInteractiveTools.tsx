@@ -4174,6 +4174,9 @@ Broker: ${broker.toUpperCase()}`;
                       riskConfig
                     });
                     const isBuy = computedRow.direction === 'BUY';
+                    const isRowNoTrade =
+                      computedRow.executionReadiness === 'NO_TRADE_CHOP' ||
+                      computedRow.executionReadiness === 'NO_TRADE_CLOSED';
                     const brokerSpec = m.spreadByBroker[broker];
                     const isSelected = pair === m.pair;
 
@@ -4206,15 +4209,27 @@ Broker: ${broker.toUpperCase()}`;
                         <td className="py-3 px-3">
                           <span
                             className={`inline-block px-2 py-0.5 rounded text-[11px] font-black ${
-                              isBuy
+                              isRowNoTrade
+                                ? 'bg-slate-800 text-amber-300 border border-slate-700'
+                                : isBuy
                                 ? 'bg-emerald-500/20 text-[#00C261] border border-emerald-500/30'
                                 : 'bg-red-500/20 text-red-300 border border-red-500/30'
                             }`}
                           >
-                            {computedRow.orderType}
+                            {isRowNoTrade
+                              ? computedRow.executionReadiness === 'NO_TRADE_CLOSED'
+                                ? 'CLOSED · STAND ASIDE'
+                                : 'STAND ASIDE (CHOP)'
+                              : computedRow.orderType}
                           </span>
-                          <span className="text-[11px] text-[#00C261] font-bold block mt-0.5">
-                            {computedRow.confidence}% Confidence · R:R {computedRow.riskReward}
+                          <span
+                            className={`text-[11px] font-bold block mt-0.5 ${
+                              isRowNoTrade ? 'text-slate-400' : 'text-[#00C261]'
+                            }`}
+                          >
+                            {isRowNoTrade
+                              ? `Wait Clear Structure · Ref R:R ${computedRow.riskReward}`
+                              : `${computedRow.confidence}% Confidence · R:R ${computedRow.riskReward}`}
                           </span>
                         </td>
 

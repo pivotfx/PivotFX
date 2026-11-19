@@ -1,13 +1,27 @@
 import {
   BrokerId,
+  ChartReplayMarker,
   CurrencyPair,
+  EaCircuitBreakerState,
+  EaLedgerStats,
+  EaSignalLedgerEntry,
+  PendingLimitOrder,
   PriceAlertRule,
   SuggestedSignalLogEntry,
   Timeframe,
   TradeNotification
 } from '../types';
 
-export type { PriceAlertRule, SuggestedSignalLogEntry, TradeNotification };
+export type {
+  ChartReplayMarker,
+  EaCircuitBreakerState,
+  EaLedgerStats,
+  EaSignalLedgerEntry,
+  PendingLimitOrder,
+  PriceAlertRule,
+  SuggestedSignalLogEntry,
+  TradeNotification
+};
 
 export type PatternCategory =
   | 'Tower Top Liquidity Sweep'
@@ -133,6 +147,15 @@ export interface InstitutionalTelemetry {
   pivotWallClear?: boolean;
   climaxWickSafe?: boolean;
   spreadEfficiencyPct?: number;
+  projectedChochReversal?: {
+    conditionalDirection: 'BUY' | 'SELL';
+    triggerLevel: number;
+    retestEntryPrice: number;
+    stopLoss: number;
+    tp1: number;
+    tp2: number;
+    ruleSummary: string;
+  };
 }
 
 export interface DeepVerifyResult {
@@ -285,6 +308,7 @@ export interface LiveBacktestStats {
   netExpectancyR: number;
   verdictLabel: 'PROVEN POSITIVE EDGE' | 'MODERATE EDGE' | 'LOW SAMPLE / CHOP';
   summary: string;
+  recentSignals?: ChartReplayMarker[];
 }
 
 export interface PlainEnglishTradeGuide {
@@ -417,6 +441,15 @@ export interface ComputedTradeParams {
     riskReward: string;
     mt4SafetyProof: string;
   };
+  spreadSlRatioPct: number;
+  spreadSafetyBlocked: boolean;
+  invalidationLevel: number;
+  invalidationReason: string;
+  candleCloseConfirmed: boolean;
+  candleCloseStatusText: string;
+  liquiditySweepConfirmed: boolean;
+  newsBlackoutActive: boolean;
+  newsBlackoutReason?: string;
 }
 
 export function getTradingViewSymbol(pair: CurrencyPair): string {
@@ -590,6 +623,8 @@ export interface ActiveMarketOrder {
   autoTrailEnabled: boolean;
   slUpdatesCount: number;
   peakProfitUsd: number;
+  partialTp1Banked?: boolean;
+  partialBankedUsd?: number;
 }
 
 export interface ClosedOrderHistoryEntry {
@@ -980,7 +1015,8 @@ export function computeLiveOrderMetrics(
     : (order.entryPrice - livePrice) * pipMultiplier;
   const floatingPips = Number(rawSignedPips.toFixed(1));
 
-  const lotScale = Math.max(0.01, order.lotSize || 0.01) / 0.01;
+  const activeLotMultiplier = order.partialTp1Banked ? 0.5 : 1.0;
+  const lotScale = (Math.max(0.01, order.lotSize || 0.01) * activeLotMultiplier) / 0.01;
   const brokerSpread = isGold
     ? 2.2
     : isJpy
@@ -997,7 +1033,8 @@ export function computeLiveOrderMetrics(
 
   const grossUsd = Number((floatingPips * pipValPerMicroLot * lotScale).toFixed(2));
   const spreadCostUsd = Number((brokerSpread * pipValPerMicroLot * lotScale).toFixed(2));
-  const netProfitUsd = Number((grossUsd - spreadCostUsd).toFixed(2));
+  const partialCredit = order.partialTp1Banked ? order.partialBankedUsd || 0 : 0;
+  const netProfitUsd = Number((grossUsd - spreadCostUsd + partialCredit).toFixed(2));
   const netProfitKes = Math.round(netProfitUsd * 130);
 
   const isInProfit = floatingPips > 0.5;
@@ -1506,10 +1543,19 @@ export function computeRealMacd(closes: number[]): {
   macdLine: number;
   signalLine: number;
   histogram: number;
+  prevHistogram: number;
+  histSlope: 'RISING' | 'FALLING' | 'FLAT';
   bias: 'BULLISH' | 'BEARISH' | 'FLAT';
 } {
   if (!closes || closes.length < 18) {
-    return { macdLine: 0, signalLine: 0, histogram: 0, bias: 'FLAT' };
+    return {
+      macdLine: 0,
+      signalLine: 0,
+      histogram: 0,
+      prevHistogram: 0,
+      histSlope: 'FLAT',
+      bias: 'FLAT'
+    };
   }
   const k12 = 2 / 13;
   const k26 = 2 / 27;
@@ -1525,20 +1571,30 @@ export function computeRealMacd(closes: number[]): {
   }
 
   let signal = macdSeries[0];
+  const sigSeries: number[] = [];
   for (let i = 0; i < macdSeries.length; i++) {
     signal = macdSeries[i] * k9 + signal * (1 - k9);
+    sigSeries.push(signal);
   }
 
-  const macdLine = macdSeries[macdSeries.length - 1];
-  const histogram = macdLine - signal;
-  const prevHistogram = macdSeries.length >= 2 ? macdSeries[macdSeries.length - 2] - signal : histogram;
+  const n = macdSeries.length - 1;
+  const macdLine = macdSeries[n];
+  const signalLine = sigSeries[n];
+  const histogram = macdLine - signalLine;
+  const prevHistogram = n >= 1 ? macdSeries[n - 1] - sigSeries[n - 1] : histogram;
+  const histSlope: 'RISING' | 'FALLING' | 'FLAT' =
+    histogram > prevHistogram
+      ? 'RISING'
+      : histogram < prevHistogram
+      ? 'FALLING'
+      : 'FLAT';
   const lastPrice = Math.max(0.0001, closes[closes.length - 1]);
   const relNorm = Math.abs(histogram) / lastPrice;
 
   const bias: 'BULLISH' | 'BEARISH' | 'FLAT' =
-    relNorm < 0.000015 && Math.abs(macdLine) / lastPrice < 0.00003
+    relNorm < 0.00001 && Math.abs(macdLine) / lastPrice < 0.000025
       ? 'FLAT'
-      : histogram > 0 && macdLine >= prevHistogram * 0.4 - Math.abs(signal) * 0.2
+      : histogram > 0
       ? 'BULLISH'
       : histogram < 0
       ? 'BEARISH'
@@ -1546,7 +1602,7 @@ export function computeRealMacd(closes: number[]): {
       ? 'BULLISH'
       : 'BEARISH';
 
-  return { macdLine, signalLine: signal, histogram, bias };
+  return { macdLine, signalLine, histogram, prevHistogram, histSlope, bias };
 }
 
 /**
@@ -2080,15 +2136,25 @@ function detectSingleTfBos(
       : refSwingLow;
 
   const latestClose = closedBars[closedBars.length - 1].close;
+  const activeBar = candles[candles.length - 1];
   const noiseTolerance = Math.max(2.0 / pipMultiplier, (atrPips * 0.16) / pipMultiplier);
+  const liveDisplacementTol = Math.max(noiseTolerance * 1.65, (atrPips * 0.38) / pipMultiplier);
+  const strongLiveBreakdown =
+    Boolean(activeBar && activeBar.close < activeBar.open) &&
+    livePrice < recentLowAnchor - liveDisplacementTol;
+  const strongLiveBreakout =
+    Boolean(activeBar && activeBar.close > activeBar.open) &&
+    livePrice > recentHighAnchor + liveDisplacementTol;
 
-  // Require CONFIRMED closed-candle body close beyond structural swing anchor (never flip off unclosed intra-bar wick)
+  // Require CONFIRMED closed-candle body close OR strong displaced live break (>0.38 ATR beyond swing anchor)
   const brokeBelowSwingLow =
-    latestClose < recentLowAnchor - noiseTolerance &&
-    livePrice <= recentLowAnchor + noiseTolerance * 0.25;
+    (latestClose < recentLowAnchor - noiseTolerance &&
+      livePrice <= recentLowAnchor + noiseTolerance * 0.25) ||
+    strongLiveBreakdown;
   const brokeAboveSwingHigh =
-    latestClose > recentHighAnchor + noiseTolerance &&
-    livePrice >= recentHighAnchor - noiseTolerance * 0.25;
+    (latestClose > recentHighAnchor + noiseTolerance &&
+      livePrice >= recentHighAnchor - noiseTolerance * 0.25) ||
+    strongLiveBreakout;
 
   const wasPriorHigherHigh = lastSwingHigh >= prevSwingHigh;
   const wasPriorLowerLow = lastSwingLow <= prevSwingLow;
@@ -2116,10 +2182,20 @@ function detectSingleTfBos(
     } else {
       bosDirection = 'BULLISH_BOS';
     }
-  } else if (lastSwingHigh > prevSwingHigh && lastSwingLow > prevSwingLow && livePrice >= lastSwingLow) {
+  } else if (
+    lastSwingHigh > prevSwingHigh &&
+    lastSwingLow > prevSwingLow &&
+    livePrice > lastSwingLow &&
+    livePrice >= prevSwingHigh
+  ) {
     bosDirection = 'BULLISH_BOS';
     bosTriggerLevel = prevSwingHigh;
-  } else if (lastSwingHigh < prevSwingHigh && lastSwingLow < prevSwingLow && livePrice <= lastSwingHigh) {
+  } else if (
+    lastSwingHigh < prevSwingHigh &&
+    lastSwingLow < prevSwingLow &&
+    livePrice < lastSwingHigh &&
+    livePrice <= prevSwingLow
+  ) {
     bosDirection = 'BEARISH_BOS';
     bosTriggerLevel = prevSwingLow;
   } else {
@@ -2657,23 +2733,43 @@ export function evaluateAllTradeFactors(p: {
       (p.adxStrength !== undefined && p.adxStrength < 14.5 && Math.abs(p.rsi - 50) < 6));
 
   if (distEma20Pips > overextLimit) {
-    if (p.ema20 >= p.ema50 || p.livePrice > p.ema50) bullWeight += 15;
-    else bearWeight += 15;
-    verdicts.push({
-      name: '2. 20/50 EMA Trend Stack',
-      signal: 'CAUTION',
-      weight: '15%',
-      detail: `Extended +${distEma20Pips.toFixed(1)}p above 20 EMA (${p.ema20.toFixed(decimals)}) — wait pullback toward 20 EMA`
-    });
+    const bullStackExtended = p.ema20 >= p.ema50 && p.livePrice > p.ema50;
+    if (bullStackExtended) {
+      bullWeight += 17;
+      verdicts.push({
+        name: '2. 20/50 EMA Trend Stack',
+        signal: 'BUY',
+        weight: '17%',
+        detail: `Bullish stack intact (extended +${distEma20Pips.toFixed(1)}p above 20 EMA ${p.ema20.toFixed(decimals)}) — stage pullback`
+      });
+    } else {
+      bearWeight += 14;
+      verdicts.push({
+        name: '2. 20/50 EMA Trend Stack',
+        signal: 'CAUTION',
+        weight: '14%',
+        detail: `Extended +${distEma20Pips.toFixed(1)}p above 20 EMA (${p.ema20.toFixed(decimals)}) inside bearish zone`
+      });
+    }
   } else if (distEma20Pips < -overextLimit) {
-    if (p.ema20 <= p.ema50 || p.livePrice < p.ema50) bearWeight += 15;
-    else bullWeight += 15;
-    verdicts.push({
-      name: '2. 20/50 EMA Trend Stack',
-      signal: 'CAUTION',
-      weight: '15%',
-      detail: `Extended ${distEma20Pips.toFixed(1)}p below 20 EMA (${p.ema20.toFixed(decimals)}) — wait pullback toward 20 EMA`
-    });
+    const bearStackExtended = p.ema20 <= p.ema50 && p.livePrice < p.ema50;
+    if (bearStackExtended) {
+      bearWeight += 17;
+      verdicts.push({
+        name: '2. 20/50 EMA Trend Stack',
+        signal: 'SELL',
+        weight: '17%',
+        detail: `Bearish stack intact (extended ${distEma20Pips.toFixed(1)}p below 20 EMA ${p.ema20.toFixed(decimals)}) — wait 20 EMA rally`
+      });
+    } else {
+      bullWeight += 14;
+      verdicts.push({
+        name: '2. 20/50 EMA Trend Stack',
+        signal: 'CAUTION',
+        weight: '14%',
+        detail: `Extended ${distEma20Pips.toFixed(1)}p below 20 EMA (${p.ema20.toFixed(decimals)}) inside bullish zone`
+      });
+    }
   } else if (p.ema20 >= p.ema50) {
     // Bullish EMA trend stack
     if (p.livePrice >= p.ema20) {
@@ -3745,7 +3841,56 @@ export function evaluateCandleSeriesAndTick(p: {
  * High-Impact Economic News Radar & Volatility Shield:
  * Tracks major central bank announcements, CPI releases, NFP, and bullion fixings in East Africa Time.
  */
+let cachedLiveCalendarEvents: Array<HighImpactEconomicEvent & { timestampMs?: number }> = [];
+let lastCalendarFetchMs = 0;
+
+export async function refreshLiveEconomicCalendar(force = false): Promise<void> {
+  if (typeof fetch === 'undefined' || typeof window === 'undefined') return;
+  const now = Date.now();
+  if (!force && now - lastCalendarFetchMs < 3 * 60 * 1000) return;
+  lastCalendarFetchMs = now;
+  try {
+    const res = await fetch('/api/economic-calendar');
+    if (res.ok) {
+      const payload = (await res.json()) as {
+        source?: string;
+        events?: Array<HighImpactEconomicEvent & { timestampMs?: number }>;
+      };
+      if (Array.isArray(payload.events) && payload.events.length > 0) {
+        cachedLiveCalendarEvents = payload.events;
+      }
+    }
+  } catch {
+    // Silent fallback to recurring EAT session windows
+  }
+}
+
 export function getUpcomingEconomicEvents(): HighImpactEconomicEvent[] {
+  const nowMs = Date.now();
+  if (cachedLiveCalendarEvents.length > 0) {
+    return cachedLiveCalendarEvents.map((ev) => {
+      const diffMins = ev.timestampMs ? Math.round((ev.timestampMs - nowMs) / 60000) : ev.minutesUntil;
+      const status: HighImpactEconomicEvent['status'] =
+        diffMins < -20
+          ? 'PASSED'
+          : diffMins >= -20 && diffMins <= 15
+          ? 'ACTIVE_NOW'
+          : diffMins > 15 && diffMins <= 90
+          ? 'IMMINENT'
+          : 'UPCOMING';
+      return {
+        id: ev.id,
+        currency: ev.currency,
+        name: ev.name,
+        impact: ev.impact,
+        timeEAT: ev.timeEAT,
+        minutesUntil: diffMins,
+        status,
+        tradingDirective: ev.tradingDirective
+      };
+    });
+  }
+
   const now = new Date();
   const nairobiWeekday = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Africa/Nairobi',
@@ -3809,9 +3954,9 @@ export function getUpcomingEconomicEvents(): HighImpactEconomicEvent[] {
       status = 'UPCOMING';
     } else if (diff < -60) {
       status = 'PASSED';
-    } else if (diff >= -60 && diff <= 20) {
+    } else if (diff >= -20 && diff <= 15) {
       status = 'ACTIVE_NOW';
-    } else if (diff > 20 && diff <= 90) {
+    } else if (diff > 15 && diff <= 90) {
       status = 'IMMINENT';
     } else {
       status = 'UPCOMING';
@@ -3907,15 +4052,23 @@ export function runLiveCandleBacktest(params: {
   brokerSpread: number;
   direction?: 'BUY' | 'SELL';
 }): LiveBacktestStats {
-  const { pipMultiplier } = getPairSpecs(params.pair);
+  const { pipMultiplier, isGold, isJpy, isBtc, isEth, isIndex, isOil } = getPairSpecs(params.pair);
   const rawBars = params.candles || [];
-  // Prefer higher-sample H1 structural window (120 bars = 5 days) if active candle window is sparse (< 80 bars)
+  // Test directly on active candle series when >= 45 closed bars exist (e.g. 75 M15 bars = ~19h, 120 H1 bars = 5d)
   const bars =
-    rawBars.length < 80 && params.h1Candles && params.h1Candles.length >= 60
+    rawBars.length >= 45
+      ? rawBars
+      : params.h1Candles && params.h1Candles.length >= 45
       ? params.h1Candles
       : rawBars.length >= 30
       ? rawBars
       : params.h1Candles || rawBars;
+
+  const isIntradayShortTf =
+    rawBars.length >= 45 &&
+    bars === rawBars &&
+    bars.length >= 2 &&
+    Math.abs(bars[1].time - bars[0].time) <= 1800;
 
   if (bars.length < 30) {
     return {
@@ -3939,13 +4092,28 @@ export function runLiveCandleBacktest(params: {
   let totalR = 0;
   let grossWinR = 0;
   let grossLossR = 0;
+  const recentSignals: ChartReplayMarker[] = [];
   const spreadBuffer = params.brokerSpread * 1.25;
+  const minAtrExpansionFloor = isGold
+    ? 22
+    : isBtc
+    ? 104
+    : isEth
+    ? 5.7
+    : isIndex
+    ? 26
+    : isOil
+    ? 15.5
+    : isJpy
+    ? 7.0
+    : 5.2;
 
   let i = 24;
-  while (i <= bars.length - 8) {
+  while (i <= bars.length - 7) {
     const windowBars = bars.slice(0, i + 1);
     const windowCloses = windowBars.map((b) => b.close);
     const ema20 = computeRealEma(windowCloses, 20);
+    const ema20Prev3 = computeRealEma(windowCloses.slice(0, -3), 20);
     const ema50 = computeRealEma(windowCloses, Math.min(50, windowCloses.length));
     const ema50Prev =
       windowCloses.length > 6 ? computeRealEma(windowCloses.slice(0, -6), Math.min(50, windowCloses.length - 6)) : ema50;
@@ -3966,41 +4134,72 @@ export function runLiveCandleBacktest(params: {
       atrCount++;
     }
     const atrPips = Math.max(3, atrCount > 0 ? atrSum / atrCount : params.atrPips ?? 14);
+    if (atrPips < minAtrExpansionFloor) {
+      i += 1;
+      continue;
+    }
+
     const entryBar = bars[i];
     const entryPrice = entryBar.close;
+    const barRange = Math.max(1e-9, entryBar.high - entryBar.low);
+    const bodyRatio = Math.abs(entryBar.close - entryBar.open) / barRange;
+    if (bodyRatio < 0.2) {
+      i += 1;
+      continue;
+    }
 
-    // Statistical Z-Score non-chase filter (last 20 closed bars)
     const zWin = windowCloses.slice(-20);
     const zMean = zWin.reduce((a, b) => a + b, 0) / Math.max(1, zWin.length);
     const zVar = zWin.reduce((a, b) => a + (b - zMean) ** 2, 0) / Math.max(1, zWin.length);
     const zStd = Math.max(1e-9, Math.sqrt(zVar));
     const windowZ = (entryPrice - zMean) / zStd;
+    const distFromEma20Pips = Math.abs(entryPrice - ema20) * pipMultiplier;
+    if (Math.abs(windowZ) > 1.35 || distFromEma20Pips > atrPips * 1.3) {
+      i += 1;
+      continue;
+    }
 
-    // Cross-examine ALL precision filters before taking a historical entry (ZERO lookahead):
-    // 1) EMA20 vs EMA50 + EMA50 slope (HTF proxy) + Closed candle confirmation in trend direction
-    // 2) ADX >= 18.0 & |+DI - -DI| > 2.0 directional agreement (eliminates dead chop whipsaws)
-    // 3) MACD(12,26,9) momentum agreement + RSI non-exhaustion corridor + Z-Score <= 1.45
+    let h1BlockBuy = false;
+    let h1BlockSell = false;
+    if (isIntradayShortTf && params.h1Candles && params.h1Candles.length >= 24) {
+      const h1Prior = params.h1Candles.filter((hb) => hb.time <= entryBar.time);
+      if (h1Prior.length >= 22) {
+        const h1m = computeRealMacd(h1Prior.map((hb) => hb.close));
+        h1BlockBuy = h1m.histogram < 0 && h1m.histogram <= h1m.prevHistogram;
+        h1BlockSell = h1m.histogram > 0 && h1m.histogram >= h1m.prevHistogram;
+      }
+    }
+
+    const macdBullCont =
+      macd.histogram > 0 || (macd.macdLine > 0 && macd.histogram > macd.prevHistogram);
+    const macdBearCont =
+      macd.histogram < 0 || (macd.macdLine < 0 && macd.histogram < macd.prevHistogram);
+
     const isBullQualified =
       ema20 > ema50 &&
+      ema20 >= ema20Prev3 &&
       ema50 >= ema50Prev &&
       entryBar.close > ema20 &&
-      entryBar.close >= entryBar.open &&
-      adx.adx >= 18.0 &&
-      adx.diSpread > 2.0 &&
-      macd.bias === 'BULLISH' &&
+      entryBar.close > entryBar.open &&
+      adx.adx >= 18.5 &&
+      adx.diSpread >= 2.2 &&
+      macdBullCont &&
       rsiVal >= 51 &&
-      rsiVal <= 67;
+      rsiVal <= 66 &&
+      !h1BlockBuy;
 
     const isBearQualified =
       ema20 < ema50 &&
+      ema20 <= ema20Prev3 &&
       ema50 <= ema50Prev &&
       entryBar.close < ema20 &&
-      entryBar.close <= entryBar.open &&
-      adx.adx >= 18.0 &&
-      adx.diSpread < -2.0 &&
-      macd.bias === 'BEARISH' &&
-      rsiVal >= 33 &&
-      rsiVal <= 49;
+      entryBar.close < entryBar.open &&
+      adx.adx >= 18.5 &&
+      adx.diSpread <= -2.2 &&
+      macdBearCont &&
+      rsiVal >= 34 &&
+      rsiVal <= 49 &&
+      !h1BlockSell;
 
     const candidateSide: 'BUY' | 'SELL' | null = isBullQualified
       ? 'BUY'
@@ -4013,13 +4212,6 @@ export function runLiveCandleBacktest(params: {
       continue;
     }
 
-    const distFromEma20Pips = Math.abs(entryPrice - ema20) * pipMultiplier;
-    // Enter only inside 20 EMA value corridor & Z-Score <= 1.45 (avoid chasing overextended spikes)
-    if (Math.abs(windowZ) > 1.45 || distFromEma20Pips > atrPips * 1.4) {
-      i += 1;
-      continue;
-    }
-
     const recentSlice = bars.slice(Math.max(0, i - 8), i + 1);
     const swingLow = Math.min(...recentSlice.map((b) => b.low));
     const swingHigh = Math.max(...recentSlice.map((b) => b.high));
@@ -4028,11 +4220,10 @@ export function runLiveCandleBacktest(params: {
         ? Math.max(0, (entryPrice - swingLow) * pipMultiplier)
         : Math.max(0, (swingHigh - entryPrice) * pipMultiplier);
 
-    // Swing-protected WIDE_TREND geometry: 1.8x ATR SL clearance + 1.35R TP1 (50% BE) + 2.25R TP2
-    const slPips = Math.max(atrPips * 1.8, Math.min(atrPips * 2.8, swingDistPips + atrPips * 0.45)) + spreadBuffer;
+    const slPips = Math.max(atrPips * 2.0, Math.min(atrPips * 2.8, swingDistPips + atrPips * 0.45)) + spreadBuffer;
     const slDist = slPips / pipMultiplier;
-    const tp1Dist = (slPips * 1.35) / pipMultiplier;
-    const tp2Dist = (slPips * 2.25) / pipMultiplier;
+    const tp1Dist = (slPips * 1.1) / pipMultiplier;
+    const tp2Dist = (slPips * 2.05) / pipMultiplier;
 
     const slPrice = candidateSide === 'BUY' ? entryPrice - slDist : entryPrice + slDist;
     const tp1Price = candidateSide === 'BUY' ? entryPrice + tp1Dist : entryPrice - tp1Dist;
@@ -4041,6 +4232,7 @@ export function runLiveCandleBacktest(params: {
 
     let hitTp1 = false;
     let tradeR = 0;
+    let outcomeTag: ChartReplayMarker['outcome'] = 'OPEN';
     let closedAtBar = i + 1;
     const maxHoldBars = 30;
 
@@ -4049,12 +4241,13 @@ export function runLiveCandleBacktest(params: {
       closedAtBar = j;
       if (candidateSide === 'BUY') {
         const activeSl = hitTp1 ? beLockPrice : slPrice;
-        // Conservative tie-breaker: check SL before TP if both touched in same candle
         if (f.low <= activeSl) {
           if (hitTp1) {
-            tradeR = 0.675 + 0.025; // 50% closed at +1.35R, 50% stopped at +0.05R BE lock
+            tradeR = 0.55 + 0.025;
+            outcomeTag = 'TP1_BE_SAVE';
           } else {
             tradeR = -1.0;
+            outcomeTag = 'SL_LOSS';
           }
           break;
         }
@@ -4062,16 +4255,19 @@ export function runLiveCandleBacktest(params: {
           hitTp1 = true;
         }
         if (f.high >= tp2Price) {
-          tradeR = 0.675 + 1.125; // 50% at +1.35R + 50% at +2.25R = +1.80R
+          tradeR = 0.55 + 1.025;
+          outcomeTag = 'TP2_WIN';
           break;
         }
       } else {
         const activeSl = hitTp1 ? beLockPrice : slPrice;
         if (f.high >= activeSl) {
           if (hitTp1) {
-            tradeR = 0.675 + 0.025;
+            tradeR = 0.55 + 0.025;
+            outcomeTag = 'TP1_BE_SAVE';
           } else {
             tradeR = -1.0;
+            outcomeTag = 'SL_LOSS';
           }
           break;
         }
@@ -4079,29 +4275,39 @@ export function runLiveCandleBacktest(params: {
           hitTp1 = true;
         }
         if (f.low <= tp2Price) {
-          tradeR = 0.675 + 1.125;
+          tradeR = 0.55 + 1.025;
+          outcomeTag = 'TP2_WIN';
           break;
         }
       }
       if (j === Math.min(bars.length - 1, i + maxHoldBars)) {
         if (hitTp1) {
-          tradeR = 0.675;
+          tradeR = 0.55;
+          outcomeTag = 'TP1_BE_SAVE';
         } else {
           const markR =
             candidateSide === 'BUY'
               ? (f.close - entryPrice) / Math.max(0.00001, slDist)
               : (entryPrice - f.close) / Math.max(0.00001, slDist);
           tradeR = Math.max(-1.0, Math.min(1.2, markR));
+          outcomeTag = tradeR > 0 ? 'TP1_BE_SAVE' : 'SL_LOSS';
         }
       }
     }
 
     sampleTrades++;
     totalR += tradeR;
+    recentSignals.push({
+      time: entryBar.time,
+      price: entryPrice,
+      direction: candidateSide,
+      outcome: outcomeTag,
+      rMultiple: Number(tradeR.toFixed(2))
+    });
     if (tradeR > 0) {
       grossWinR += tradeR;
       if (hitTp1) tp1BreakevenWins++;
-      if (tradeR >= 1.65) fullTp2Wins++;
+      if (tradeR >= 1.45) fullTp2Wins++;
     } else {
       grossLossR += Math.abs(tradeR);
       losses++;
@@ -4121,7 +4327,8 @@ export function runLiveCandleBacktest(params: {
       profitFactor: 0,
       netExpectancyR: 0,
       verdictLabel: 'LOW SAMPLE / CHOP',
-      summary: `Recent ${bars.length} closed candles on ${params.pair} failed strict ADX>=18 + MACD + Z<=1.45 + Closed-Candle alignment — precision filter rightly stayed aside.`
+      summary: `Recent ${bars.length} closed candles on ${params.pair} failed strict ADX>=18.5 + MACD + EMA20 Slope + Min-ATR expansion — precision filter rightly stayed aside.`,
+      recentSignals: []
     };
   }
 
@@ -4131,7 +4338,7 @@ export function runLiveCandleBacktest(params: {
     grossLossR > 0 ? Number((grossWinR / grossLossR).toFixed(2)) : Number((grossWinR > 0 ? 3.5 : 1.0).toFixed(2));
   const netExpectancyR = Number((totalR / sampleTrades).toFixed(2));
   const verdictLabel: LiveBacktestStats['verdictLabel'] =
-    netExpectancyR >= 0.35 && profitFactor >= 1.4
+    netExpectancyR >= 0.3 && profitFactor >= 1.4
       ? 'PROVEN POSITIVE EDGE'
       : netExpectancyR > 0
       ? 'MODERATE EDGE'
@@ -4147,7 +4354,8 @@ export function runLiveCandleBacktest(params: {
     profitFactor,
     netExpectancyR,
     verdictLabel,
-    summary: `Walk-forward precision test (${bars.length} candles, 1.8x ATR SL / 1.35R TP1 / 2.25R TP2): ${sampleTrades} ADX/MACD/Z-Score setups (${tp1WinRatePct}% positive/TP1 rate, ${losses} SL losses, ${profitFactor} PF, ${netExpectancyR >= 0 ? '+' : ''}${netExpectancyR}R avg expectancy).`
+    summary: `Walk-forward precision test (${bars.length} candles, 2.0x ATR SL / 1.10R TP1 / 2.05R TP2): ${sampleTrades} ADX/MACD/EMA-Slope setups (${tp1WinRatePct}% positive/TP1 rate, ${losses} SL losses, ${profitFactor} PF, ${netExpectancyR >= 0 ? '+' : ''}${netExpectancyR}R avg expectancy).`,
+    recentSignals: recentSignals.slice(-12)
   };
 }
 
@@ -4322,12 +4530,30 @@ export function computeRealChartTradeParams(p: {
 
   // Derive MACD, ADX, Candlestick Pattern & Pin/Sweep signals consistently with evaluateCandleSeriesAndTick
   const derivedCloses = effectiveCandles && effectiveCandles.length >= 18 ? effectiveCandles.map((c) => c.close) : null;
-  const derivedMacd =
-    p.macdBias !== undefined && p.macdHistogram !== undefined
-      ? { bias: p.macdBias, histogram: p.macdHistogram }
-      : derivedCloses
-      ? computeRealMacd(derivedCloses)
-      : { bias: (p.ema20 ?? p.price) >= (p.ema50 ?? p.price) ? ('BULLISH' as const) : ('BEARISH' as const), histogram: 0 };
+  const computedMacdFull = derivedCloses ? computeRealMacd(derivedCloses) : null;
+  const derivedMacd = computedMacdFull
+    ? {
+        ...computedMacdFull,
+        bias: p.macdBias ?? computedMacdFull.bias,
+        histogram: p.macdHistogram ?? computedMacdFull.histogram
+      }
+    : p.macdBias !== undefined && p.macdHistogram !== undefined
+    ? {
+        macdLine: p.macdHistogram,
+        signalLine: 0,
+        histogram: p.macdHistogram,
+        prevHistogram: p.macdHistogram,
+        histSlope: 'FLAT' as const,
+        bias: p.macdBias
+      }
+    : {
+        macdLine: 0,
+        signalLine: 0,
+        histogram: 0,
+        prevHistogram: 0,
+        histSlope: 'FLAT' as const,
+        bias: (p.ema20 ?? p.price) >= (p.ema50 ?? p.price) ? ('BULLISH' as const) : ('BEARISH' as const)
+      };
   const adxStats =
     effectiveCandles && effectiveCandles.length >= 16
       ? computeRealAdx(effectiveCandles, 14)
@@ -4431,14 +4657,14 @@ export function computeRealChartTradeParams(p: {
     ? Math.max(minSlFloor, Math.min(atrEnvelopeMax, Math.max(hardSlCapPips, baseSlPips * 2.2, effectiveAtr * 2.65 + spreadBuffer)))
     : Math.max(minSlFloor, Math.min(atrEnvelopeMax, Math.max(hardSlCapPips, effectiveAtr * 2.65 + spreadBuffer)));
 
-  // Proven WIDE_TREND SL clearance (1.75x ATR + spread floor up to swing protection) to prevent intraday wicks shaking out winning trends
+  // Proven WIDE_TREND SL clearance (1.95x ATR + spread floor up to swing protection) to prevent intraday wicks shaking out winning trends
   const rawTargetSlPips =
     rawSwingDistPips > 0
       ? Math.max(
-          effectiveAtr * 1.75 + spreadBuffer,
+          effectiveAtr * 1.95 + spreadBuffer,
           Math.min(rawSwingDistPips + sweepShieldPips + spreadBuffer, maxStructuralSlCap)
         )
-      : Math.min(effectiveAtr * 1.85 + spreadBuffer, maxStructuralSlCap);
+      : Math.min(effectiveAtr * 2.0 + spreadBuffer, maxStructuralSlCap);
 
   const structuralSlPips = Number(
     Math.min(maxStructuralSlCap, Math.max(minSlFloor, rawTargetSlPips)).toFixed(1)
@@ -4482,11 +4708,11 @@ export function computeRealChartTradeParams(p: {
     baseTp3Pips = Number((baseTp2Pips * 1.35).toFixed(1));
   } else {
     if (riskPlan && riskPlan.syncSlTpWithRisk) {
-      baseTp1Pips = Number((baseSlPips * 1.35).toFixed(1));
-      baseTp2Pips = Number((baseSlPips * 2.25).toFixed(1));
+      baseTp1Pips = Number((baseSlPips * 1.12).toFixed(1));
+      baseTp2Pips = Number((baseSlPips * 2.08).toFixed(1));
     } else {
-      baseTp1Pips = Number(Math.max(baseSlPips * 1.35, baseTp1Pips).toFixed(1));
-      baseTp2Pips = Number(Math.max(baseSlPips * 2.25, baseTp2Pips).toFixed(1));
+      baseTp1Pips = Number(Math.max(baseSlPips * 1.12, baseTp1Pips).toFixed(1));
+      baseTp2Pips = Number(Math.max(baseSlPips * 2.08, baseTp2Pips).toFixed(1));
     }
     baseTp3Pips = Number((baseTp2Pips * macroExpansionMultiplier * rsiHeadroomFactor).toFixed(1));
   }
@@ -4890,8 +5116,25 @@ export function computeRealChartTradeParams(p: {
   // Minimum-Loss Precision Guards:
   // 1) Spread-to-ATR Efficiency Shield (prevents entering when spread consumes >28% of a candle)
   const spreadToAtrRatio = brokerSpread / Math.max(1, effectiveAtr);
-  const spreadEfficient = spreadToAtrRatio <= 0.28;
+  const spreadSlRatioPct = Number(((brokerSpread / Math.max(1, actualSlPips)) * 100).toFixed(1));
+  const spreadSafetyBlocked = spreadSlRatioPct > 22.0;
+  const spreadEfficient = spreadToAtrRatio <= 0.28 && !spreadSafetyBlocked;
   const spreadEfficiencyPct = Number(Math.max(0, Math.min(100, (1 - spreadToAtrRatio) * 100)).toFixed(1));
+
+  // Real-time High-Impact Economic Calendar Blackout Check (-15m to +15m around release)
+  const quoteCurrency = p.targetPair.split('/')[1] || '';
+  const matchingActiveNews = allEconomicEvents.find(
+    (ev) =>
+      ev.status === 'ACTIVE_NOW' &&
+      (ev.currency === p.targetPair ||
+        ev.currency === baseCurrency ||
+        ev.currency === quoteCurrency ||
+        ((isGold || isIndex || isBtc || isEth || isOil) && ev.currency === 'USD'))
+  );
+  const newsBlackoutActive = Boolean(matchingActiveNews && cachedLiveCalendarEvents.length > 0);
+  const newsBlackoutReason = newsBlackoutActive
+    ? `NEWS BLACKOUT (${matchingActiveNews!.currency} · ${matchingActiveNews!.name} @ ${matchingActiveNews!.timeEAT}): Stand aside until +15m post-release spread stabilizes.`
+    : undefined;
 
   // 2) Floor Pivot Brick-Wall Headroom Guard (blocks chasing directly under R1 on BUY or above S1 on SELL)
   const pivotObstacleDistPips = isBuy
@@ -4960,12 +5203,51 @@ export function computeRealChartTradeParams(p: {
     return h4Ema10 > h4Ema20 && p.price > h4Ema10;
   })();
 
-  const diAligned = isBuy ? adxStats.diSpread >= 1.8 : adxStats.diSpread <= -1.8;
-  const macdAligned = isBuy ? derivedMacd.bias === 'BULLISH' : derivedMacd.bias === 'BEARISH';
+  const diAligned = isBuy ? adxStats.diSpread >= 2.0 : adxStats.diSpread <= -2.0;
+  const macdAligned = isBuy
+    ? derivedMacd.bias === 'BULLISH' || (derivedMacd.macdLine > 0 && derivedMacd.histogram > derivedMacd.prevHistogram)
+    : derivedMacd.bias === 'BEARISH' || (derivedMacd.macdLine < 0 && derivedMacd.histogram < derivedMacd.prevHistogram);
+
+  // MACD Histogram Momentum Reversal & H1 Anti-Counter Guard (stops selling into turning bullish turns & vice versa)
+  const h1Macd =
+    (p.targetTf === 'M5' || p.targetTf === 'M15') && h1Safe.length >= 22
+      ? computeRealMacd(h1Safe.map((c) => c.close))
+      : null;
+  const macdCounterTurn = isBuy
+    ? (derivedMacd.histogram < 0 && derivedMacd.histSlope === 'FALLING' && p.price < ema20Val) ||
+      Boolean(h1Macd && h1Macd.histogram < 0 && h1Macd.histSlope === 'FALLING')
+    : (derivedMacd.histogram > 0 && derivedMacd.histSlope === 'RISING') ||
+      Boolean(h1Macd && h1Macd.histogram > 0 && h1Macd.histSlope === 'RISING');
+
+  // 20-EMA Slope Guard (last 3 closed bars): block READY BUY if 20 EMA is still curving down (and vice versa)
+  const ema20Prev3Val =
+    derivedCloses && derivedCloses.length >= 24
+      ? computeRealEma(derivedCloses.slice(0, -3), 20)
+      : ema20Val;
+  const ema20SlopeAligned = isBuy ? ema20Val >= ema20Prev3Val : ema20Val <= ema20Prev3Val;
+
+  // Minimum Volatility Expansion Floor on intraday M5/M15 (blocks dead pre-London Asian micro-ATR squeezes)
+  const minIntradayAtr = isGold
+    ? 22
+    : isBtc
+    ? 104
+    : isEth
+    ? 5.7
+    : isIndex
+    ? 26
+    : isOil
+    ? 15.5
+    : isJpy
+    ? 7.0
+    : 5.2;
+  const deadLowAtrBox =
+    (p.targetTf === 'M5' || p.targetTf === 'M15') && effectiveAtr < minIntradayAtr;
+
   const weakTrendOrConflict =
     derivedAdx < 18.5 ||
     !diAligned ||
     (!macdAligned && derivedMacd.bias !== 'FLAT') ||
+    macdCounterTurn ||
     !h1AlignedWithOrder ||
     h4ConflictDetected;
 
@@ -4985,17 +5267,56 @@ export function computeRealChartTradeParams(p: {
     ema20DistAtr > 0.72 || Math.abs(quantMetricsBase.zScore) > 1.15;
 
   const livePriceOnWrongSideOfEma20 = isBuy ? p.price < ema20Val : p.price > ema20Val;
-  const rsiExhausted = isBuy ? rsiVal >= 67 : rsiVal <= 33;
-  const rsiExtremeTrap = (isBuy ? rsiVal >= 69 : rsiVal <= 31) && Math.abs(quantMetricsBase.zScore) >= 1.5;
+  const rsiExhausted = isBuy ? rsiVal >= 66.5 : rsiVal <= 33.5;
+
+  // Distinguish genuine trend expansion (strong ADX + H1/EMA/MACD/DI aligned -> WAIT_PULLBACK) vs low-conviction RSI extreme trap (-> NO_TRADE_CHOP)
+  const rawRsiExtreme =
+    (isBuy ? rsiVal >= 70.5 : rsiVal <= 29.5) ||
+    ((isBuy ? rsiVal >= 68 : rsiVal <= 32) && Math.abs(quantMetricsBase.zScore) >= 1.35);
+  const cleanTrendOverride =
+    derivedAdx >= 22.0 &&
+    diAligned &&
+    macdAligned &&
+    !macdCounterTurn &&
+    h1AlignedWithOrder &&
+    !h4ConflictDetected &&
+    !bosConflictDetected &&
+    scoreMargin >= 24;
+  const rsiExtremeTrap = rawRsiExtreme && !cleanTrendOverride;
+
+  // Anti-Knife-Catching Momentum Rollover Guard: catches topping/bottoming rollovers BEFORE they dump through 20 EMA
+  const macdHistWeakening = isBuy
+    ? derivedMacd.histogram < derivedMacd.prevHistogram && (derivedMacd.histogram <= 0 || rsiVal >= 58 || closedCandleOpposing)
+    : derivedMacd.histogram > derivedMacd.prevHistogram && (derivedMacd.histogram >= 0 || rsiVal <= 42 || closedCandleOpposing);
+  const lowerHighRollingTop = (() => {
+    if (!effectiveCandles || effectiveCandles.length < 6) return false;
+    const closed = effectiveCandles.slice(-8, -1);
+    if (closed.length < 4) return false;
+    const peakHigh = Math.max(...closed.map((c) => c.high));
+    const troughLow = Math.min(...closed.map((c) => c.low));
+    const lastTwo = closed.slice(-2);
+    if (isBuy) {
+      return Math.max(...lastTwo.map((c) => c.high)) < peakHigh - (effectiveAtr * 0.25) / pipMultiplier && closedCandleOpposing;
+    }
+    return Math.min(...lastTwo.map((c) => c.low)) > troughLow + (effectiveAtr * 0.25) / pipMultiplier && closedCandleOpposing;
+  })();
+  const momentumRolloverTrap = macdHistWeakening && lowerHighRollingTop;
+
+  // Strong 5+ aligned factors on high directional margin (>= 26%) avoids falsely sidelining clean trends where Factor 5 is non-directional CAUTION
+  const effectiveFactorMin =
+    cleanTrendOverride && scoreMargin >= 28 ? 5 : 6;
+
   const offPeakSessionCaution = pairTiming.windowStatusCode === 'OPENING_SOON' || !pairTiming.isFavorableTime;
   const hasLowEdgeOrChop =
     bosConflictDetected ||
     !spreadEfficient ||
+    deadLowAtrBox ||
     allFactorEval.isFlatEmaChop ||
     scoreMargin < 14 ||
-    allFactorEval.alignedFactorsCount < 6 ||
+    allFactorEval.alignedFactorsCount < effectiveFactorMin ||
     weakTrendOrConflict ||
     rsiExtremeTrap ||
+    momentumRolloverTrap ||
     backtestNegativeRegime;
 
   let executionReadiness: ComputedTradeParams['executionReadiness'] = 'READY_ENTER';
@@ -5004,29 +5325,42 @@ export function computeRealChartTradeParams(p: {
   if (pairTiming.windowStatusCode === 'CLOSED_WAIT') {
     executionReadiness = 'NO_TRADE_CLOSED';
     executionReadinessReason = `Market closed (${pairTiming.currentWindowName}) — spreads spike at open.`;
+  } else if (newsBlackoutActive && newsBlackoutReason) {
+    executionReadiness = 'NO_TRADE_CHOP';
+    executionReadinessReason = newsBlackoutReason;
   } else if (bosConflictDetected) {
     executionReadiness = 'NO_TRADE_CHOP';
     executionReadinessReason =
       p.bosAnalysis?.bosVetoReason ||
       `Opposing Break of Structure (${p.bosAnalysis?.bosDirection.replace('_', ' ')}) blocks ${isBuy ? 'BUY' : 'SELL'} to protect against structural reversal.`;
+  } else if (deadLowAtrBox) {
+    executionReadiness = 'NO_TRADE_CHOP';
+    executionReadinessReason = `Dead low-ATR accumulation box (${p.targetTf} ATR ${effectiveAtr.toFixed(1)}p < ${minIntradayAtr}p min expansion) — London/NY open sweeps tight ranges, stand aside.`;
   } else if (!spreadEfficient) {
     executionReadiness = 'NO_TRADE_CHOP';
-    executionReadinessReason = `Spread bleed guard: ${brokerSpread}p spread consumes ${(spreadToAtrRatio * 100).toFixed(0)}% of ${p.targetTf} ATR (${effectiveAtr.toFixed(1)}p) — wait higher volatility session.`;
+    executionReadinessReason = spreadSafetyBlocked
+      ? `Spread-to-SL guard: ${brokerSpread}p spread is ${spreadSlRatioPct}% of your ${actualSlPips}p Stop Loss (max 22%) — widen SL or choose tighter spread broker.`
+      : `Spread bleed guard: ${brokerSpread}p spread consumes ${(spreadToAtrRatio * 100).toFixed(0)}% of ${p.targetTf} ATR (${effectiveAtr.toFixed(1)}p) — wait higher volatility session.`;
   } else if (
     allFactorEval.isFlatEmaChop ||
     scoreMargin < 14 ||
-    allFactorEval.alignedFactorsCount < 6 ||
+    allFactorEval.alignedFactorsCount < effectiveFactorMin ||
     weakTrendOrConflict ||
     rsiExtremeTrap ||
+    momentumRolloverTrap ||
     backtestNegativeRegime
   ) {
     executionReadiness = 'NO_TRADE_CHOP';
     executionReadinessReason = backtestNegativeRegime
       ? `Walk-forward regime shield: recent ${p.targetTf} candles show negative expectancy (${liveBacktest.netExpectancyR}R across ${liveBacktest.sampleTrades} trades) — stand aside until clean directional trend resumes.`
+      : momentumRolloverTrap
+      ? `Rollover / knife-catch shield: ${isBuy ? 'lower high + fading MACD histogram' : 'higher low + fading bearish MACD'} detected — do NOT stage passive Limit into a potential reversal.`
+      : macdCounterTurn
+      ? `MACD momentum reversal guard: histogram (${derivedMacd.histSlope}) or H1 momentum is actively turning against ${isBuy ? 'BUY' : 'SELL'} — stand aside.`
       : h4ConflictDetected
       ? `H4 macro structure opposes ${p.targetTf} ${isBuy ? 'BUY' : 'SELL'} (spot trapped below/above H4 10/20 EMA) — wait H4 alignment.`
       : rsiExtremeTrap
-      ? `Extreme RSI exhaustion trap (${rsiVal.toFixed(1)} @ Z=${quantMetricsBase.zScore}σ) — bounce risk high, stand aside.`
+      ? `Extreme RSI exhaustion trap (${rsiVal.toFixed(1)} @ Z=${quantMetricsBase.zScore}σ) — reversal risk high, stand aside.`
       : allFactorEval.isFlatEmaChop || derivedAdx < 18.5
       ? `Low-ADX chop compression (ADX ${derivedAdx.toFixed(1)} < 18.5 · RSI ${rsiVal.toFixed(1)}) — sideways trap, wait directional breakout.`
       : !h1AlignedWithOrder
@@ -5038,6 +5372,7 @@ export function computeRealChartTradeParams(p: {
     offPeakSessionCaution ||
     rsiExhausted ||
     h1RsiExhausted ||
+    !ema20SlopeAligned ||
     derivedAdx < 20.5 ||
     closedCandleOpposing ||
     livePriceOnWrongSideOfEma20 ||
@@ -5050,25 +5385,27 @@ export function computeRealChartTradeParams(p: {
   ) {
     executionReadiness = 'WAIT_PULLBACK';
     executionReadinessReason = offPeakSessionCaution
-      ? `${pairTiming.bannerHeadline} — stage Sniper Limit @ ${advisoryEntryPrice} or wait peak liquidity.`
+      ? `${pairTiming.bannerHeadline} — wait pullback bounce confirmation near ${advisoryEntryPrice} in active window.`
       : h1RsiExhausted
-      ? `1H RSI (${h1RsiVal.toFixed(1)}) is already ${isBuy ? 'overbought (>= 68)' : 'oversold (<= 32)'} — do not chase ${p.targetTf} at extremes; stage Sniper Limit @ ${advisoryEntryPrice}.`
+      ? `1H RSI (${h1RsiVal.toFixed(1)}) is already ${isBuy ? 'overbought (>= 68)' : 'oversold (<= 32)'} — do not chase ${p.targetTf}; confirm bounce close near ${advisoryEntryPrice}.`
       : rsiExhausted
-      ? `RSI ${rsiVal.toFixed(1)} is ${isBuy ? 'overbought (>= 67)' : 'oversold (<= 33)'} — do not chase exhaustion; stage Sniper Limit @ ${advisoryEntryPrice} on 20 EMA retest.`
+      ? `RSI ${rsiVal.toFixed(1)} is ${isBuy ? 'overbought (>= 66.5)' : 'oversold (<= 33.5)'} — trend active (ADX ${derivedAdx.toFixed(1)}), do NOT chase; wait retest bounce close near ${advisoryEntryPrice}.`
+      : !ema20SlopeAligned
+      ? `20 EMA slope has not curved into ${isBuy ? 'BUY' : 'SELL'} yet — confirm candle bounce close near ${advisoryEntryPrice}.`
       : derivedAdx < 20.5
-      ? `Moderate ADX (${derivedAdx.toFixed(1)} < 20.5) — wait pullback Sniper Limit @ ${advisoryEntryPrice} rather than market execution.`
+      ? `Moderate ADX (${derivedAdx.toFixed(1)} < 20.5) — wait pullback confirmation near ${advisoryEntryPrice} rather than market execution.`
       : closedCandleOpposing
-      ? `Latest closed candle closed ${isBuy ? 'bearish against BUY' : 'bullish against SELL'} without directional pin rejection — stage Sniper Limit @ ${advisoryEntryPrice} or wait confirmed close.`
+      ? `Latest closed candle closed ${isBuy ? 'bearish against BUY' : 'bullish against SELL'} without directional pin rejection — wait confirmed bounce close near ${advisoryEntryPrice}.`
       : livePriceOnWrongSideOfEma20
-      ? `Price (${anchoredEntry}) is currently on wrong side of 20 EMA (${ema20Val.toFixed(decimals)}) — wait closed candle reclaim or Sniper Limit @ ${advisoryEntryPrice}.`
+      ? `Price (${anchoredEntry}) is currently on wrong side of 20 EMA (${ema20Val.toFixed(decimals)}) — wait closed candle reclaim or rejection near ${advisoryEntryPrice}.`
       : p.opposingCandleWarning
       ? p.opposingCandleWarning
       : climaxWickAgainstSide
-      ? `Climax rejection wick detected on latest closed candle — stage Sniper Limit @ ${advisoryEntryPrice} instead of buying/selling into the wick.`
+      ? `Climax rejection wick detected on latest closed candle — wait confirmed retest near ${advisoryEntryPrice} instead of entering into the wick.`
       : pivotWallBlocked
-      ? `Floor Pivot barrier (${isBuy ? `R1 ${quantMetricsBase.pivotLevels.r1}` : `S1 ${quantMetricsBase.pivotLevels.s1}`}) is only ${pivotObstacleDistPips.toFixed(1)}p away — stage Sniper Limit @ ${advisoryEntryPrice} for clean R:R headroom.`
+      ? `Floor Pivot barrier (${isBuy ? `R1 ${quantMetricsBase.pivotLevels.r1}` : `S1 ${quantMetricsBase.pivotLevels.s1}`}) is only ${pivotObstacleDistPips.toFixed(1)}p away — wait pullback near ${advisoryEntryPrice} for clean R:R headroom.`
       : allFactorEval.isExtendedZone || stretchedFromValueCorridor
-      ? `Price stretched ${ema20DistAtr.toFixed(2)}x ATR (Z=${quantMetricsBase.zScore}σ) from 20 EMA — stage Sniper Limit @ ${advisoryEntryPrice} rather than chasing.`
+      ? `Price stretched ${ema20DistAtr.toFixed(2)}x ATR (Z=${quantMetricsBase.zScore}σ) from 20 EMA — do NOT chase; wait bounce close near ${advisoryEntryPrice}.`
       : `Candle ATR (${effectiveAtr.toFixed(1)}p) exceeds your ${actualSlPips}p SL — wait tight retest or increase SL budget.`;
   }
 
@@ -5112,15 +5449,20 @@ export function computeRealChartTradeParams(p: {
 
   const checksPassedCount = preflightChecks.filter((c) => c.passed).length;
   const totalCheckCount = preflightChecks.length || 10;
+  const strictMacdBiasMatch = isBuy ? derivedMacd.bias === 'BULLISH' : derivedMacd.bias === 'BEARISH';
   const strictHighConviction =
     executionReadiness === 'READY_ENTER' &&
-    allFactorEval.alignedFactorsCount >= 6 &&
+    allFactorEval.alignedFactorsCount >= effectiveFactorMin &&
     scoreMargin >= 16 &&
     derivedAdx >= 20.5 &&
     diAligned &&
     macdAligned &&
+    strictMacdBiasMatch &&
+    !macdCounterTurn &&
+    ema20SlopeAligned &&
     !rsiExhausted &&
     !h1RsiExhausted &&
+    h1AlignedWithOrder &&
     !h4ConflictDetected &&
     !closedCandleOpposing &&
     !livePriceOnWrongSideOfEma20 &&
@@ -5129,7 +5471,9 @@ export function computeRealChartTradeParams(p: {
     pivotWallClear &&
     climaxWickSafe &&
     spreadEfficient &&
+    !deadLowAtrBox &&
     !bosConflictDetected &&
+    !momentumRolloverTrap &&
     rrNumeric >= 1.75 &&
     checksPassedCount >= 8;
 
@@ -5138,16 +5482,19 @@ export function computeRealChartTradeParams(p: {
     !hasLowEdgeOrChop &&
     (executionReadiness === 'WAIT_PULLBACK' || executionReadiness === 'READY_ENTER') &&
     spreadEfficient &&
+    !deadLowAtrBox &&
     !bosConflictDetected &&
     !backtestNegativeRegime &&
     h1AlignedWithOrder &&
     !h4ConflictDetected &&
     !rsiExtremeTrap &&
+    !momentumRolloverTrap &&
     diAligned &&
     macdAligned &&
+    !macdCounterTurn &&
     derivedAdx >= 18.5 &&
     scoreMargin >= 14 &&
-    allFactorEval.alignedFactorsCount >= 6 &&
+    allFactorEval.alignedFactorsCount >= effectiveFactorMin &&
     checksPassedCount >= 7;
 
   // Lock executionReadiness strictly to verified roboticVerdict so UI readiness and robotic verdict never contradict
@@ -5247,6 +5594,49 @@ export function computeRealChartTradeParams(p: {
       ? `DIRECTIONAL EDGE LOCKED (${isBuy ? 'BUY' : 'SELL'}), MINIMUM-LOSS LIMIT STAGE: Stage Sniper Limit @ ${advisoryEntryPrice} (trims ${advisoryDiscountPips}p / ${drawdownSavingsPct}% potential drawdown) instead of chasing ${anchoredEntry}.`
       : `PRECISION SAFETY BLOCK (${executionReadinessReason}): Algorithmic gate blocks execution — wait for higher-probability alignment.`;
 
+  // Projected Conditional CHoCH Structural Reversal Plan (nearest Lower High / Higher Low trigger + post-break retest E.P.)
+  const projectedChochReversal = (() => {
+    const revIsBuy = !isBuy;
+    const recentClosed = (effectiveCandles || []).slice(-10, -1);
+    const localHigh =
+      recentClosed.length > 0
+        ? Math.max(...recentClosed.map((c) => c.high))
+        : p.bosAnalysis?.lastSwingHigh ?? p.price + slOffset * 0.7;
+    const localLow =
+      recentClosed.length > 0
+        ? Math.min(...recentClosed.map((c) => c.low))
+        : p.bosAnalysis?.lastSwingLow ?? p.price - slOffset * 0.7;
+    const structHigh = p.bosAnalysis?.lastSwingHigh ?? localHigh;
+    const structLow = p.bosAnalysis?.lastSwingLow ?? localLow;
+    const candidateTrig = revIsBuy
+      ? structHigh > p.price + minGapPrice * 0.35
+        ? Math.min(structHigh, Math.max(localHigh, ema50Val))
+        : Math.max(localHigh, ema50Val)
+      : structLow < p.price - minGapPrice * 0.35
+      ? Math.max(structLow, Math.min(localLow, ema50Val))
+      : Math.min(localLow, ema50Val);
+    const trig = Number(
+      (revIsBuy ? Math.max(candidateTrig, p.price + minGapPrice * 0.4) : Math.min(candidateTrig, p.price - minGapPrice * 0.4)).toFixed(decimals)
+    );
+    const revEp = Number(
+      (revIsBuy ? trig - minGapPrice * 0.15 : trig + minGapPrice * 0.15).toFixed(decimals)
+    );
+    const revSl = Number((revIsBuy ? revEp - slOffset : revEp + slOffset).toFixed(decimals));
+    const revTp1 = Number((revIsBuy ? revEp + tp1Offset : revEp - tp1Offset).toFixed(decimals));
+    const revTp2 = Number((revIsBuy ? revEp + tp2Offset : revEp - tp2Offset).toFixed(decimals));
+    return {
+      conditionalDirection: revIsBuy ? ('BUY' as const) : ('SELL' as const),
+      triggerLevel: trig,
+      retestEntryPrice: revEp,
+      stopLoss: revSl,
+      tp1: revTp1,
+      tp2: revTp2,
+      ruleSummary: revIsBuy
+        ? `Do NOT guess BUY inside downtrend. Wait for closed candle ABOVE Swing High ${trig.toFixed(decimals)} (BULLISH CHoCH), then stage BUY LIMIT retest @ ${revEp.toFixed(decimals)}.`
+        : `Do NOT guess SELL inside uptrend. Wait for closed candle BELOW Swing Low ${trig.toFixed(decimals)} (BEARISH CHoCH), then stage SELL LIMIT retest @ ${revEp.toFixed(decimals)}.`
+    };
+  })();
+
   const institutionalTelemetry: InstitutionalTelemetry = {
     ...quantMetricsBase,
     roboticVerdict,
@@ -5257,7 +5647,8 @@ export function computeRealChartTradeParams(p: {
     drawdownSavingsPct,
     pivotWallClear,
     climaxWickSafe,
-    spreadEfficiencyPct
+    spreadEfficiencyPct,
+    projectedChochReversal
   };
 
   const plainEnglishGuide = buildPlainEnglishTradeGuide({
@@ -5285,6 +5676,35 @@ export function computeRealChartTradeParams(p: {
     bosAnalysis: p.bosAnalysis,
     liveBacktest
   });
+
+  // Hard Invalidation Level, Bar-Close Confirmation & True Liquidity Sweep Proof
+  const rawInvalidation = isBuy
+    ? Math.max(slPrice + minGapPrice * 0.2, Math.min(ema50Val, bosSwingAnchor || ema50Val))
+    : Math.min(slPrice - minGapPrice * 0.2, Math.max(ema50Val, bosSwingAnchor || ema50Val));
+  const invalidationLevel = Number(
+    (isBuy
+      ? Math.min(anchoredEntry - minGapPrice * 0.5, Math.max(slPrice, rawInvalidation))
+      : Math.max(anchoredEntry + minGapPrice * 0.5, Math.min(slPrice, rawInvalidation))
+    ).toFixed(decimals)
+  );
+  const invalidationReason = isBuy
+    ? `BUY thesis invalidates if ${p.targetTf} candle closes below ${invalidationLevel.toFixed(decimals)}`
+    : `SELL thesis invalidates if ${p.targetTf} candle closes above ${invalidationLevel.toFixed(decimals)}`;
+
+  const candleCloseConfirmed = Boolean(
+    latestClosedCandle &&
+      (isBuy
+        ? latestClosedCandle.close > latestClosedCandle.open && latestClosedCandle.close >= ema20Val * 0.9998 && !closedCandleOpposing
+        : latestClosedCandle.close < latestClosedCandle.open && latestClosedCandle.close <= ema20Val * 1.0002 && !closedCandleOpposing)
+  );
+  const candleCloseStatusText = candleCloseConfirmed
+    ? `${p.targetTf} closed candle confirmed ${isBuy ? 'BULLISH' : 'BEARISH'} body past 20 EMA`
+    : closedCandleOpposing
+    ? `Last ${p.targetTf} close opposed ${isBuy ? 'BUY' : 'SELL'} — await closing confirmation`
+    : `Current ${p.targetTf} bar still forming — wait bar close or Limit`;
+  const liquiditySweepConfirmed = Boolean(
+    isBuy ? derivedBullishPinOrAbsorption : derivedBearishPinOrSweep
+  );
 
   return {
     direction: isBuy ? 'BUY' : 'SELL',
@@ -5356,12 +5776,21 @@ export function computeRealChartTradeParams(p: {
     executionBrief: plainEnglishGuide,
     plainEnglishGuide,
     institutionalTelemetry,
-    limitPlan
+    limitPlan,
+    spreadSlRatioPct,
+    spreadSafetyBlocked,
+    invalidationLevel,
+    invalidationReason,
+    candleCloseConfirmed,
+    candleCloseStatusText,
+    liquiditySweepConfirmed,
+    newsBlackoutActive,
+    newsBlackoutReason
   };
 }
 
 export interface EntryMomentVerdict {
-  status: 'PRIME_NOW' | 'WAIT_PULLBACK' | 'MARKET_CLOSED';
+  status: 'PRIME_NOW' | 'WAIT_PULLBACK' | 'STAND_ASIDE' | 'MARKET_CLOSED';
   badge: string;
   headline: string;
   actionGuidance: string;
@@ -5382,10 +5811,10 @@ export interface TrendSustainabilityVerdict {
 export function evaluateOrderEntryMoment(
   pair: CurrencyPair,
   computed: ComputedTradeParams,
-  livePrice: number,
+  _livePrice: number,
   kenyaTiming: KenyaEntryWindowInfo
 ): EntryMomentVerdict {
-  if (kenyaTiming.windowStatusCode === 'CLOSED_WAIT') {
+  if (kenyaTiming.windowStatusCode === 'CLOSED_WAIT' || computed.executionReadiness === 'NO_TRADE_CLOSED') {
     return {
       status: 'MARKET_CLOSED',
       badge: 'NOT RIGHT TIME · PLEASE WAIT',
@@ -5394,6 +5823,20 @@ export function evaluateOrderEntryMoment(
         ? `Brokers halt weekend FX/Metals execution. Please wait for market open (${kenyaTiming.nextWindowName}) or inspect 24/7 Crypto.`
         : `Please do not rush into ${pair} right now — off-session spreads and fakeouts are high. Wait ${kenyaTiming.countdownFormatted} for ${kenyaTiming.nextWindowName} and study key levels first.`,
       themeColor: '#EF4444'
+    };
+  }
+
+  // Strictly obey algorithmic NO_TRADE_CHOP gate so UI timers NEVER display "SAFE TO ENTER" when probability is low
+  if (computed.executionReadiness === 'NO_TRADE_CHOP') {
+    return {
+      status: 'STAND_ASIDE',
+      badge: 'ALGO LOCKED · STAND ASIDE',
+      headline: `Do NOT Enter ${pair} Now — Low Edge / Chop Guard`,
+      actionGuidance:
+        computed.executionReadinessReason ||
+        `${pair} failed precision confluence or positive expectancy filters. Do not enter on any timer — stand aside until clean H1/M15 breakout alignment appears.`,
+      themeColor: '#EF4444',
+      advisoryPrice: computed.advisoryEntryPrice
     };
   }
 
@@ -5455,23 +5898,29 @@ export function evaluateOrderEntryMoment(
     };
   }
 
-  if (computed.isExtendedZone && computed.advisoryDiscountPips && computed.advisoryDiscountPips > 0) {
+  // Respect ALL WAIT_PULLBACK reasons (closing candle, low ADX, pivot barrier, RSI exhaustion, or 20 EMA stretch)
+  if (computed.executionReadiness === 'WAIT_PULLBACK' || (computed.isExtendedZone && computed.advisoryDiscountPips && computed.advisoryDiscountPips > 0)) {
+    const disc = computed.advisoryDiscountPips && computed.advisoryDiscountPips > 0 ? computed.advisoryDiscountPips : undefined;
     return {
       status: 'WAIT_PULLBACK',
-      badge: `WAIT PULLBACK TO ${computed.advisoryEntryPrice}`,
-      headline: `Extended by ${computed.advisoryDiscountPips}p — Please Do Not Rush Entry`,
-      actionGuidance: `Price is stretched away from 20 EMA. Please wait for pullback to ${computed.advisoryEntryPrice} before entering to save ${computed.advisoryDiscountPips} pips drawdown.`,
+      badge: disc ? `LIMIT EP @ ${computed.advisoryEntryPrice} (-${disc}p)` : `WAIT CLOSE CONFIRM · EP ${computed.advisoryEntryPrice}`,
+      headline: disc
+        ? `Stretched ${disc}p — Stage Sniper Limit @ ${computed.advisoryEntryPrice} (Do NOT Market Buy/Sell)`
+        : `Wait Confirmation or Limit @ ${computed.advisoryEntryPrice} (Do NOT Enter Blindly)`,
+      actionGuidance:
+        computed.executionReadinessReason ||
+        `Do NOT execute at Market on a clock countdown. Wait for price to pull back to ${computed.advisoryEntryPrice} with confirmed candle close.`,
       themeColor: '#F59E0B',
       advisoryPrice: computed.advisoryEntryPrice,
-      discountPips: computed.advisoryDiscountPips
+      discountPips: disc
     };
   }
 
   return {
     status: 'PRIME_NOW',
     badge: 'SAFE TO ENTER · PRIME MOMENT ✓',
-    headline: 'Right Moment Confirmed: Clean Session & 20/50 EMA Zone',
-    actionGuidance: `Session window is live and price is in prime corridor with ${computed.alignedFactorsCount}/${computed.totalFactorsCount} aligned factors. Safe to apply SL & TP risk rules.`,
+    headline: 'All 12 Institutional Gates & Positive Edge Verified',
+    actionGuidance: `Session window is live, recent backtest edge is positive, and price is inside 20 EMA corridor with ${computed.alignedFactorsCount}/${computed.totalFactorsCount} aligned factors.`,
     themeColor: '#00C261',
     advisoryPrice: computed.advisoryEntryPrice
   };
@@ -5480,12 +5929,31 @@ export function evaluateOrderEntryMoment(
 export function evaluateOrderTrendSustainability(
   computed: ComputedTradeParams
 ): TrendSustainabilityVerdict {
+  if (computed.executionReadiness === 'NO_TRADE_CHOP' || computed.executionReadiness === 'NO_TRADE_CLOSED') {
+    return {
+      status: 'CHOP_CAUTION',
+      integrityPct: 42,
+      badge: 'ALGO LOCKED · STAND ASIDE',
+      headline: 'Low Probability / Conflicted Regime — Do Not Enter',
+      structuralReason:
+        computed.executionReadinessReason ||
+        'Algorithmic gates detected chop, MACD reversal conflict, or negative walk-forward expectancy. Stand aside.',
+      themeColor: '#EF4444'
+    };
+  }
+
   const isH1Aligned = computed.h1TrendDirection === (computed.direction === 'BUY' ? 'UPTREND' : 'DOWNTREND');
   const factorPct = Math.round((computed.alignedFactorsCount / Math.max(1, computed.totalFactorsCount)) * 100);
   const mtfTier = computed.mtfAlignment?.tierGrade || 'GRADE B (2/4 MIXED — WAIT)';
 
-  if (isH1Aligned && factorPct >= 75 && (mtfTier.includes('GRADE A+') || mtfTier.includes('GRADE A')) && !computed.slVolatilityWarning) {
-    const integrity = Math.min(82, Math.max(68, Math.round(computed.confidence * 0.85)));
+  if (
+    computed.executionReadiness === 'READY_ENTER' &&
+    isH1Aligned &&
+    factorPct >= 65 &&
+    (mtfTier.includes('GRADE A+') || mtfTier.includes('GRADE A')) &&
+    !computed.slVolatilityWarning
+  ) {
+    const integrity = Math.min(84, Math.max(70, Math.round(computed.confidence * 0.88)));
     return {
       status: 'HIGH_SUSTAINABLE',
       integrityPct: integrity,
@@ -5502,8 +5970,8 @@ export function evaluateOrderTrendSustainability(
       status: 'MODERATE_SUSTAINABLE',
       integrityPct: integrity,
       badge: `MODERATE CONFLUENCE (${integrity}%)`,
-      headline: `Selective ${computed.direction} — Confirm Candle Close`,
-      structuralReason: 'Partial alignment only. Scale out 50% at TP1 and move SL to Breakeven early if momentum stalls.',
+      headline: `Selective ${computed.direction} — Stage Limit & Confirm Close`,
+      structuralReason: 'Partial alignment only. Stage Sniper Limit instead of chasing Spot, scale out 50% at TP1 and move SL to Breakeven early.',
       themeColor: '#38BDF8'
     };
   }
@@ -5659,9 +6127,11 @@ export function buildCalibratedMarketItem(params: {
 
   // Unify direction strictly with computed.direction so MarketScanData.bias and SL/TP can NEVER contradict
   const isBuy = computed.direction === 'BUY';
+  const dirMargin = Math.abs(computed.bullScorePct - computed.bearScorePct);
   const lowFactorConviction =
-    computed.alignedFactorsCount < 6 ||
-    Math.abs(computed.bullScorePct - computed.bearScorePct) < 14 ||
+    (computed.alignedFactorsCount < 5 ||
+      (computed.alignedFactorsCount < 6 && dirMargin < 26)) ||
+    dirMargin < 14 ||
     (computed.adxStrength !== undefined && computed.adxStrength < 17.5) ||
     computed.h1TrendDirection !== (isBuy ? 'UPTREND' : 'DOWNTREND');
   const isNeutral = preliminaryNeutral || computed.executionReadiness === 'NO_TRADE_CHOP' || lowFactorConviction;
@@ -6577,13 +7047,15 @@ export async function fetchLiveMarketSnapshot(
 
     const prevMeta = new Map<
       CurrencyPair,
-      { rank: number; dir: 'BUY' | 'SELL'; trendDir: 'UPTREND' | 'DOWNTREND' | 'RANGING'; price: number }
+      { rank: number; dir: 'BUY' | 'SELL'; bias: MarketScanData['bias']; trendDir: 'UPTREND' | 'DOWNTREND' | 'RANGING'; price: number }
     >();
     currentMarkets.forEach((cm, idx) => {
+      const resolvedDir = resolveMarketDirection(cm);
       prevMeta.set(cm.pair, {
         rank: cm.currentRank || idx + 1,
-        dir: cm.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
-        trendDir: cm.trendDirection || (cm.bias === 'STRONG_SELL' ? 'DOWNTREND' : 'UPTREND'),
+        dir: resolvedDir,
+        bias: cm.bias,
+        trendDir: cm.trendDirection || (resolvedDir === 'SELL' ? 'DOWNTREND' : 'UPTREND'),
         price: cm.price
       });
     });
@@ -6624,12 +7096,17 @@ export async function fetchLiveMarketSnapshot(
         spreadByBroker: existing.spreadByBroker,
         dataSource: liveFeedConnected ? 'Live Interbank Feed' : 'Live Feed + Institutional Calibration'
       });
-      const newDir: 'BUY' | 'SELL' = item.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
+      const newDir: 'BUY' | 'SELL' = resolveMarketDirection(item);
+      const confirmedFlip =
+        Boolean(old) &&
+        old!.bias !== 'NEUTRAL_CHOP' &&
+        item.bias !== 'NEUTRAL_CHOP' &&
+        old!.dir !== newDir;
       return {
         ...item,
         previousRank: old?.rank,
         previousDirection: old?.dir,
-        directionFlipped: Boolean(old && old.dir !== newDir),
+        directionFlipped: confirmedFlip,
         lastTickTime: nowTickStr,
         lastTickDir: tickDir,
         lastTickDeltaPips: rawDiffPips
@@ -7235,8 +7712,14 @@ export interface GlobalStreamState {
   selectedPair: CurrencyPair | null;
   activeBroker: BrokerId;
   activeOrders: Partial<Record<CurrencyPair, ActiveMarketOrder>>;
+  pendingLimits: PendingLimitOrder[];
   orderHistory: ClosedOrderHistoryEntry[];
   suggestedSignals: SuggestedSignalLogEntry[];
+  eaLedger: EaSignalLedgerEntry[];
+  eaLedgerStats: EaLedgerStats;
+  eaAutoPilot: boolean;
+  eaCircuitBreaker: EaCircuitBreakerState;
+  soundAlertsEnabled: boolean;
   notifications: TradeNotification[];
   priceAlerts: PriceAlertRule[];
   superAiAutoEnabled: boolean;
@@ -7255,12 +7738,67 @@ export interface GlobalStreamState {
 type StreamListener = (state: GlobalStreamState) => void;
 
 const ACTIVE_ORDERS_STORAGE_KEY = 'pivotfx_active_market_orders_v1';
+const PENDING_LIMITS_STORAGE_KEY = 'pivotfx_pending_limits_v1';
 const CLOSED_ORDERS_STORAGE_KEY = 'pivotfx_closed_orders_history_v1';
 const SUGGESTED_SIGNALS_STORAGE_KEY = 'pivotfx_suggested_signals_v1';
+const EA_LEDGER_STORAGE_KEY = 'pivotfx_ea_ledger_v1';
+const EA_AUTOPILOT_STORAGE_KEY = 'pivotfx_ea_autopilot_v1';
+const EA_CB_RESET_STORAGE_KEY = 'pivotfx_ea_cb_reset_v1';
+const SOUND_ALERTS_STORAGE_KEY = 'pivotfx_sound_alerts_v1';
 const NOTIFICATIONS_STORAGE_KEY = 'pivotfx_trade_notifications_v1';
 const PRICE_ALERTS_STORAGE_KEY = 'pivotfx_price_alerts_v1';
 const BROKER_STORAGE_KEY = 'pivotfx_selected_broker_v1';
 const PROP_TRADES_STORAGE_KEY = 'pivotfx_prop_trades';
+
+export function computeEaLedgerStats(entries: EaSignalLedgerEntry[]): EaLedgerStats {
+  const total = entries.length;
+  let open = 0;
+  let wins = 0;
+  let tp1Saves = 0;
+  let losses = 0;
+  let grossWinR = 0;
+  let grossLossR = 0;
+  let netR = 0;
+
+  for (const row of entries) {
+    if (row.status === 'OPEN') {
+      open += 1;
+      continue;
+    }
+    netR += row.realizedR;
+    if (row.status === 'TP2_WIN') {
+      wins += 1;
+      grossWinR += Math.max(0, row.realizedR);
+    } else if (row.status === 'TP1_BE_SAVE') {
+      tp1Saves += 1;
+      wins += 1;
+      grossWinR += Math.max(0, row.realizedR);
+    } else {
+      losses += 1;
+      grossLossR += Math.abs(Math.min(0, row.realizedR));
+    }
+  }
+
+  const resolvedCount = wins + losses;
+  const winRatePct = resolvedCount > 0 ? Math.round((wins / resolvedCount) * 100) : 0;
+  const profitFactor =
+    grossLossR > 0
+      ? Number((grossWinR / grossLossR).toFixed(2))
+      : grossWinR > 0
+      ? Number(Math.min(9.99, grossWinR + 1).toFixed(2))
+      : 0;
+
+  return {
+    total,
+    open,
+    wins,
+    tp1Saves,
+    losses,
+    winRatePct,
+    netR: Number(netR.toFixed(2)),
+    profitFactor
+  };
+}
 
 function loadPersistedActiveOrders(): Partial<Record<CurrencyPair, ActiveMarketOrder>> {
   try {
@@ -7292,6 +7830,25 @@ function loadPersistedSuggestedSignals(): SuggestedSignalLogEntry[] {
   }
 }
 
+function loadPersistedEaLedger(): EaSignalLedgerEntry[] {
+  try {
+    if (typeof window === 'undefined') return [];
+    const raw = window.localStorage.getItem(EA_LEDGER_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as EaSignalLedgerEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadPersistedEaAutoPilot(): boolean {
+  try {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(EA_AUTOPILOT_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 function loadPersistedNotifications(): TradeNotification[] {
   try {
     if (typeof window === 'undefined') return [];
@@ -7312,6 +7869,45 @@ function loadPersistedPriceAlerts(): PriceAlertRule[] {
   }
 }
 
+function loadPersistedPendingLimits(): PendingLimitOrder[] {
+  try {
+    if (typeof window === 'undefined') return [];
+    const raw = window.localStorage.getItem(PENDING_LIMITS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as PendingLimitOrder[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadPersistedSoundAlerts(): boolean {
+  try {
+    if (typeof window === 'undefined') return true;
+    const raw = window.localStorage.getItem(SOUND_ALERTS_STORAGE_KEY);
+    return raw === null ? true : raw === 'true';
+  } catch {
+    return true;
+  }
+}
+
+function loadPersistedCbResetMs(): number {
+  try {
+    if (typeof window === 'undefined') return 0;
+    const raw = window.localStorage.getItem(EA_CB_RESET_STORAGE_KEY);
+    const num = raw ? Number(raw) : 0;
+    return Number.isFinite(num) ? num : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function getCurrentEatDateKey(): string {
+  try {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
 function loadPersistedBroker(): BrokerId {
   try {
     if (typeof window === 'undefined') return 'fxpesa';
@@ -7323,32 +7919,70 @@ function loadPersistedBroker(): BrokerId {
   }
 }
 
+export function resolveMarketDirection(m: {
+  bias?: MarketScanData['bias'];
+  trendDirection?: 'UPTREND' | 'DOWNTREND' | 'RANGING';
+  h1TrendDirection?: 'UPTREND' | 'DOWNTREND' | 'RANGING';
+  bearScorePct?: number;
+  bullScorePct?: number;
+  price?: number;
+  ema20?: number;
+  change24hPct?: number;
+}): 'BUY' | 'SELL' {
+  if (m.bias === 'STRONG_SELL') return 'SELL';
+  if (m.bias === 'STRONG_BUY') return 'BUY';
+  if (m.trendDirection === 'DOWNTREND') return 'SELL';
+  if (m.trendDirection === 'UPTREND') return 'BUY';
+  if (typeof m.bearScorePct === 'number' && typeof m.bullScorePct === 'number' && m.bearScorePct !== m.bullScorePct) {
+    return m.bearScorePct > m.bullScorePct ? 'SELL' : 'BUY';
+  }
+  if (m.h1TrendDirection === 'DOWNTREND') return 'SELL';
+  if (m.h1TrendDirection === 'UPTREND') return 'BUY';
+  if (typeof m.price === 'number' && typeof m.ema20 === 'number' && m.price !== m.ema20) {
+    return m.price < m.ema20 ? 'SELL' : 'BUY';
+  }
+  return (m.change24hPct ?? 0) < 0 ? 'SELL' : 'BUY';
+}
+
 function buildInitialMacroDirective(markets: MarketScanData[]): DailyMacroAiDirective {
   const pctMap: Partial<Record<CurrencyPair, number>> = {};
   markets.forEach((m) => {
     pctMap[m.pair] = m.change24hPct;
   });
   const macro = getCurrentMacroContext(pctMap);
-  const top = markets[0];
-  const buyCount = markets.filter((m) => m.bias !== 'STRONG_SELL').length;
-  const sellCount = markets.length - buyCount;
+  const actionableTop =
+    markets.find((m) => m.executionReadiness === 'READY_ENTER' || m.executionReadiness === 'WAIT_PULLBACK') ||
+    markets[0];
+  const buyCount = markets.filter((m) => m.bias === 'STRONG_BUY').length;
+  const sellCount = markets.filter((m) => m.bias === 'STRONG_SELL').length;
+  const chopCount = markets.length - buyCount - sellCount;
 
   const headline =
     macro.dxyPressurePct <= -0.08
       ? `TODAY & THIS HOUR: FAVOURABLE BUYING ON NON-USD PAIRS & GOLD (DXY ${macro.dxyPressurePct}%)`
       : macro.dxyPressurePct >= 0.08
       ? `TODAY & THIS HOUR: FAVOURABLE SELLING EUR/GBP/AUD · LONG USD PAIRS (DXY +${macro.dxyPressurePct}%)`
+      : buyCount === 0 && sellCount === 0
+      ? `TODAY & THIS HOUR: STAND ASIDE / CHOP FILTER ACTIVE (${chopCount} Markets Waiting Clean Setup)`
       : buyCount >= sellCount
-      ? `TODAY & THIS HOUR: SELECTIVE BUY BIAS (${buyCount} BUY vs ${sellCount} SELL Setups)`
-      : `TODAY & THIS HOUR: SELECTIVE SELL BIAS (${sellCount} SELL vs ${buyCount} BUY Setups)`;
+      ? `TODAY & THIS HOUR: SELECTIVE BUY BIAS (${buyCount} BUY vs ${sellCount} SELL · ${chopCount} Chop)`
+      : `TODAY & THIS HOUR: SELECTIVE SELL BIAS (${sellCount} SELL vs ${buyCount} BUY · ${chopCount} Chop)`;
+
+  const topActionLabel = actionableTop
+    ? actionableTop.bias === 'NEUTRAL_CHOP' || actionableTop.executionReadiness === 'NO_TRADE_CHOP'
+      ? `STAND ASIDE (CHOP)`
+      : actionableTop.executionReadiness === 'WAIT_PULLBACK'
+      ? `WAIT PULLBACK ${resolveMarketDirection(actionableTop)}`
+      : resolveMarketDirection(actionableTop)
+    : 'STAND ASIDE';
 
   return {
     headline,
     overallSafety: macro.overallDaySafety,
-    hourlyOutlook: top
-      ? `${macro.sessionWindowName} (${macro.eatTimeString}): #1 Leader ${top.pair} (${
-          top.change24hPct >= 0 ? `+${top.change24hPct}%` : `${top.change24hPct}%`
-        }) holds ${top.trendDirection} → ${top.bias === 'STRONG_SELL' ? 'SELL' : 'BUY'} @ ${top.price}.`
+    hourlyOutlook: actionableTop
+      ? `${macro.sessionWindowName} (${macro.eatTimeString}): Top Ranked ${actionableTop.pair} (${
+          actionableTop.change24hPct >= 0 ? `+${actionableTop.change24hPct}%` : `${actionableTop.change24hPct}%`
+        }) → ${topActionLabel} @ ${actionableTop.price}.`
       : macro.overallHeadline,
     catalystSummary: `Macro Regime: ${macro.riskRegime} · ${macro.dxySummary} · 0.01 Micro Lot ($2.00 / 260 KES Cap)`,
     source: 'quantitative-engine',
@@ -7361,8 +7995,13 @@ class GlobalLiveMarketStreamEngine {
   private selectedPair: CurrencyPair | null = null;
   private activeBroker: BrokerId = loadPersistedBroker();
   private activeOrders: Partial<Record<CurrencyPair, ActiveMarketOrder>> = loadPersistedActiveOrders();
+  private pendingLimits: PendingLimitOrder[] = loadPersistedPendingLimits();
   private orderHistory: ClosedOrderHistoryEntry[] = loadPersistedOrderHistory();
   private suggestedSignals: SuggestedSignalLogEntry[] = loadPersistedSuggestedSignals();
+  private eaLedger: EaSignalLedgerEntry[] = loadPersistedEaLedger();
+  private eaAutoPilot: boolean = loadPersistedEaAutoPilot();
+  private eaCircuitBreakerResetMs: number = loadPersistedCbResetMs();
+  private soundAlertsEnabled: boolean = loadPersistedSoundAlerts();
   private notifications: TradeNotification[] = loadPersistedNotifications();
   private priceAlerts: PriceAlertRule[] = loadPersistedPriceAlerts();
   private superAiAutoEnabled: boolean = true;
@@ -7389,15 +8028,66 @@ class GlobalLiveMarketStreamEngine {
   private sessionDirection: Partial<Record<CurrencyPair, 'BUY' | 'SELL'>> = {};
   private sessionTrendDirection: Partial<Record<CurrencyPair, 'UPTREND' | 'DOWNTREND' | 'RANGING'>> = {};
   private lastReversalWarningByPair: Partial<Record<CurrencyPair, number>> = {};
+  private lastAutoClosedByPair: Partial<Record<CurrencyPair, number>> = {};
   private orderMilestoneAlerts = new Set<string>();
   private lastNotificationDedupe = new Map<string, number>();
   private unsubscribeRiskStore: (() => void) | null = null;
+
+  private playTradingChime(kind: 'READY' | 'FILL' | 'TP1' | 'ALERT' | 'STOP') {
+    if (!this.soundAlertsEnabled || typeof window === 'undefined') return;
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const notes =
+        kind === 'TP1'
+          ? [659.25, 880, 1046.5]
+          : kind === 'FILL'
+          ? [523.25, 783.99]
+          : kind === 'READY'
+          ? [587.33, 880]
+          : kind === 'STOP'
+          ? [392.0, 293.66]
+          : [740.0, 987.77];
+
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const start = ctx.currentTime + idx * 0.085;
+        osc.type = kind === 'STOP' ? 'triangle' : 'sine';
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.055, start + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.19);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + 0.2);
+      });
+    } catch {}
+  }
+
+  private persistPendingLimits() {
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(PENDING_LIMITS_STORAGE_KEY, JSON.stringify(this.pendingLimits));
+      }
+    } catch {}
+  }
 
   private persistOrders() {
     try {
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(ACTIVE_ORDERS_STORAGE_KEY, JSON.stringify(this.activeOrders));
         window.localStorage.setItem(CLOSED_ORDERS_STORAGE_KEY, JSON.stringify(this.orderHistory));
+      }
+    } catch {}
+  }
+
+  private persistEaLedger() {
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(EA_LEDGER_STORAGE_KEY, JSON.stringify(this.eaLedger));
       }
     } catch {}
   }
@@ -7599,6 +8289,7 @@ class GlobalLiveMarketStreamEngine {
     if (changed) {
       this.persistPriceAlerts();
       hitRules.forEach((rule) => {
+        this.playTradingChime('ALERT');
         this.pushNotification({
           pair: rule.pair,
           type: 'PRICE_ALERT',
@@ -7637,7 +8328,7 @@ class GlobalLiveMarketStreamEngine {
     });
     const macro = getCurrentMacroContext(pctMap);
     const swings = computeCandleSwingLevels(market.candles);
-    const dir = params.direction || (market.bias === 'STRONG_SELL' ? 'SELL' : 'BUY');
+    const dir = params.direction || resolveMarketDirection(market);
 
     const computed = computeRealChartTradeParams({
       targetPair: market.pair,
@@ -7754,6 +8445,7 @@ class GlobalLiveMarketStreamEngine {
       // Check real-time TP milestones & drawdown cushion notifications (1 alert per milestone per order)
       if (metrics.hitTp1 && !this.orderMilestoneAlerts.has(`${order.id}:TP1`)) {
         this.orderMilestoneAlerts.add(`${order.id}:TP1`);
+        this.playTradingChime('TP1');
         this.pushNotification({
           pair: order.pair,
           type: 'TP_HIT',
@@ -7761,13 +8453,24 @@ class GlobalLiveMarketStreamEngine {
           message: `Live candle @ ${market.price} crossed TP1 (${order.tp1}). Lock Breakeven SL (${metrics.suggestedBreakevenSl}) on your broker!`
         });
       }
-      if (metrics.hitTp2 && !this.orderMilestoneAlerts.has(`${order.id}:TP2`)) {
-        this.orderMilestoneAlerts.add(`${order.id}:TP2`);
+
+      // True 50% Partial Close Scaling at TP1 when Auto-Trail is enabled
+      let workingOrder = order;
+      if (workingOrder.autoTrailEnabled && !workingOrder.partialTp1Banked && metrics.hitTp1) {
+        const banked = this.bankPartialTp1(pairKey, true);
+        if (banked && this.activeOrders[pairKey]) {
+          workingOrder = this.activeOrders[pairKey]!;
+        }
+      }
+
+      if (metrics.hitTp2 && !this.orderMilestoneAlerts.has(`${workingOrder.id}:TP2`)) {
+        this.orderMilestoneAlerts.add(`${workingOrder.id}:TP2`);
+        this.playTradingChime('TP1');
         this.pushNotification({
-          pair: order.pair,
+          pair: workingOrder.pair,
           type: 'TP_HIT',
-          title: `${order.pair} ${order.direction} Reached TP2 (+${metrics.floatingPips}p)`,
-          message: `Target TP2 (${order.tp2}) reached (+$${metrics.netProfitUsd.toFixed(2)}). Trail SL or extend to TP3 (${order.tp3}).`
+          title: `${workingOrder.pair} ${workingOrder.direction} Reached TP2 (+${metrics.floatingPips}p)`,
+          message: `Target TP2 (${workingOrder.tp2}) reached (+$${metrics.netProfitUsd.toFixed(2)}). Trail SL or extend to TP3 (${workingOrder.tp3}).`
         });
       }
       const dynamicBeTrigger = Math.max(4, Number(((market.atrPips || 16) * 0.55).toFixed(1)));
@@ -7781,45 +8484,47 @@ class GlobalLiveMarketStreamEngine {
         !metrics.isInProfit &&
         metrics.pipsDistanceAboveSl > 0 &&
         metrics.pipsDistanceAboveSl <= dynamicProximityGuard &&
-        !this.orderMilestoneAlerts.has(`${order.id}:SL_PROXIMITY`)
+        !this.orderMilestoneAlerts.has(`${workingOrder.id}:SL_PROXIMITY`)
       ) {
-        this.orderMilestoneAlerts.add(`${order.id}:SL_PROXIMITY`);
+        this.orderMilestoneAlerts.add(`${workingOrder.id}:SL_PROXIMITY`);
+        this.playTradingChime('STOP');
         this.pushNotification({
-          pair: order.pair,
+          pair: workingOrder.pair,
           type: 'SL_WARNING',
-          title: `${order.pair} ${order.direction} Drawdown Guard Alert`,
-          message: `Price (${market.price}) is within ${metrics.pipsDistanceAboveSl}p of your SL (${order.stopLoss}). Check Super AI Position Coach in Trade Log.`
+          title: `${workingOrder.pair} ${workingOrder.direction} Drawdown Guard Alert`,
+          message: `Price (${market.price}) is within ${metrics.pipsDistanceAboveSl}p of your SL (${workingOrder.stopLoss}). Check Super AI Position Coach in Trade Log.`
         });
       }
 
       // Structural BOS Flip Protection on Active Orders
       const bosOpposesOpenOrder = Boolean(
         market.bosAnalysis?.brokenStructure &&
-          ((order.direction === 'BUY' &&
+          ((workingOrder.direction === 'BUY' &&
             (market.bosAnalysis.bosDirection === 'BEARISH_BOS' ||
               market.bosAnalysis.bosDirection === 'BEARISH_CHOCH')) ||
-            (order.direction === 'SELL' &&
+            (workingOrder.direction === 'SELL' &&
               (market.bosAnalysis.bosDirection === 'BULLISH_BOS' ||
                 market.bosAnalysis.bosDirection === 'BULLISH_CHOCH')))
       );
-      if (bosOpposesOpenOrder && !this.orderMilestoneAlerts.has(`${order.id}:BOS_FLIP`)) {
-        this.orderMilestoneAlerts.add(`${order.id}:BOS_FLIP`);
+      if (bosOpposesOpenOrder && !this.orderMilestoneAlerts.has(`${workingOrder.id}:BOS_FLIP`)) {
+        this.orderMilestoneAlerts.add(`${workingOrder.id}:BOS_FLIP`);
+        this.playTradingChime('STOP');
         this.pushNotification({
-          pair: order.pair,
+          pair: workingOrder.pair,
           type: 'SL_WARNING',
-          title: `STRUCTURE FLIP ALERT · ${order.pair} ${order.direction}`,
+          title: `STRUCTURE FLIP ALERT · ${workingOrder.pair} ${workingOrder.direction}`,
           message: `Opposing ${market.bosAnalysis?.bosDirection.replace('_', ' ')} triggered @ ${market.bosAnalysis?.bosTriggerLevel}. Tighten SL or lock profit now.`
         });
       }
 
-      let nextSl = order.stopLoss;
-      let nextSlCount = order.slUpdatesCount;
-      let nextTp2 = order.tp2;
-      let nextTp3 = order.tp3;
+      let nextSl = workingOrder.stopLoss;
+      let nextSlCount = workingOrder.slUpdatesCount;
+      let nextTp2 = workingOrder.tp2;
+      let nextTp3 = workingOrder.tp3;
 
       // Dynamic ATR-Scaled Auto-Breakeven & 55% Profit Lock
-      if (order.autoTrailEnabled && metrics.floatingPips >= dynamicBeTrigger) {
-        const isBuy = order.direction === 'BUY';
+      if (workingOrder.autoTrailEnabled && metrics.floatingPips >= dynamicBeTrigger) {
+        const isBuy = workingOrder.direction === 'BUY';
         const improvedSl =
           metrics.floatingPips >= dynamicLockTrigger ? metrics.suggestedLockProfitSl : metrics.suggestedBreakevenSl;
         if ((isBuy && improvedSl > nextSl) || (!isBuy && improvedSl < nextSl)) {
@@ -7840,7 +8545,7 @@ class GlobalLiveMarketStreamEngine {
       }
 
       this.activeOrders[pairKey] = {
-        ...order,
+        ...workingOrder,
         stopLoss: nextSl,
         tp2: nextTp2,
         tp3: nextTp3,
@@ -7854,14 +8559,596 @@ class GlobalLiveMarketStreamEngine {
     }
   }
 
+  private evaluateEaLedgerAgainstMarkets() {
+    const nowEat = this.formatNowEat();
+    const nowMs = Date.now();
+    let changed = false;
+
+    // 1. Score OPEN entries against live market prices
+    this.eaLedger = this.eaLedger.map((entry) => {
+      if (entry.status !== 'OPEN') return entry;
+      const mkt = this.markets.find((m) => m.pair === entry.pair);
+      if (!mkt || mkt.price <= 0) return entry;
+
+      const { pipMultiplier } = getPairSpecs(entry.pair);
+      const isBuy = entry.direction === 'BUY';
+      const signedPips = Number(
+        (((isBuy ? mkt.price - entry.entryPrice : entry.entryPrice - mkt.price)) * pipMultiplier).toFixed(1)
+      );
+      const nextPeak = Math.max(entry.peakPips, signedPips);
+      const slDist = Math.max(0.00001, Math.abs(entry.entryPrice - entry.stopLoss));
+      const tp2Dist = Math.max(0.00001, Math.abs(entry.tp2 - entry.entryPrice));
+
+      const hitTp1 = isBuy ? mkt.price >= entry.tp1 : mkt.price <= entry.tp1;
+      const tp1WasHit = Boolean(entry.tp1Reached || hitTp1);
+      const hitTp2 = isBuy ? mkt.price >= entry.tp2 : mkt.price <= entry.tp2;
+      const hitBeAfterTp1 = tp1WasHit && (isBuy ? mkt.price <= entry.entryPrice : mkt.price >= entry.entryPrice);
+      const hitInitialSl = !tp1WasHit && (isBuy ? mkt.price <= entry.stopLoss : mkt.price >= entry.stopLoss);
+
+      if (hitTp2) {
+        changed = true;
+        return {
+          ...entry,
+          tp1Reached: true,
+          status: 'TP2_WIN',
+          currentPips: signedPips,
+          peakPips: nextPeak,
+          realizedR: Number((tp2Dist / slDist).toFixed(2)),
+          resolvedAtEat: nowEat,
+          resolvedPrice: mkt.price
+        };
+      }
+
+      if (hitBeAfterTp1) {
+        changed = true;
+        return {
+          ...entry,
+          tp1Reached: true,
+          status: 'TP1_BE_SAVE',
+          currentPips: Math.max(0, signedPips),
+          peakPips: nextPeak,
+          realizedR: 0.5,
+          resolvedAtEat: nowEat,
+          resolvedPrice: entry.entryPrice
+        };
+      }
+
+      if (hitInitialSl) {
+        changed = true;
+        return {
+          ...entry,
+          status: 'SL_LOSS',
+          currentPips: signedPips,
+          peakPips: nextPeak,
+          realizedR: -1.0,
+          resolvedAtEat: nowEat,
+          resolvedPrice: entry.stopLoss
+        };
+      }
+
+      if (signedPips !== entry.currentPips || nextPeak !== entry.peakPips || tp1WasHit !== Boolean(entry.tp1Reached)) {
+        changed = true;
+        return {
+          ...entry,
+          tp1Reached: tp1WasHit,
+          currentPips: signedPips,
+          peakPips: nextPeak
+        };
+      }
+      return entry;
+    });
+
+    // 2. Auto-record new qualified READY_ENTER signals (max 1 OPEN entry per pair, max 1 entry per 15m bucket per pair)
+    const rankedReady = sortMarketsByTopPercent(this.markets, 'PRECISION').filter(
+      (m) =>
+        m.executionReadiness === 'READY_ENTER' &&
+        !m.isExtendedZone &&
+        m.bias !== 'NEUTRAL_CHOP' &&
+        m.confidence >= 72 &&
+        m.price > 0
+    );
+
+    for (const m of rankedReady) {
+      const hasOpenForPair = this.eaLedger.some((e) => e.pair === m.pair && e.status === 'OPEN');
+      if (hasOpenForPair) continue;
+      const recentSamePair = this.eaLedger.find(
+        (e) => e.pair === m.pair && nowMs - e.openedTimestampMs < 15 * 60 * 1000
+      );
+      if (recentSamePair) continue;
+
+      const dir = resolveMarketDirection(m);
+      const isBuy = dir === 'BUY';
+      const geometryOk = isBuy
+        ? m.suggestedSL < m.price && m.price < m.suggestedTP1 && m.suggestedTP1 < m.suggestedTP2
+        : m.suggestedTP2 < m.suggestedTP1 && m.suggestedTP1 < m.price && m.price < m.suggestedSL;
+      if (!geometryOk) continue;
+
+      const row: EaSignalLedgerEntry = {
+        id: `ea_sig_${nowMs}_${m.pair.replace('/', '')}`,
+        pair: m.pair,
+        timeframe: this.customTimeframes[m.pair] || m.recommendedTf || 'M15',
+        direction: dir,
+        entryPrice: m.price,
+        stopLoss: m.suggestedSL,
+        tp1: m.suggestedTP1,
+        tp2: m.suggestedTP2,
+        confidence: m.confidence,
+        strategy: m.recommendedStrategy || '20/50 EMA Trend Pullback',
+        openedAtEat: nowEat,
+        openedTimestampMs: nowMs,
+        status: 'OPEN',
+        tp1Reached: false,
+        peakPips: 0,
+        currentPips: 0,
+        realizedR: 0
+      };
+      this.eaLedger = [row, ...this.eaLedger].slice(0, 40);
+      changed = true;
+    }
+
+    if (changed) {
+      this.persistEaLedger();
+    }
+  }
+
+  public computeCircuitBreakerState(): EaCircuitBreakerState {
+    const riskCfg = positionRiskStore.getConfig();
+    const balance = Math.max(50, riskCfg.accountBalanceUsd || 200);
+    const maxDailyLossUsd = Number(Math.max(6, balance * 0.03).toFixed(2));
+    const maxLossStreak = 2;
+    const dateEat = getCurrentEatDateKey();
+
+    // Inspect recent closed orders since last manual circuit-breaker reset
+    const relevantClosed = this.orderHistory.filter((item) => {
+      const idParts = item.id.split('_');
+      const ts = Number(idParts[1]);
+      const afterReset = Number.isFinite(ts) && ts > 1_000_000_000 ? ts >= this.eaCircuitBreakerResetMs : true;
+      return afterReset;
+    });
+
+    const dailyRealizedUsd = Number(
+      relevantClosed.reduce((acc, row) => acc + (Number.isFinite(row.realizedUsd) ? row.realizedUsd : 0), 0).toFixed(2)
+    );
+
+    let consecutiveLosses = 0;
+    for (const row of relevantClosed) {
+      if (row.realizedUsd < -0.05 && row.outcome === 'STOP_LOSS') {
+        consecutiveLosses += 1;
+      } else if (row.realizedUsd >= 0) {
+        break;
+      }
+    }
+
+    const hitDailyCap = dailyRealizedUsd <= -maxDailyLossUsd;
+    const hitLossStreak = consecutiveLosses >= maxLossStreak;
+    const tripped = hitDailyCap || hitLossStreak;
+    const reason = hitDailyCap
+      ? `Daily realized loss ($${Math.abs(dailyRealizedUsd).toFixed(2)}) hit -3% protection cap (-$${maxDailyLossUsd.toFixed(2)}).`
+      : hitLossStreak
+      ? `${consecutiveLosses} consecutive Stop-Loss hits triggered cool-down protection.`
+      : undefined;
+
+    return {
+      tripped,
+      reason,
+      dailyRealizedUsd,
+      consecutiveLosses,
+      maxDailyLossUsd,
+      maxLossStreak,
+      dateEat
+    };
+  }
+
+  public resetEaCircuitBreaker() {
+    this.eaCircuitBreakerResetMs = Date.now();
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(EA_CB_RESET_STORAGE_KEY, String(this.eaCircuitBreakerResetMs));
+      }
+    } catch {}
+    this.pushNotification({
+      type: 'AI_SIGNAL',
+      title: 'EA Circuit Breaker Reset',
+      message: 'Daily drawdown & loss-streak counter cleared. EA Auto-Pilot protection re-armed.'
+    });
+    this.broadcast();
+  }
+
+  public toggleSoundAlerts(enabled?: boolean): boolean {
+    const next = typeof enabled === 'boolean' ? enabled : !this.soundAlertsEnabled;
+    this.soundAlertsEnabled = next;
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(SOUND_ALERTS_STORAGE_KEY, String(next));
+      }
+    } catch {}
+    if (next) {
+      this.playTradingChime('READY');
+    }
+    this.broadcast();
+    return next;
+  }
+
+  public armPendingLimitOrder(params: {
+    pair: CurrencyPair;
+    direction?: 'BUY' | 'SELL';
+    limitEntryPrice?: number;
+    timeframe?: Timeframe;
+    broker?: BrokerId;
+    lotSize?: number;
+    reason?: string;
+  }): PendingLimitOrder | null {
+    const market = this.markets.find((m) => m.pair === params.pair);
+    if (!market || market.price <= 0) return null;
+
+    const dir = params.direction || resolveMarketDirection(market);
+    const timeframe = params.timeframe || this.customTimeframes[market.pair] || market.recommendedTf || 'M15';
+    const broker = params.broker || this.activeBroker;
+    const pctMap: Partial<Record<CurrencyPair, number>> = {};
+    this.markets.forEach((m) => {
+      pctMap[m.pair] = m.change24hPct;
+    });
+    const macro = getCurrentMacroContext(pctMap);
+    const swings = computeCandleSwingLevels(market.candles);
+    const { decimals } = getPairSpecs(market.pair);
+
+    const targetLimitPrice =
+      params.limitEntryPrice && Number.isFinite(params.limitEntryPrice) && params.limitEntryPrice > 0
+        ? Number(params.limitEntryPrice.toFixed(decimals))
+        : Number((market.advisoryEntryPrice || market.ema20 || market.price).toFixed(decimals));
+
+    const computed = computeRealChartTradeParams({
+      targetPair: market.pair,
+      targetTf: timeframe,
+      targetBroker: broker,
+      price: targetLimitPrice,
+      keyLevel: market.keyLevel,
+      ema20: market.ema20,
+      ema50: market.ema50,
+      rsi: market.rsi,
+      atrPips: market.atrPips,
+      candles: market.candles,
+      h1Candles: market.h1Candles,
+      swingLow: swings.swingLow,
+      swingHigh: swings.swingHigh,
+      macro,
+      biasOverride: dir,
+      previousDirection: dir,
+      h1TrendDirection: market.h1TrendDirection,
+      change24hPct: market.change24hPct,
+      bosAnalysis: market.bosAnalysis,
+      riskConfig: positionRiskStore.getConfig()
+    });
+
+    const limitOrder: PendingLimitOrder = {
+      id: `lim_${Date.now()}_${market.pair.replace('/', '')}`,
+      pair: market.pair,
+      direction: dir,
+      limitEntryPrice: targetLimitPrice,
+      stopLoss: computed.stopLoss,
+      tp1: computed.tp1,
+      tp2: computed.tp2,
+      tp3: computed.tp3,
+      invalidationPrice: computed.invalidationLevel ?? computed.stopLoss,
+      lotSize: Number((params.lotSize || computed.lotSize || 0.01).toFixed(2)),
+      timeframe,
+      broker,
+      armedAtEat: this.formatNowEat(),
+      armedTimestampMs: Date.now(),
+      status: 'PENDING',
+      reason:
+        params.reason ||
+        `Sniper ${dir} LIMIT @ ${targetLimitPrice} (20 EMA Value Zone · Invalidates if ${dir === 'BUY' ? '≤' : '≥'} ${computed.invalidationLevel ?? computed.stopLoss})`
+    };
+
+    // Keep max 1 active PENDING limit per pair
+    this.pendingLimits = [
+      limitOrder,
+      ...this.pendingLimits.filter((l) => !(l.pair === limitOrder.pair && l.status === 'PENDING'))
+    ].slice(0, 30);
+    this.persistPendingLimits();
+
+    this.playTradingChime('READY');
+    this.pushNotification({
+      pair: limitOrder.pair,
+      type: 'AI_SIGNAL',
+      title: `Armed ${limitOrder.direction} LIMIT · ${limitOrder.pair} @ ${limitOrder.limitEntryPrice}`,
+      message: `Waiting pullback fill @ ${limitOrder.limitEntryPrice} (SL ${limitOrder.stopLoss} · TP2 ${limitOrder.tp2} · Auto-cancels if thesis invalidates).`
+    });
+
+    return limitOrder;
+  }
+
+  public cancelPendingLimitOrder(id: string) {
+    let changed = false;
+    this.pendingLimits = this.pendingLimits.map((l) => {
+      if (l.id === id && l.status === 'PENDING') {
+        changed = true;
+        return { ...l, status: 'CANCELLED_MANUAL' };
+      }
+      return l;
+    });
+    if (changed) {
+      this.persistPendingLimits();
+      this.broadcast();
+    }
+  }
+
+  private checkPendingLimitsAgainstMarkets() {
+    if (this.pendingLimits.length === 0) return;
+    let changed = false;
+    const toFill: PendingLimitOrder[] = [];
+    const invalidated: PendingLimitOrder[] = [];
+
+    this.pendingLimits = this.pendingLimits.map((limit) => {
+      if (limit.status !== 'PENDING') return limit;
+      const mkt = this.markets.find((m) => m.pair === limit.pair);
+      if (!mkt || mkt.price <= 0) return limit;
+
+      const isBuy = limit.direction === 'BUY';
+      const isInvalidated = isBuy
+        ? mkt.price <= limit.invalidationPrice || mkt.price <= limit.stopLoss
+        : mkt.price >= limit.invalidationPrice || mkt.price >= limit.stopLoss;
+
+      if (isInvalidated) {
+        changed = true;
+        const cancelled: PendingLimitOrder = { ...limit, status: 'CANCELLED_INVALIDATED' };
+        invalidated.push(cancelled);
+        return cancelled;
+      }
+
+      const isFilled = isBuy ? mkt.price <= limit.limitEntryPrice : mkt.price >= limit.limitEntryPrice;
+      if (isFilled && !this.activeOrders[limit.pair]) {
+        changed = true;
+        const filled: PendingLimitOrder = { ...limit, status: 'FILLED' };
+        toFill.push(filled);
+        return filled;
+      }
+
+      return limit;
+    });
+
+    if (changed) {
+      this.persistPendingLimits();
+      invalidated.forEach((lim) => {
+        this.playTradingChime('STOP');
+        this.pushNotification({
+          pair: lim.pair,
+          type: 'SL_WARNING',
+          title: `Limit Auto-Cancelled · ${lim.pair} ${lim.direction}`,
+          message: `Thesis invalidation floor (${lim.invalidationPrice}) breached before entry fill. Zero capital risked.`
+        });
+      });
+      toFill.forEach((lim) => {
+        this.playTradingChime('FILL');
+        this.loadMarketOrder({
+          pair: lim.pair,
+          direction: lim.direction,
+          lotSize: lim.lotSize,
+          timeframe: lim.timeframe,
+          broker: lim.broker,
+          autoTrailEnabled: true,
+          customEntryPrice: lim.limitEntryPrice,
+          customStopLoss: lim.stopLoss,
+          customTp: lim.tp2,
+          note: `Pending ${lim.direction} LIMIT Filled @ ${lim.limitEntryPrice}`
+        });
+      });
+    }
+  }
+
+  public bankPartialTp1(pair: CurrencyPair, silentIfAlready = false): ActiveMarketOrder | null {
+    const existing = this.activeOrders[pair];
+    if (!existing) return null;
+    if (existing.partialTp1Banked && silentIfAlready) return existing;
+
+    const market = this.markets.find((m) => m.pair === pair);
+    const livePrice = market ? market.price : existing.tp1;
+    const metrics = computeLiveOrderMetrics(existing, livePrice, market?.atrPips);
+
+    // Bank 50% of floating net profit (min $0.05 if in profit) & move SL to breakeven
+    const prevBanked = existing.partialTp1Banked ? existing.partialBankedUsd || 0 : 0;
+    const unbankedNet = metrics.netProfitUsd - prevBanked;
+    const partialProfitUsd = Number((existing.partialTp1Banked ? 0 : unbankedNet * 0.5).toFixed(2));
+    const partialKes = Math.round(partialProfitUsd * 130);
+
+    const isBuy = existing.direction === 'BUY';
+    const improvedBeSl = isBuy
+      ? Math.max(existing.stopLoss, metrics.suggestedBreakevenSl)
+      : Math.min(existing.stopLoss, metrics.suggestedBreakevenSl);
+
+    const updatedOrder: ActiveMarketOrder = {
+      ...existing,
+      partialTp1Banked: true,
+      partialBankedUsd: Number((prevBanked + partialProfitUsd).toFixed(2)),
+      stopLoss: improvedBeSl,
+      slUpdatesCount: improvedBeSl !== existing.stopLoss ? existing.slUpdatesCount + 1 : existing.slUpdatesCount
+    };
+
+    this.activeOrders[pair] = updatedOrder;
+
+    // Record closed 50% scale slice in history if newly banked
+    if (!existing.partialTp1Banked) {
+      const partialHist: ClosedOrderHistoryEntry = {
+        id: `${existing.id}_pt1_${Date.now()}`,
+        pair: existing.pair,
+        direction: existing.direction,
+        lotSize: Number((existing.lotSize * 0.5).toFixed(2)),
+        broker: existing.broker,
+        timeframe: existing.timeframe,
+        entryPrice: existing.entryPrice,
+        closePrice: livePrice,
+        finalStopLoss: improvedBeSl,
+        finalTp: existing.tp1,
+        realizedPips: metrics.floatingPips,
+        realizedUsd: partialProfitUsd,
+        realizedKes: partialKes,
+        slUpdatesCount: updatedOrder.slUpdatesCount,
+        loadedAtEat: existing.loadedAtEat,
+        closedAtEat: this.formatNowEat(),
+        outcome: 'PROFIT'
+      };
+      this.orderHistory = [partialHist, ...this.orderHistory].slice(0, 40);
+      this.appendPropJournalRecord({
+        pair: existing.pair,
+        direction: existing.direction,
+        entryPrice: existing.entryPrice,
+        exitPrice: livePrice,
+        pips: metrics.floatingPips,
+        usdPnL: partialProfitUsd,
+        kesPnL: partialKes,
+        outcome: partialProfitUsd >= 0 ? 'WIN' : 'LOSS',
+        reason: `50% Partial Banked @ TP1 (${livePrice}) · Remaining 50% runner protected at BE SL ${improvedBeSl}`
+      });
+    }
+
+    this.persistOrders();
+    this.playTradingChime('TP1');
+    this.pushNotification({
+      pair: existing.pair,
+      type: 'TP_HIT',
+      title: `50% Banked @ TP1 · ${existing.pair} ${existing.direction}`,
+      message: `Realized +$${partialProfitUsd.toFixed(2)} (${partialKes} KES) on half volume. Remaining 50% runner protected at BE SL ${improvedBeSl}.`
+    });
+    this.broadcast();
+    return updatedOrder;
+  }
+
+  private runEaAutoPilotStep() {
+    if (!this.eaAutoPilot) return;
+    const nowMs = Date.now();
+
+    // 1. Auto-close orders that hit TP2 or SL cleanly just like an MT5 Expert Advisor
+    const openKeys = Object.keys(this.activeOrders) as CurrencyPair[];
+    for (const pairKey of openKeys) {
+      const ord = this.activeOrders[pairKey];
+      const mkt = this.markets.find((m) => m.pair === pairKey);
+      if (!ord || !mkt || !ord.autoTrailEnabled) continue;
+      const metrics = computeLiveOrderMetrics(ord, mkt.price, mkt.atrPips);
+      if (metrics.hitTp2 || metrics.hitSl) {
+        this.lastAutoClosedByPair[pairKey] = nowMs;
+        this.closeMarketOrder(pairKey);
+      }
+    }
+
+    // 2. Enforce Daily Drawdown & Loss-Streak Circuit Breaker before opening new positions
+    const circuitBreaker = this.computeCircuitBreakerState();
+    if (circuitBreaker.tripped) return;
+
+    // 3. Auto-open high-probability READY_ENTER setups (cap at 3 simultaneous positions, guard correlated stacking)
+    const activeCount = Object.keys(this.activeOrders).length;
+    const riskCfg = positionRiskStore.getConfig();
+
+    if (activeCount < 3) {
+      const candidates = sortMarketsByTopPercent(this.markets, 'PRECISION').filter(
+        (m) =>
+          m.executionReadiness === 'READY_ENTER' &&
+          !m.isExtendedZone &&
+          m.bias !== 'NEUTRAL_CHOP' &&
+          m.confidence >= 74 &&
+          !this.activeOrders[m.pair] &&
+          nowMs - (this.lastAutoClosedByPair[m.pair] ?? 0) > 5 * 60 * 1000
+      );
+
+      for (const cand of candidates) {
+        if (Object.keys(this.activeOrders).length >= 3) break;
+        const dir = resolveMarketDirection(cand);
+        const tf = this.customTimeframes[cand.pair] || cand.recommendedTf || 'M15';
+        const exposure = evaluatePortfolioRiskExposure(this.activeOrders, riskCfg, {
+          pair: cand.pair,
+          direction: dir,
+          riskUsd: cand.actualRiskUsd ?? 2.0
+        });
+        if (exposure.severity === 'HIGH_STACKED_RISK') continue;
+
+        this.playTradingChime('FILL');
+        this.loadMarketOrder({
+          pair: cand.pair,
+          direction: dir,
+          timeframe: tf,
+          broker: this.activeBroker,
+          autoTrailEnabled: true,
+          note: `MT5 EA Auto-Pilot Entry (${cand.confidence}% · ${cand.recommendedStrategy})`
+        });
+      }
+    }
+
+    // 4. Auto-arm up to 2 Tier-2 Pullback Sniper Limits on 20 EMA retests
+    const armedCount = this.pendingLimits.filter((l) => l.status === 'PENDING').length;
+    if (armedCount < 2) {
+      const pullbackCands = sortMarketsByTopPercent(this.markets, 'PRECISION').filter(
+        (m) =>
+          m.executionReadiness === 'WAIT_PULLBACK' &&
+          m.bias !== 'NEUTRAL_CHOP' &&
+          m.confidence >= 72 &&
+          !this.activeOrders[m.pair] &&
+          !this.pendingLimits.some((l) => l.pair === m.pair && l.status === 'PENDING') &&
+          Boolean(m.advisoryEntryPrice && m.advisoryEntryPrice > 0)
+      );
+      for (const pb of pullbackCands.slice(0, 2 - armedCount)) {
+        const dir = resolveMarketDirection(pb);
+        const tf = this.customTimeframes[pb.pair] || pb.recommendedTf || 'M15';
+        this.armPendingLimitOrder({
+          pair: pb.pair,
+          direction: dir,
+          limitEntryPrice: pb.advisoryEntryPrice,
+          timeframe: tf,
+          broker: this.activeBroker,
+          reason: `Auto-Armed Sniper ${dir} LIMIT @ 20 EMA (${pb.advisoryEntryPrice})`
+        });
+      }
+    }
+  }
+
+  public toggleEaAutoPilot(enabled?: boolean): boolean {
+    const next = typeof enabled === 'boolean' ? enabled : !this.eaAutoPilot;
+    this.eaAutoPilot = next;
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(EA_AUTOPILOT_STORAGE_KEY, String(next));
+      }
+    } catch {}
+    if (next) {
+      this.runEaAutoPilotStep();
+    }
+    this.pushNotification({
+      type: 'AI_SIGNAL',
+      title: `MT5 EA Auto-Pilot ${next ? 'ACTIVATED' : 'PAUSED'}`,
+      message: next
+        ? 'Autonomous MT5 execution active: high-conviction READY setups auto-stage, SL trails at 0.55x ATR / +55% lock, 50% banks at TP1, and TP2/SL hits auto-settle.'
+        : 'Autonomous EA execution paused. Existing open orders retain manual SL/TP & Profit-Lock tracking.'
+    });
+    this.broadcast();
+    return next;
+  }
+
+  public clearEaLedger() {
+    this.eaLedger = [];
+    this.persistEaLedger();
+    this.broadcast();
+  }
+
+  public evaluateEaLedgerAgainstPrice(pair: CurrencyPair, price: number) {
+    if (!Number.isFinite(price) || price <= 0) return;
+    this.markets = this.markets.map((m) => (m.pair === pair ? { ...m, price } : m));
+    this.evaluateEaLedgerAgainstMarkets();
+    this.broadcast();
+  }
+
   public getState(): GlobalStreamState {
     return {
       markets: this.markets,
       selectedPair: this.selectedPair,
       activeBroker: this.activeBroker,
       activeOrders: { ...this.activeOrders },
+      pendingLimits: [...this.pendingLimits],
       orderHistory: [...this.orderHistory],
       suggestedSignals: [...this.suggestedSignals],
+      eaLedger: [...this.eaLedger],
+      eaLedgerStats: computeEaLedgerStats(this.eaLedger),
+      eaAutoPilot: this.eaAutoPilot,
+      eaCircuitBreaker: this.computeCircuitBreakerState(),
+      soundAlertsEnabled: this.soundAlertsEnabled,
       notifications: [...this.notifications],
       priceAlerts: [...this.priceAlerts],
       superAiAutoEnabled: this.superAiAutoEnabled,
@@ -8713,14 +10000,16 @@ class GlobalLiveMarketStreamEngine {
   ) {
     const prevMeta = new Map<
       CurrencyPair,
-      { rank: number; dir: 'BUY' | 'SELL'; trendDir: 'UPTREND' | 'DOWNTREND' | 'RANGING'; price: number }
+      { rank: number; dir: 'BUY' | 'SELL'; bias: MarketScanData['bias']; trendDir: 'UPTREND' | 'DOWNTREND' | 'RANGING'; price: number }
     >();
     const pctSnapshot: Partial<Record<CurrencyPair, number>> = {};
     this.markets.forEach((m, idx) => {
+      const resolvedDir = resolveMarketDirection(m);
       prevMeta.set(m.pair, {
         rank: m.currentRank || idx + 1,
-        dir: m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
-        trendDir: m.trendDirection || (m.bias === 'STRONG_SELL' ? 'DOWNTREND' : 'UPTREND'),
+        dir: resolvedDir,
+        bias: m.bias,
+        trendDir: m.trendDirection || (resolvedDir === 'SELL' ? 'DOWNTREND' : 'UPTREND'),
         price: m.price
       });
       pctSnapshot[m.pair] = priceUpdates?.[m.pair]?.pct ?? m.change24hPct;
@@ -8790,12 +10079,14 @@ class GlobalLiveMarketStreamEngine {
         dataSource: feedOk ? 'Live Interbank Feed' : 'Live Feed + Institutional Calibration'
       });
 
-      const newDir: 'BUY' | 'SELL' = calibrated.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
+      const newDir: 'BUY' | 'SELL' = resolveMarketDirection(calibrated);
       const newTrendDir: 'UPTREND' | 'DOWNTREND' | 'RANGING' = calibrated.trendDirection;
 
-      // Update persistent session anchors
-      this.sessionDirection[existing.pair] = newDir;
-      this.sessionTrendDirection[existing.pair] = newTrendDir;
+      // Update persistent session anchors ONLY when setup has valid non-chop directional conviction
+      if (calibrated.bias !== 'NEUTRAL_CHOP') {
+        this.sessionDirection[existing.pair] = newDir;
+        this.sessionTrendDirection[existing.pair] = newTrendDir;
+      }
 
       // Proactive Audio Warning & Alert on Approaching Invalidation Floor or Reversal:
       const distToSlPips = Math.abs(nextPrice - calibrated.suggestedSL) * pipMultiplier;
@@ -8803,7 +10094,11 @@ class GlobalLiveMarketStreamEngine {
       const isNearInvalidation = distToSlPips <= invalidationThresholdPips;
       const lastWarn = this.lastReversalWarningByPair[existing.pair] ?? 0;
 
-      if (isNearInvalidation && nowMs - lastWarn > 45_000) {
+      if (
+        isNearInvalidation &&
+        nowMs - lastWarn > 45_000 &&
+        (Boolean(this.activeOrders[existing.pair]) || calibrated.executionReadiness !== 'NO_TRADE_CHOP')
+      ) {
         this.lastReversalWarningByPair[existing.pair] = nowMs;
         const actionVerb = newDir === 'BUY' ? 'BUY' : 'SELL';
         const protectVerb = newDir === 'BUY' ? 'support floor' : 'resistance ceiling';
@@ -8815,13 +10110,18 @@ class GlobalLiveMarketStreamEngine {
         });
       }
 
-      // Confirmed Structural Trend Shift (Breaking news, geopolitical shock, or structural breakdown)
-      if (old && old.dir !== newDir) {
+      // Only fire Reversal Confirmed alert on genuine non-CHOP bias reversal (never from NEUTRAL_CHOP pause!)
+      const isGenuineReversalFlip =
+        Boolean(old) &&
+        old!.bias !== 'NEUTRAL_CHOP' &&
+        calibrated.bias !== 'NEUTRAL_CHOP' &&
+        old!.dir !== newDir;
+      if (isGenuineReversalFlip) {
         this.pushNotification({
           pair: existing.pair,
           type: 'SL_WARNING',
           title: `🔄 MARKET REVERSAL CONFIRMED: ${existing.pair} FLIPPED TO ${newDir}`,
-          message: `${existing.pair} confirmed structural trend shift from ${old.dir} to ${newDir}. Close active ${old.dir} broker positions immediately or prepare ${newDir} entry.`
+          message: `${existing.pair} confirmed structural trend shift from ${old!.dir} to ${newDir}. Close active ${old!.dir} broker positions immediately or review ${newDir} structure.`
         });
       }
 
@@ -8829,7 +10129,7 @@ class GlobalLiveMarketStreamEngine {
         ...calibrated,
         previousRank: old?.rank ?? calibrated.previousRank,
         previousDirection: old?.dir ?? calibrated.previousDirection,
-        directionFlipped: Boolean(old && old.dir !== newDir),
+        directionFlipped: isGenuineReversalFlip,
         lastTickTime: tickStr,
         lastTickDir: tickDir,
         lastTickDeltaPips: rawDiffPips !== 0 ? rawDiffPips : existing.lastTickDeltaPips
@@ -8839,7 +10139,10 @@ class GlobalLiveMarketStreamEngine {
     // Dynamic sorting strictly from Top % down to Least % across all markets!
     this.markets = sortMarketsByTopPercent(updatedList, 'PCT_DESC');
     this.syncActiveOrdersWithMarkets();
+    this.checkPendingLimitsAgainstMarkets();
     this.checkPriceAlertsAgainstMarkets();
+    this.evaluateEaLedgerAgainstMarkets();
+    this.runEaAutoPilotStep();
     if (
       scanMode === 'auto_1s' &&
       this.dailyMacroDirective.source !== 'gemini-4-hydrogen' &&
@@ -8848,15 +10151,18 @@ class GlobalLiveMarketStreamEngine {
       this.dailyMacroDirective = buildInitialMacroDirective(this.markets);
     }
 
-    if (isExplicitFreshScan && this.markets[0]) {
-      const top = this.markets[0];
-      const dir = top.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
-      if (top.confidence >= 76) {
+    if (isExplicitFreshScan) {
+      const top =
+        sortMarketsByTopPercent(this.markets, 'PRECISION').find(
+          (m) => m.executionReadiness === 'READY_ENTER' || m.executionReadiness === 'WAIT_PULLBACK'
+        );
+      if (top && top.confidence >= 74) {
+        const dir = resolveMarketDirection(top);
         this.pushNotification({
           pair: top.pair,
           type: 'AI_SIGNAL',
-          title: `#1 Ranked Setup: ${top.pair} ${dir} (${top.confidence}% AI)`,
-          message: `Entry @ ${top.price} · SL ${top.suggestedSL} · TP2 ${top.suggestedTP2} · ${
+          title: `#1 Ranked Setup: ${top.pair} ${top.executionReadiness === 'WAIT_PULLBACK' ? `WAIT PULLBACK ${dir}` : dir} (${top.confidence}% AI)`,
+          message: `Entry @ ${top.executionReadiness === 'WAIT_PULLBACK' ? top.advisoryEntryPrice || top.price : top.price} · SL ${top.suggestedSL} · TP2 ${top.suggestedTP2} · ${
             top.entryTimingWarning || 'Prime Entry Zone'
           }`
         });
@@ -9034,7 +10340,7 @@ class GlobalLiveMarketStreamEngine {
           timeframe: this.customTimeframes[m.pair] || m.recommendedTf,
           price: m.price,
           change24hPct: m.change24hPct,
-          direction: m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+          direction: resolveMarketDirection(m),
           trendDirection: m.trendDirection,
           ema20: m.ema20,
           ema50: m.ema50,
@@ -9206,7 +10512,7 @@ class GlobalLiveMarketStreamEngine {
     this.markets = this.markets.map((m) => {
       if (m.pair !== pair) return m;
       const activeTf = this.customTimeframes[pair] || m.recommendedTf;
-      const prevDir: 'BUY' | 'SELL' = m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
+      const prevDir: 'BUY' | 'SELL' = resolveMarketDirection(m);
       const inferredOpen =
         m.dailyOpenPrice && m.dailyOpenPrice > 0
           ? m.dailyOpenPrice
@@ -9236,12 +10542,13 @@ class GlobalLiveMarketStreamEngine {
         spreadByBroker: m.spreadByBroker,
         dataSource: m.dataSource
       });
-      const newDir: 'BUY' | 'SELL' = updated.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
+      const newDir: 'BUY' | 'SELL' = resolveMarketDirection(updated);
+      const confirmedFlip = m.bias !== 'NEUTRAL_CHOP' && updated.bias !== 'NEUTRAL_CHOP' && prevDir !== newDir;
       return {
         ...updated,
         previousRank: m.currentRank,
         previousDirection: prevDir,
-        directionFlipped: prevDir !== newDir,
+        directionFlipped: confirmedFlip,
         lastTickTime: tickStr,
         lastTickDir: tickDir,
         lastTickDeltaPips: diffPips
@@ -9254,7 +10561,10 @@ class GlobalLiveMarketStreamEngine {
       previousRank: prevRanks.get(m.pair)
     }));
     this.syncActiveOrdersWithMarkets();
+    this.checkPendingLimitsAgainstMarkets();
     this.checkPriceAlertsAgainstMarkets();
+    this.evaluateEaLedgerAgainstMarkets();
+    this.runEaAutoPilotStep();
     this.syncedAt = tickStr;
     this.broadcast();
   }
@@ -9286,11 +10596,15 @@ class GlobalLiveMarketStreamEngine {
       });
     }
     if (!this.intervalId) {
+      void refreshLiveEconomicCalendar(false);
       void refreshBackgroundRealOhlcCandles(true);
       void this.pollLiveExchangeRest('scan_all').then(() => this.runBatchAiScan('deep_ai'));
       this.intervalId = setInterval(() => {
         this.tickCount += 1;
         this.syncedAt = this.formatNowEat();
+        if (this.tickCount % 90 === 0) {
+          void refreshLiveEconomicCalendar(false);
+        }
         this.pollLiveExchangeRest('auto_1s');
       }, 2000);
     }

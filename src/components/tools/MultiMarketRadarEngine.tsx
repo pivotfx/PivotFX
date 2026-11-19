@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { CurrencyPair, Timeframe, BrokerId } from '../../types';
+import {
+  CurrencyPair,
+  Timeframe,
+  BrokerId,
+  EaSignalLedgerEntry,
+  EaLedgerStats,
+  PendingLimitOrder,
+  EaCircuitBreakerState
+} from '../../types';
 import {
   MarketScanData,
   DailyMacroAiDirective,
@@ -23,7 +31,8 @@ import {
   DeepVerifyResult,
   positionRiskStore,
   getTradingViewSymbol,
-  getTradingViewExternalUrl
+  getTradingViewExternalUrl,
+  resolveMarketDirection
 } from '../../utils/liveMarketEngine';
 import { EntryConfirmationController } from './EntryConfirmationController';
 import { LiveInteractiveCandleChart } from './LiveInteractiveCandleChart';
@@ -155,6 +164,20 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
   const [propAccount, setPropAccount] = useState<PropAccountConfig>(() => getStoredPropAccount());
   const [journalTrades, setJournalTrades] = useState<JournalTrade[]>(() => getStoredJournalTrades());
   const [isAudioActive, setIsAudioActive] = useState<boolean>(() => audioAlertEngine.isEnabled());
+  const [eaAutoPilot, setEaAutoPilot] = useState<boolean>(() => globalLiveStream.getState().eaAutoPilot);
+  const [eaLedger, setEaLedger] = useState<EaSignalLedgerEntry[]>(() => globalLiveStream.getState().eaLedger);
+  const [eaLedgerStats, setEaLedgerStats] = useState<EaLedgerStats>(() => globalLiveStream.getState().eaLedgerStats);
+  const [pendingLimits, setPendingLimits] = useState<PendingLimitOrder[]>(
+    () => globalLiveStream.getState().pendingLimits
+  );
+  const [soundAlertsEnabled, setSoundAlertsEnabled] = useState<boolean>(
+    () => globalLiveStream.getState().soundAlertsEnabled
+  );
+  const [eaCircuitBreaker, setEaCircuitBreaker] = useState<EaCircuitBreakerState>(
+    () => globalLiveStream.getState().eaCircuitBreaker
+  );
+  const [showLedgerDrawer, setShowLedgerDrawer] = useState<boolean>(false);
+  const [showChopTier, setShowChopTier] = useState<boolean>(false);
   const [, setEatClockTick] = useState<number>(0);
 
   useEffect(() => {
@@ -164,7 +187,9 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
 
   const handleToggleSound = () => {
     const nextState = audioAlertEngine.toggle();
+    globalLiveStream.toggleSoundAlerts(nextState);
     setIsAudioActive(nextState);
+    setSoundAlertsEnabled(nextState);
   };
 
   const handleQuickCopyValue = (val: string | number, key: string) => {
@@ -192,6 +217,12 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
       setDailyMacroDirective(streamState.dailyMacroDirective);
       setSelectedPair(streamState.selectedPair);
       setActiveOrders(streamState.activeOrders);
+      setEaAutoPilot(streamState.eaAutoPilot);
+      setEaLedger(streamState.eaLedger);
+      setEaLedgerStats(streamState.eaLedgerStats);
+      setPendingLimits(streamState.pendingLimits);
+      setSoundAlertsEnabled(streamState.soundAlertsEnabled);
+      setEaCircuitBreaker(streamState.eaCircuitBreaker);
     });
     const unsubRisk = positionRiskStore.subscribe((nextCfg) => setRiskConfig(nextCfg));
     const handlePropTradesUpdated = () => {
@@ -259,7 +290,16 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
     setIsScanning(false);
 
     const precisionSorted = sortMarketsByTopPercent(updatedState.markets, 'PRECISION');
-    const leader = mode === 'precision_ai' ? precisionSorted[0] : updatedState.markets[0];
+    const actionablePrecisionLeader = precisionSorted.find(
+      (m) => m.executionReadiness === 'READY_ENTER' || m.executionReadiness === 'WAIT_PULLBACK'
+    );
+    const actionableTopLeader = updatedState.markets.find(
+      (m) => m.executionReadiness === 'READY_ENTER' || m.executionReadiness === 'WAIT_PULLBACK'
+    );
+    const leader =
+      mode === 'precision_ai'
+        ? actionablePrecisionLeader || precisionSorted[0]
+        : actionableTopLeader || updatedState.markets[0];
     const modeLabel =
       mode === 'precision_ai'
         ? 'SUPER PRECISION AI SCAN (LOWEST-DRAWDOWN RANK)'
@@ -272,21 +312,26 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
         : 'SCAN ALL MARKETS';
 
     if (leader) {
-      const dirWord = leader.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
+      const dirWord = resolveMarketDirection(leader);
+      const isLeaderBlocked =
+        leader.executionReadiness === 'NO_TRADE_CHOP' ||
+        leader.executionReadiness === 'NO_TRADE_CLOSED';
       const pctStr = leader.change24hPct >= 0 ? `+${leader.change24hPct}%` : `${leader.change24hPct}%`;
       const netUsd = leader.netProfitUsd ?? Number((leader.projectedPips * 0.1).toFixed(2));
       const netKes = leader.netProfitKes ?? Math.round(netUsd * 130);
       const tel = leader.institutionalTelemetry;
       const epInfo =
         leader.advisoryEntryPrice && (leader.advisoryDiscountPips ?? 0) > 0
-          ? `Sniper EP @ ${leader.advisoryEntryPrice} (trims ${leader.advisoryDiscountPips}p DD)`
+          ? `Wait Bounce @ ${leader.advisoryEntryPrice} (trims ${leader.advisoryDiscountPips}p DD)`
           : `@ ${leader.price}`;
       setScanBanner(
-        mode === 'precision_ai'
+        isLeaderBlocked
+          ? `${modeLabel} (${updatedState.syncedAt}) · STAND ASIDE — All pairs currently ${leader.executionReadiness === 'NO_TRADE_CLOSED' ? 'CLOSED' : 'IN CHOP / COUNTER-TREND NOISE'} · Top mover: ${leader.pair} (${pctStr})`
+          : mode === 'precision_ai'
           ? `${modeLabel} (${updatedState.syncedAt}) · #1 Highest Edge: ${leader.pair} ${dirWord} (${tel?.roboticVerdict || leader.executionReadiness} · ${tel?.roboticScore ?? leader.confidence}/100 · ${tel?.estimatedWinProbPct ?? leader.confidence}% WinP · ${tel?.expectedRMultiple ?? '+0.8'}R) · ${epInfo} · SL ${leader.suggestedSL} · TP2 ${leader.suggestedTP2}`
           : mode === 'h1_trend_lock'
-          ? `1H TREND-LOCK ACTIVE ✓ · All ${updatedState.markets.length} pairs anchored to 1H 20/50 EMA structure · Pullback candles classified as Retracements (Sell Rally in Downtrend / Buy Dip in Uptrend) · Top Setup: ${leader.pair} ${dirWord} @ ${leader.price}`
-          : `${modeLabel} (${updatedState.syncedAt}) · #1 Top % Leader: ${leader.pair} (${pctStr}) · ${leader.trendDirection} · ORDER ${dirWord} @ ${leader.price} · Est. Net +$${netUsd.toFixed(2)} (+${netKes} KES) · SL ${leader.suggestedSL} · TP ${leader.suggestedTP2}`
+          ? `1H TREND-LOCK ACTIVE ✓ · All ${updatedState.markets.length} pairs anchored to 1H 20/50 EMA structure · Top Setup: ${leader.pair} ${dirWord} @ ${leader.price}`
+          : `${modeLabel} (${updatedState.syncedAt}) · #1 Top Edge: ${leader.pair} (${pctStr}) · ${leader.trendDirection} · ${dirWord} @ ${leader.price} · Est. Net +$${netUsd.toFixed(2)} (+${netKes} KES) · SL ${leader.suggestedSL} · TP ${leader.suggestedTP2}`
       );
       setTimeout(() => setScanBanner(null), 7000);
     }
@@ -402,8 +447,9 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
       if (filterBias === 'SELL') return m.bias === 'STRONG_SELL';
       if (filterBias === 'FLIPPED') return Boolean(m.directionFlipped);
       if (filterBias === 'GRADE_A') {
-        const isBull = m.bias === 'STRONG_BUY';
-        return m.h1TrendDirection === (isBull ? 'UPTREND' : 'DOWNTREND');
+        if (m.bias === 'NEUTRAL_CHOP') return false;
+        const resolved = resolveMarketDirection(m);
+        return m.h1TrendDirection === (resolved === 'BUY' ? 'UPTREND' : 'DOWNTREND');
       }
       return true;
     });
@@ -434,7 +480,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
           ema20: m.ema20,
           ema50: m.ema50,
           h1TrendDirection:
-            m.h1TrendDirection || (m.bias === 'STRONG_SELL' ? 'DOWNTREND' : 'UPTREND'),
+            m.h1TrendDirection || (resolveMarketDirection(m) === 'SELL' ? 'DOWNTREND' : 'UPTREND'),
           change24hPct: m.change24hPct,
           macro: macroContext
         });
@@ -480,7 +526,11 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
       .toFixed(2)
   );
 
-  const topLeader = filteredMarkets[0] || markets[0];
+  const topLeader =
+    filteredMarkets.find((m) => m.executionReadiness === 'READY_ENTER') ||
+    filteredMarkets.find((m) => m.executionReadiness === 'WAIT_PULLBACK') ||
+    filteredMarkets[0] ||
+    markets[0];
   const focusedMarket = selectedPair ? markets.find((m) => m.pair === selectedPair) || null : null;
   const TIMEFRAME_CHOICES: Timeframe[] = ['M1', 'M5', 'M10', 'M15', 'H1', 'H4', 'D1'];
 
@@ -584,8 +634,83 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
           </p>
         </div>
 
-        {/* SCAN CONTROLS: Super AI Auto | Scan All | Rescan | 1H Trend-Lock | Deep AI */}
+        {/* SCAN CONTROLS: MT5 EA Auto | Super AI Auto | Scan All | Rescan | 1H Trend-Lock | Deep AI */}
         <div className="flex items-center gap-2 flex-wrap shrink-0 w-full xl:w-auto">
+          <button
+            type="button"
+            onClick={() => {
+              const nextState = globalLiveStream.toggleEaAutoPilot();
+              setScanBanner(
+                nextState
+                  ? 'MT5 EA AUTO-PILOT ACTIVATED · Qualified READY_ENTER setups auto-stage, SL trails (0.55x ATR / +55% lock), 50% banks at TP1, and TP2/SL hits auto-settle.'
+                  : 'MT5 EA AUTO-PILOT PAUSED · Manual confirmation & existing active SL/TP tracking remain active.'
+              );
+              setTimeout(() => setScanBanner(null), 5500);
+            }}
+            className={`px-3.5 py-2.5 rounded-xl font-mono font-black text-xs flex items-center gap-1.5 transition whitespace-nowrap shrink-0 border ${
+              eaAutoPilot
+                ? 'bg-[#00C261] text-black border-[#00C261] shadow-lg shadow-[#00C261]/25'
+                : 'bg-slate-900 text-amber-300 hover:text-white border-amber-500/50'
+            }`}
+            title="Toggle MT5-style autonomous EA Auto-Pilot (auto-stages READY setups, trails SL, 50% TP1 partial bank, closes TP2/SL hits)"
+          >
+            <Bot className="w-3.5 h-3.5" />
+            <span>MT5 EA Auto: {eaAutoPilot ? 'ON' : 'OFF'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              const nextSound = globalLiveStream.toggleSoundAlerts();
+              if (audioAlertEngine.isEnabled() !== nextSound) {
+                audioAlertEngine.toggle();
+              }
+              setIsAudioActive(nextSound);
+              setSoundAlertsEnabled(nextSound);
+            }}
+            className={`px-3 py-2.5 rounded-xl font-mono font-bold text-xs flex items-center gap-1.5 transition whitespace-nowrap shrink-0 border ${
+              soundAlertsEnabled
+                ? 'bg-amber-950/60 text-amber-300 border-amber-500/50'
+                : 'bg-slate-900 text-slate-400 hover:text-white border-slate-800'
+            }`}
+            title="Toggle crisp Web Audio chimes on Limit fills, TP1 partial bank, and price alerts"
+          >
+            {soundAlertsEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            <span>Sound: {soundAlertsEnabled ? 'ON' : 'OFF'}</span>
+          </button>
+
+          {(() => {
+            const armedCount = pendingLimits.filter((l) => l.status === 'PENDING').length;
+            return (
+              <div className="flex items-center gap-1.5 shrink-0">
+                {armedCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => globalLiveStream.requestOpenScannerView('trade_log')}
+                    className="px-3 py-2.5 rounded-xl bg-amber-500/15 text-amber-300 border border-amber-500/45 font-mono font-black text-xs whitespace-nowrap"
+                    title="View armed Sniper BUY/SELL LIMIT orders in Trade Log"
+                  >
+                    Limits Armed: {armedCount}
+                  </button>
+                )}
+                {eaCircuitBreaker.tripped && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      globalLiveStream.resetEaCircuitBreaker();
+                      setScanBanner('EA Circuit Breaker Reset · Protection counter cleared.');
+                      setTimeout(() => setScanBanner(null), 4000);
+                    }}
+                    className="px-3 py-2.5 rounded-xl bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-500/60 font-mono font-black text-xs whitespace-nowrap"
+                    title={eaCircuitBreaker.reason || 'Daily drawdown or loss-streak circuit breaker tripped'}
+                  >
+                    CB Tripped · Reset
+                  </button>
+                )}
+              </div>
+            );
+          })()}
+
           <button
             type="button"
             onClick={() => globalLiveStream.setSuperAiAuto(!superAiAuto)}
@@ -695,30 +820,153 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
         </div>
       </div>
 
-      {/* 2B. HIGH-IMPACT ECONOMIC NEWS & SPREAD VOLATILITY SHIELD */}
+      {/* 2B. HIGH-IMPACT ECONOMIC NEWS & SPREAD VOLATILITY SHIELD + LIVE PROOF LEDGER STRIP */}
       {(() => {
         const events = getUpcomingEconomicEvents();
         const activeOrImminent = events.find((e) => e.status === 'ACTIVE_NOW' || e.status === 'IMMINENT');
         const nextEvent = events.find((e) => e.status !== 'PASSED') || events[0];
 
         return (
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs font-mono">
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <span
-                className={`px-2.5 py-1 rounded-lg font-black text-[10px] flex items-center gap-1.5 ${
-                  activeOrImminent
-                    ? 'bg-amber-400 text-black'
-                    : 'bg-emerald-950/80 text-[#00C261] border border-[#00C261]/50'
-                }`}
-              >
-                <Shield className="w-3.5 h-3.5" />
-                <span>{activeOrImminent ? '⚠️ HIGH-IMPACT NEWS RADAR ACTIVE' : '🟢 SPREAD CLEAR SKY'}</span>
-              </span>
-              <span className="text-white font-bold">{nextEvent.name} ({nextEvent.currency})</span>
-              <span className="text-slate-400">· Release: {nextEvent.timeEAT}</span>
+          <div className="space-y-2.5">
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs font-mono">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <span
+                  className={`px-2.5 py-1 rounded-lg font-black text-[10px] flex items-center gap-1.5 ${
+                    activeOrImminent
+                      ? 'bg-amber-400 text-black'
+                      : 'bg-emerald-950/80 text-[#00C261] border border-[#00C261]/50'
+                  }`}
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  <span>{activeOrImminent ? '⚠️ HIGH-IMPACT NEWS RADAR ACTIVE' : '🟢 SPREAD CLEAR SKY'}</span>
+                </span>
+                <span className="text-white font-bold">{nextEvent.name} ({nextEvent.currency})</span>
+                <span className="text-slate-400">· Release: {nextEvent.timeEAT}</span>
+              </div>
+              <div className="text-slate-300 text-[11px] font-sans">
+                {nextEvent.tradingDirective}
+              </div>
             </div>
-            <div className="text-slate-300 text-[11px] font-sans">
-              {nextEvent.tradingDirective}
+
+            {/* Verified Live EA Signal Proof Scoreboard */}
+            <div className="p-3 rounded-2xl bg-[#090F1E] border border-slate-800 space-y-2.5 text-xs font-mono tabular-nums">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 text-[10px] font-black">
+                    AUTO-SCORED SIGNAL PROOF
+                  </span>
+                  <span className="text-slate-200 font-bold">
+                    {eaLedgerStats.total === 0
+                      ? 'Waiting for first qualified READY_ENTER bar signal...'
+                      : `${eaLedgerStats.wins}W / ${eaLedgerStats.losses}L · ${eaLedgerStats.winRatePct}% Win Rate · Net ${
+                          eaLedgerStats.netR >= 0 ? `+${eaLedgerStats.netR}` : eaLedgerStats.netR
+                        }R · PF ${eaLedgerStats.profitFactor} · ${eaLedgerStats.open} Open`}
+                  </span>
+                  {eaAutoPilot && (
+                    <span className="px-2 py-0.5 rounded bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40 text-[10px] font-black">
+                      EA AUTO-PILOT EXECUTING
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowLedgerDrawer((prev) => !prev)}
+                    className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-slate-700 text-[11px] font-bold flex items-center gap-1 transition"
+                  >
+                    <span>{showLedgerDrawer ? 'Hide Proof Ledger' : `Proof Ledger (${eaLedger.length})`}</span>
+                    {showLedgerDrawer ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </button>
+                  {eaLedger.length > 0 && showLedgerDrawer && (
+                    <button
+                      type="button"
+                      onClick={() => globalLiveStream.clearEaLedger()}
+                      className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-red-950 text-red-300 border border-red-500/40 text-[10px] font-bold transition"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {showLedgerDrawer && (
+                <div className="pt-2 border-t border-slate-800/80 overflow-x-auto">
+                  {eaLedger.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 font-sans">
+                      No READY_ENTER signals fired in this browser session yet. When all gates align (20/50 EMA trend + H1 anchor + active session + clean Value Zone), signals automatically enter here and score live ticks to TP1/TP2/SL.
+                    </p>
+                  ) : (
+                    <table className="w-full text-left border-collapse text-[11px]">
+                      <thead>
+                        <tr className="border-b border-slate-800 text-slate-400 text-[10px] uppercase">
+                          <th className="py-1.5 px-2">Opened (EAT)</th>
+                          <th className="py-1.5 px-2">Pair · TF</th>
+                          <th className="py-1.5 px-2">Side</th>
+                          <th className="py-1.5 px-2 text-right">Entry</th>
+                          <th className="py-1.5 px-2 text-right">SL</th>
+                          <th className="py-1.5 px-2 text-right">TP2</th>
+                          <th className="py-1.5 px-2 text-right">Live/Peak Pips</th>
+                          <th className="py-1.5 px-2 text-right">Outcome</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60">
+                        {eaLedger.slice(0, 12).map((row) => (
+                          <tr
+                            key={row.id}
+                            onClick={() => handleOpenPairCard(row.pair)}
+                            className="hover:bg-slate-900/70 cursor-pointer"
+                          >
+                            <td className="py-1.5 px-2 text-slate-300">{row.openedAtEat}</td>
+                            <td className="py-1.5 px-2 font-black text-white">
+                              {row.pair} <span className="text-slate-400 font-normal">{row.timeframe}</span>
+                            </td>
+                            <td className="py-1.5 px-2">
+                              <span
+                                className={`px-1.5 py-0.5 rounded font-black text-[10px] ${
+                                  row.direction === 'BUY'
+                                    ? 'bg-[#00C261]/20 text-[#00C261]'
+                                    : 'bg-red-500/20 text-red-300'
+                                }`}
+                              >
+                                {row.direction}
+                              </span>
+                            </td>
+                            <td className="py-1.5 px-2 text-right text-slate-200">{row.entryPrice}</td>
+                            <td className="py-1.5 px-2 text-right text-red-300">{row.stopLoss}</td>
+                            <td className="py-1.5 px-2 text-right text-[#00C261]">{row.tp2}</td>
+                            <td className={`py-1.5 px-2 text-right font-bold ${row.currentPips >= 0 ? 'text-[#00C261]' : 'text-red-400'}`}>
+                              {row.currentPips >= 0 ? `+${row.currentPips}p` : `${row.currentPips}p`}
+                              <span className="text-slate-500 font-normal"> (pk +{row.peakPips}p)</span>
+                            </td>
+                            <td className="py-1.5 px-2 text-right">
+                              <span
+                                className={`px-1.5 py-0.5 rounded font-black text-[10px] ${
+                                  row.status === 'TP2_WIN'
+                                    ? 'bg-[#00C261] text-black'
+                                    : row.status === 'TP1_BE_SAVE'
+                                    ? 'bg-cyan-500/25 text-cyan-300'
+                                    : row.status === 'SL_LOSS'
+                                    ? 'bg-red-500/25 text-red-300'
+                                    : row.tp1Reached
+                                    ? 'bg-amber-400 text-black'
+                                    : 'bg-slate-800 text-slate-200'
+                                }`}
+                              >
+                                {row.status === 'OPEN'
+                                  ? row.tp1Reached
+                                    ? 'OPEN (TP1 BE✓)'
+                                    : 'OPEN LIVE'
+                                  : `${row.status.replace(/_/g, ' ')} (${row.realizedR >= 0 ? `+${row.realizedR}R` : `${row.realizedR}R`})`}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         );
@@ -743,7 +991,7 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
       {focusedMarket ? (
         (() => {
           const activeTf = customTfs[focusedMarket.pair] || focusedMarket.recommendedTf;
-          const aiRecommendedSide: 'BUY' | 'SELL' = focusedMarket.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
+          const aiRecommendedSide: 'BUY' | 'SELL' = resolveMarketDirection(focusedMarket);
           const selectedSideMode = inspectedSideByPair[focusedMarket.pair] || 'AUTO';
           const focusedSwings = computeCandleSwingLevels(focusedMarket.candles);
 
@@ -818,7 +1066,11 @@ export const MultiMarketRadarEngine: React.FC<MultiMarketRadarEngineProps> = ({
           const shownSl = displayOrder ? displayOrder.stopLoss : computed.stopLoss;
           const shownTp1 = displayOrder ? displayOrder.tp1 : computed.tp1;
           const shownTp2 = displayOrder ? displayOrder.tp2 : computed.tp2;
-          const isHighWinRateSetup = computed.alignedFactorsCount >= 7 && !computed.isExtendedZone;
+          const isFocusedNoTrade =
+            !displayOrder &&
+            (computed.executionReadiness === 'NO_TRADE_CHOP' ||
+              computed.executionReadiness === 'NO_TRADE_CLOSED');
+          const isHighWinRateSetup = computed.alignedFactorsCount >= 7 && !computed.isExtendedZone && !isFocusedNoTrade;
 
           const eaMqlCode = `// --- PIVOTFX LIVE AUTO-SYNC EA CONFIG ---
 // Broker: ${selectedBroker.toUpperCase()} | Synced: ${lastScannedTime} | Rank #${rankNum}
@@ -839,7 +1091,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
             id: 'ORDER' | 'DEEP_AI' | 'THESIS' | 'FACTORS' | 'TV_EA';
             label: string;
           }> = [
-            { id: 'ORDER', label: 'Live Order & Sizing' },
+            { id: 'ORDER', label: 'Position Sizing & Alt Side' },
             { id: 'DEEP_AI', label: 'Deep AI & BOS' },
             { id: 'THESIS', label: 'Backtest & Brief' },
             { id: 'FACTORS', label: `Quant Matrix (${computed.totalFactorsCount})` },
@@ -980,12 +1232,18 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                       </span>
                       <span
                         className={`px-2.5 py-0.5 rounded-lg font-black ${
-                          isBuy
+                          isFocusedNoTrade
+                            ? 'bg-slate-800 text-amber-300 border border-slate-700'
+                            : isBuy
                             ? 'bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/50'
                             : 'bg-red-500/20 text-red-300 border border-red-500/50'
                         }`}
                       >
-                        {computed.orderType}
+                        {isFocusedNoTrade
+                          ? computed.executionReadiness === 'NO_TRADE_CLOSED'
+                            ? 'CLOSED · STAND ASIDE'
+                            : 'STAND ASIDE (CHOP)'
+                          : computed.orderType}
                       </span>
                       {computed.institutionalTelemetry && (
                         <span
@@ -1101,199 +1359,267 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                   </div>
                 </div>
 
-                {/* INTERACTIVE LIVE CANDLESTICK CHART */}
-                <LiveInteractiveCandleChart
-                  pair={focusedMarket.pair}
-                  timeframe={activeTf}
-                  candles={focusedMarket.candles || []}
-                  livePrice={focusedMarket.price}
-                  ema20={focusedMarket.ema20}
-                  ema50={focusedMarket.ema50}
-                  entryPrice={shownEntry}
-                  stopLoss={shownSl}
-                  tp1={shownTp1}
-                  tp2={shownTp2}
-                  advisoryEntryPrice={computed.advisoryEntryPrice}
-                  direction={displayOrder ? displayOrder.direction : computed.direction}
-                  change24hPct={focusedMarket.change24hPct}
-                  lotSize={displayOrder ? displayOrder.lotSize : computed.lotSize}
-                  riskUsd={computed.actualRiskUsd}
-                  executionReadiness={computed.executionReadiness}
-                  executionReadinessReason={computed.executionReadinessReason}
-                  bosAnalysis={computed.bosAnalysis}
-                  isLockedToCustom={Boolean(lockedPairs[focusedMarket.pair])}
-                  onCandlePriceChange={(newPrice) =>
-                    globalLiveStream.setCustomCandlePrice(focusedMarket.pair, newPrice, activeTf)
-                  }
-                  onResetToLiveStream={() => globalLiveStream.unlockPairToLiveStream(focusedMarket.pair)}
-                />
+                {/* DUAL-PANE EXECUTION DESK: LEFT = CHART & PROOF | RIGHT = MT5 ORDER TICKET & CONFIRMATION */}
+                <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
+                  <div className="xl:col-span-7 space-y-3 min-w-0">
+                    {/* INTERACTIVE LIVE CANDLESTICK CHART */}
+                    {(() => {
+                      const focusedPendingLimit =
+                        pendingLimits.find(
+                          (l) => l.pair === focusedMarket.pair && l.status === 'PENDING'
+                        ) || null;
+                      return (
+                        <LiveInteractiveCandleChart
+                          pair={focusedMarket.pair}
+                          timeframe={activeTf}
+                          candles={focusedMarket.candles || []}
+                          livePrice={focusedMarket.price}
+                          ema20={focusedMarket.ema20}
+                          ema50={focusedMarket.ema50}
+                          entryPrice={shownEntry}
+                          stopLoss={shownSl}
+                          tp1={shownTp1}
+                          tp2={shownTp2}
+                          advisoryEntryPrice={computed.advisoryEntryPrice}
+                          invalidationLevel={computed.invalidationLevel}
+                          pendingLimitPrice={focusedPendingLimit?.limitEntryPrice ?? null}
+                          replaySignals={computed.liveBacktest?.recentSignals}
+                          direction={displayOrder ? displayOrder.direction : computed.direction}
+                          manualPreviewDirection={selectedSideMode !== 'AUTO' ? selectedSideMode : null}
+                          activeOrderDirection={displayOrder ? displayOrder.direction : null}
+                          selectedSideMode={selectedSideMode}
+                          onSelectSideSync={(sideBtn) =>
+                            setInspectedSideByPair((prev) => ({
+                              ...prev,
+                              [focusedMarket.pair]: sideBtn
+                            }))
+                          }
+                          change24hPct={focusedMarket.change24hPct}
+                          lotSize={displayOrder ? displayOrder.lotSize : computed.lotSize}
+                          riskUsd={computed.actualRiskUsd}
+                          executionReadiness={computed.executionReadiness}
+                          executionReadinessReason={computed.executionReadinessReason}
+                          bosAnalysis={computed.bosAnalysis}
+                          isLockedToCustom={Boolean(lockedPairs[focusedMarket.pair])}
+                          onCandlePriceChange={(newPrice) =>
+                            globalLiveStream.setCustomCandlePrice(focusedMarket.pair, newPrice, activeTf)
+                          }
+                          onResetToLiveStream={() => globalLiveStream.unlockPairToLiveStream(focusedMarket.pair)}
+                        />
+                      );
+                    })()}
 
-                {/* CLEAN 1-ROW KEY EXECUTION LEVELS STRIP */}
-                <div className="space-y-2.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span
-                        className={`px-2.5 py-1 rounded-lg font-black text-[11px] flex items-center gap-1.5 ${
-                          isHighWinRateSetup ? 'bg-[#00C261] text-black' : 'bg-[#D4AF37] text-black'
-                        }`}
-                      >
-                        <Shield className="w-3.5 h-3.5" />
-                        <span>
-                          {computed.alignedFactorsCount}/{computed.totalFactorsCount} Factors Aligned · R:R {computed.riskReward}
-                        </span>
-                      </span>
-                      <span className="text-slate-300 font-sans text-xs">
-                        12H Est: <strong className="text-[#00C261]">+${computed.netProfitUsd.toFixed(2)}</strong> ({computed.lotSize.toFixed(2)} Lots · ${computed.actualRiskUsd.toFixed(2)} risk)
-                      </span>
-                      {computed.institutionalTelemetry && (
-                        <span className="px-2 py-0.5 rounded-lg bg-slate-900 border border-cyan-500/35 text-cyan-300 text-[10px] font-bold">
-                          Sniper EP {computed.advisoryEntryPrice} · Pivots S1 {computed.institutionalTelemetry.pivotLevels.s1} / P {computed.institutionalTelemetry.pivotLevels.pivot} / R1 {computed.institutionalTelemetry.pivotLevels.r1} · Z={computed.institutionalTelemetry.zScore}σ
-                        </span>
-                      )}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const fullTicket = `${computed.brokerSymbol} ${computed.orderType} | Price: ${shownEntry} | SL: ${shownSl} | TP1: ${shownTp1} | TP2: ${shownTp2} | Vol: ${computed.lotSize.toFixed(2)} Lots ($${computed.actualRiskUsd.toFixed(2)} Risk) | Broker: ${selectedBroker.toUpperCase()}`;
-                        handleQuickCopyValue(fullTicket, `full-ticket-${focusedMarket.pair}`);
-                      }}
-                      className="px-3.5 py-1.5 rounded-xl bg-[#D4AF37] hover:bg-amber-400 text-black font-black text-xs flex items-center gap-1.5 transition whitespace-nowrap shrink-0"
-                    >
-                      {copiedCardPair === `full-ticket-${focusedMarket.pair}` ? (
-                        <Check className="w-3.5 h-3.5" />
-                      ) : (
-                        <Copy className="w-3.5 h-3.5" />
-                      )}
-                      <span>
-                        {copiedCardPair === `full-ticket-${focusedMarket.pair}`
-                          ? 'Ticket Copied ✓'
-                          : 'Copy MT4/MT5 Ticket'}
-                      </span>
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 text-xs">
-                    <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex flex-col justify-between gap-1.5">
-                      <div>
-                        <span className="text-[10px] text-slate-400 block">
-                          {displayOrder ? 'Order Entry' : 'Entry Price'}
-                        </span>
-                        <strong className="text-base text-white">{shownEntry}</strong>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleQuickCopyValue(shownEntry, `focus-entry-${focusedMarket.pair}`)}
-                        className="w-full py-1 px-2 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-800 text-[10px] font-bold flex items-center justify-center gap-1 transition"
-                      >
-                        {copiedCardPair === `focus-entry-${focusedMarket.pair}` ? (
-                          <Check className="w-3 h-3 text-[#00C261]" />
-                        ) : (
-                          <Copy className="w-3 h-3 text-[#D4AF37]" />
-                        )}
-                        <span>{copiedCardPair === `focus-entry-${focusedMarket.pair}` ? 'Copied' : 'Copy EP'}</span>
-                      </button>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-red-950/30 border border-red-500/40 flex flex-col justify-between gap-1.5">
-                      <div>
-                        <span className="text-[10px] text-red-300 block">Stop Loss (-{computed.slPips}p)</span>
-                        <strong className="text-base text-red-400">{shownSl}</strong>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleQuickCopyValue(shownSl, `focus-sl-${focusedMarket.pair}`)}
-                        className="w-full py-1 px-2 rounded-lg bg-slate-950 hover:bg-red-900/60 text-red-200 border border-red-500/40 text-[10px] font-black flex items-center justify-center gap-1 transition"
-                      >
-                        {copiedCardPair === `focus-sl-${focusedMarket.pair}` ? (
-                          <Check className="w-3 h-3 text-[#00C261]" />
-                        ) : (
-                          <Copy className="w-3 h-3" />
-                        )}
-                        <span>{copiedCardPair === `focus-sl-${focusedMarket.pair}` ? 'Copied' : 'Copy SL'}</span>
-                      </button>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-cyan-950/30 border border-cyan-500/40 flex flex-col justify-between gap-1.5">
-                      <div>
-                        <span className="text-[10px] text-cyan-300 block">TP1 (50% BE Lock)</span>
-                        <strong className="text-base text-cyan-300">{shownTp1}</strong>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleQuickCopyValue(shownTp1, `focus-tp1-${focusedMarket.pair}`)}
-                        className="w-full py-1 px-2 rounded-lg bg-slate-950 hover:bg-cyan-900/60 text-cyan-200 border border-cyan-500/40 text-[10px] font-bold flex items-center justify-center gap-1 transition"
-                      >
-                        {copiedCardPair === `focus-tp1-${focusedMarket.pair}` ? (
-                          <Check className="w-3 h-3 text-[#00C261]" />
-                        ) : (
-                          <Copy className="w-3 h-3" />
-                        )}
-                        <span>{copiedCardPair === `focus-tp1-${focusedMarket.pair}` ? 'Copied' : 'Copy TP1'}</span>
-                      </button>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/40 flex flex-col justify-between gap-1.5">
-                      <div>
-                        <span className="text-[10px] text-emerald-300 block">TP2 Target (+{computed.tpPips}p)</span>
-                        <strong className="text-base text-[#00C261]">{shownTp2}</strong>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleQuickCopyValue(shownTp2, `focus-tp2-${focusedMarket.pair}`)}
-                        className="w-full py-1 px-2 rounded-lg bg-slate-950 hover:bg-emerald-900/60 text-emerald-200 border border-emerald-500/40 text-[10px] font-black flex items-center justify-center gap-1 transition"
-                      >
-                        {copiedCardPair === `focus-tp2-${focusedMarket.pair}` ? (
-                          <Check className="w-3 h-3 text-[#00C261]" />
-                        ) : (
-                          <Copy className="w-3 h-3" />
-                        )}
-                        <span>{copiedCardPair === `focus-tp2-${focusedMarket.pair}` ? 'Copied' : 'Copy TP2'}</span>
-                      </button>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex flex-col justify-between">
-                      <span className="text-[10px] text-slate-400 block">48H Extended TP3</span>
-                      <strong className="text-base text-[#D4AF37]">{computed.tp3}</strong>
-                      <span className="text-[10px] text-cyan-300">+${computed.netProfit48hUsd.toFixed(2)} est.</span>
-                    </div>
-                  </div>
-
-                  {/* Direct Live 3-Horizon Projection Strip (1H-4H / 4H-12H / 12H-48H) */}
-                  {computed.trajectoryHorizons && computed.trajectoryHorizons.length > 0 && (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-1">
-                      {computed.trajectoryHorizons.map((step) => (
-                        <div
-                          key={step.horizon}
-                          className="p-2.5 rounded-xl bg-slate-900/75 border border-slate-800 space-y-1 text-xs"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10px] text-[#D4AF37] font-black">{step.horizon}</span>
-                            <span className="text-[10px] text-[#00C261] font-bold">
-                              +{step.targetPips}p · +${step.netProfitUsd.toFixed(2)}
+                    {/* CLEAN 1-ROW KEY EXECUTION LEVELS STRIP */}
+                    <div className="space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className={`px-2.5 py-1 rounded-lg font-black text-[11px] flex items-center gap-1.5 ${
+                              isHighWinRateSetup ? 'bg-[#00C261] text-black' : 'bg-[#D4AF37] text-black'
+                            }`}
+                          >
+                            <Shield className="w-3.5 h-3.5" />
+                            <span>
+                              {computed.alignedFactorsCount}/{computed.totalFactorsCount} Factors · R:R {computed.riskReward}
                             </span>
-                          </div>
-                          <strong className="text-xs text-white block">
-                            Target @ {step.targetPrice} (+{step.netProfitKes} KES)
-                          </strong>
-                          <p className="text-[10px] text-slate-400 leading-snug line-clamp-2 font-sans">
-                            {step.driverSummary}
-                          </p>
+                          </span>
+                          <span className="text-slate-300 font-sans text-xs">
+                            12H Est:{' '}
+                            <strong className={isFocusedNoTrade && selectedSideMode === 'AUTO' ? 'text-slate-400' : 'text-[#00C261]'}>
+                              {isFocusedNoTrade && selectedSideMode === 'AUTO'
+                                ? 'Stand Aside'
+                                : `+$${computed.netProfitUsd.toFixed(2)}`}
+                            </strong>{' '}
+                            ({computed.lotSize.toFixed(2)} Lots · ${computed.actualRiskUsd.toFixed(2)} risk)
+                          </span>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
 
-                {/* REAL-TIME PRICE ALERT TRIGGER BAR FOR FOCUSED PAIR */}
-                <PriceAlertManagerBar
-                  mode="pair"
-                  pair={focusedMarket.pair}
-                  livePrice={focusedMarket.price}
-                  ema20={focusedMarket.ema20}
-                  bosLevel={computed.bosAnalysis?.bosTriggerLevel || 0}
-                  tp1={shownTp1}
-                />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const modeStr =
+                              isFocusedNoTrade && selectedSideMode === 'AUTO'
+                                ? `REF (${computed.executionReadiness})`
+                                : computed.orderType;
+                            const fullTicket = `${computed.brokerSymbol} ${modeStr} | Price: ${shownEntry} | SL: ${shownSl} | TP1: ${shownTp1} | TP2: ${shownTp2} | Vol: ${computed.lotSize.toFixed(2)} Lots ($${computed.actualRiskUsd.toFixed(2)} Risk) | Broker: ${selectedBroker.toUpperCase()}`;
+                            handleQuickCopyValue(fullTicket, `full-ticket-${focusedMarket.pair}`);
+                          }}
+                          className={`px-3 py-1.5 rounded-xl font-black text-xs flex items-center gap-1.5 transition whitespace-nowrap shrink-0 ${
+                            isFocusedNoTrade && selectedSideMode === 'AUTO'
+                              ? 'bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40'
+                              : 'bg-[#D4AF37] hover:bg-amber-400 text-black'
+                          }`}
+                        >
+                          {copiedCardPair === `full-ticket-${focusedMarket.pair}` ? (
+                            <Check className="w-3.5 h-3.5" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                          <span>
+                            {copiedCardPair === `full-ticket-${focusedMarket.pair}`
+                              ? 'Levels Copied ✓'
+                              : isFocusedNoTrade && selectedSideMode === 'AUTO'
+                              ? 'Copy Ref Levels'
+                              : 'Copy MT5 Ticket'}
+                          </span>
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                        <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex flex-col justify-between gap-1">
+                          <div>
+                            <span className="text-[10px] text-slate-400 block">
+                              {displayOrder ? 'Order Entry' : 'Entry Price'}
+                            </span>
+                            <strong className="text-sm text-white">{shownEntry}</strong>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickCopyValue(shownEntry, `focus-entry-${focusedMarket.pair}`)}
+                            className="w-full py-1 px-2 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-800 text-[10px] font-bold flex items-center justify-center gap-1 transition"
+                          >
+                            {copiedCardPair === `focus-entry-${focusedMarket.pair}` ? (
+                              <Check className="w-3 h-3 text-[#00C261]" />
+                            ) : (
+                              <Copy className="w-3 h-3 text-[#D4AF37]" />
+                            )}
+                            <span>{copiedCardPair === `focus-entry-${focusedMarket.pair}` ? 'Copied' : 'Copy EP'}</span>
+                          </button>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-red-950/30 border border-red-500/40 flex flex-col justify-between gap-1">
+                          <div>
+                            <span className="text-[10px] text-red-300 block">Stop Loss (-{computed.slPips}p)</span>
+                            <strong className="text-sm text-red-400">{shownSl}</strong>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickCopyValue(shownSl, `focus-sl-${focusedMarket.pair}`)}
+                            className="w-full py-1 px-2 rounded-lg bg-slate-950 hover:bg-red-900/60 text-red-200 border border-red-500/40 text-[10px] font-black flex items-center justify-center gap-1 transition"
+                          >
+                            {copiedCardPair === `focus-sl-${focusedMarket.pair}` ? (
+                              <Check className="w-3 h-3 text-[#00C261]" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
+                            <span>{copiedCardPair === `focus-sl-${focusedMarket.pair}` ? 'Copied' : 'Copy SL'}</span>
+                          </button>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-cyan-950/30 border border-cyan-500/40 flex flex-col justify-between gap-1">
+                          <div>
+                            <span className="text-[10px] text-cyan-300 block">TP1 (50% BE Lock)</span>
+                            <strong className="text-sm text-cyan-300">{shownTp1}</strong>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickCopyValue(shownTp1, `focus-tp1-${focusedMarket.pair}`)}
+                            className="w-full py-1 px-2 rounded-lg bg-slate-950 hover:bg-cyan-900/60 text-cyan-200 border border-cyan-500/40 text-[10px] font-bold flex items-center justify-center gap-1 transition"
+                          >
+                            {copiedCardPair === `focus-tp1-${focusedMarket.pair}` ? (
+                              <Check className="w-3 h-3 text-[#00C261]" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
+                            <span>{copiedCardPair === `focus-tp1-${focusedMarket.pair}` ? 'Copied' : 'Copy TP1'}</span>
+                          </button>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/40 flex flex-col justify-between gap-1">
+                          <div>
+                            <span className="text-[10px] text-emerald-300 block">TP2 Target (+{computed.tpPips}p)</span>
+                            <strong className="text-sm text-[#00C261]">{shownTp2}</strong>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickCopyValue(shownTp2, `focus-tp2-${focusedMarket.pair}`)}
+                            className="w-full py-1 px-2 rounded-lg bg-slate-950 hover:bg-emerald-900/60 text-emerald-200 border border-emerald-500/40 text-[10px] font-black flex items-center justify-center gap-1 transition"
+                          >
+                            {copiedCardPair === `focus-tp2-${focusedMarket.pair}` ? (
+                              <Check className="w-3 h-3 text-[#00C261]" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
+                            <span>{copiedCardPair === `focus-tp2-${focusedMarket.pair}` ? 'Copied' : 'Copy TP2'}</span>
+                          </button>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex flex-col justify-between">
+                          <span className="text-[10px] text-slate-400 block">48H Extended TP3</span>
+                          <strong className="text-sm text-[#D4AF37]">{computed.tp3}</strong>
+                          <span className="text-[10px] text-cyan-300">+${computed.netProfit48hUsd.toFixed(2)} est.</span>
+                        </div>
+                      </div>
+
+                      {computed.trajectoryHorizons && computed.trajectoryHorizons.length > 0 && (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-1">
+                          {computed.trajectoryHorizons.map((step) => (
+                            <div
+                              key={step.horizon}
+                              className="p-2 rounded-xl bg-slate-900/75 border border-slate-800 space-y-0.5 text-xs"
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-[10px] text-[#D4AF37] font-black">{step.horizon}</span>
+                                <span className="text-[10px] text-[#00C261] font-bold">
+                                  +{step.targetPips}p · +${step.netProfitUsd.toFixed(2)}
+                                </span>
+                              </div>
+                              <strong className="text-xs text-white block">
+                                Target @ {step.targetPrice}
+                              </strong>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <PriceAlertManagerBar
+                      mode="pair"
+                      pair={focusedMarket.pair}
+                      livePrice={focusedMarket.price}
+                      ema20={focusedMarket.ema20}
+                      bosLevel={computed.bosAnalysis?.bosTriggerLevel || 0}
+                      tp1={shownTp1}
+                    />
+                  </div>
+
+                  {/* RIGHT EXECUTION PANE: LIVE MT5 ORDER TICKET & ENTRY CONFIRMATION */}
+                  <div className="xl:col-span-5 space-y-3 min-w-0">
+                    <ActiveMarketOrderPanel
+                      mode="full"
+                      pair={focusedMarket.pair}
+                      direction={selectedSideMode !== 'AUTO' ? selectedSideMode : computed.direction}
+                      timeframe={activeTf}
+                      broker={selectedBroker}
+                      onSideSyncRequest={(syncSide) =>
+                        setInspectedSideByPair((prev) => ({
+                          ...prev,
+                          [focusedMarket.pair]: syncSide
+                        }))
+                      }
+                    />
+
+                    <EntryConfirmationController
+                      pair={focusedMarket.pair}
+                      computed={computed}
+                      kenyaTiming={kenyaTiming}
+                      livePrice={focusedMarket.price}
+                      timeframe={activeTf}
+                      lockedOrder={loadedOrder}
+                      showSavedOrder={showSavedOrder}
+                      onToggleSavedOrder={() =>
+                        setViewSavedOrderByPair((prev) => ({
+                          ...prev,
+                          [focusedMarket.pair]: !showSavedOrder
+                        }))
+                      }
+                      ema20={focusedMarket.ema20}
+                      ema50={focusedMarket.ema50}
+                      rsi={focusedMarket.rsi}
+                      variant="focused"
+                    />
+                  </div>
+                </div>
 
                 {/* 5 CLICKABLE INDEPENDENT SUB-CARD TABS */}
                 <div className="pt-2 border-t border-slate-800">
@@ -1323,37 +1649,9 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                   </div>
 
                   <div className="pt-3 space-y-4">
-                    {/* SUB-CARD 1: LIVE ORDER EXECUTION & RISK SIZING */}
+                    {/* SUB-CARD 1: POSITION SIZING & ALTERNATIVE SIDE COMPARISON */}
                     {activeSubTab === 'ORDER' && (
                       <div className="space-y-4">
-                        <ActiveMarketOrderPanel
-                          mode="full"
-                          pair={focusedMarket.pair}
-                          direction={computed.direction}
-                          timeframe={activeTf}
-                          broker={selectedBroker}
-                        />
-
-                        <EntryConfirmationController
-                          pair={focusedMarket.pair}
-                          computed={computed}
-                          kenyaTiming={kenyaTiming}
-                          livePrice={focusedMarket.price}
-                          timeframe={activeTf}
-                          lockedOrder={loadedOrder}
-                          showSavedOrder={showSavedOrder}
-                          onToggleSavedOrder={() =>
-                            setViewSavedOrderByPair((prev) => ({
-                              ...prev,
-                              [focusedMarket.pair]: !showSavedOrder
-                            }))
-                          }
-                          ema20={focusedMarket.ema20}
-                          ema50={focusedMarket.ema50}
-                          rsi={focusedMarket.rsi}
-                          variant="focused"
-                        />
-
                         <DynamicPositionSizeCalculator
                           pair={focusedMarket.pair}
                           computed={computed}
@@ -1381,7 +1679,7 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                             }
                             className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-[#D4AF37] border border-slate-700 text-[11px] font-black shrink-0 transition whitespace-nowrap"
                           >
-                            Switch to {oppositeSide}
+                            Switch Chart &amp; Order to {oppositeSide}
                           </button>
                         </div>
                       </div>
@@ -1819,6 +2117,40 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                   )}
                 </div>
               </div>
+
+              {/* Slim Mobile Sticky Quick-Action Bar (<= 56px, md:hidden) */}
+              <div className="md:hidden sticky bottom-2 z-30 h-14 px-3 rounded-2xl bg-[#070B14]/95 border border-[#D4AF37]/50 flex items-center justify-between gap-2 shadow-2xl">
+                <div className="min-w-0 text-[11px]">
+                  <strong className="text-white block truncate">{focusedMarket.pair}</strong>
+                  <span className="text-[#D4AF37] font-bold">@ {focusedMarket.price}</span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLoadCardOrder(focusedMarket.pair, 'BUY', activeTf)}
+                    className="px-3 py-1.5 rounded-xl bg-[#00C261] text-black font-black text-xs whitespace-nowrap"
+                  >
+                    BUY
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickLoadCardOrder(focusedMarket.pair, 'SELL', activeTf)}
+                    className="px-3 py-1.5 rounded-xl bg-red-600 text-white font-black text-xs whitespace-nowrap"
+                  >
+                    SELL
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const fullTicket = `${computed.brokerSymbol} ${computed.direction} | EP ${shownEntry} | SL ${shownSl} | TP1 ${shownTp1} | TP2 ${shownTp2}`;
+                      handleQuickCopyValue(fullTicket, `mob-ticket-${focusedMarket.pair}`);
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-900 text-[#D4AF37] border border-[#D4AF37]/40 font-black text-xs whitespace-nowrap"
+                  >
+                    {copiedCardPair === `mob-ticket-${focusedMarket.pair}` ? 'Copied ✓' : 'Copy MT5'}
+                  </button>
+                </div>
+              </div>
             </div>
           );
         })()
@@ -1884,6 +2216,11 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                 ? rawTopLoadedOrder
                 : null;
 
+            const isTopBlocked =
+              !topLoadedOrder &&
+              (topComputed.executionReadiness === 'NO_TRADE_CHOP' ||
+                topComputed.executionReadiness === 'NO_TRADE_CLOSED');
+
             return (
               <div
                 onClick={() => handleOpenPairCard(topLeader.pair)}
@@ -1895,13 +2232,24 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                     handleOpenPairCard(topLeader.pair);
                   }
                 }}
-                className="p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-[#0E1629] to-slate-900 border border-[#D4AF37] cursor-pointer flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 font-mono tabular-nums transition"
+                className={`p-5 rounded-2xl border cursor-pointer flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 font-mono tabular-nums transition ${
+                  isTopBlocked
+                    ? 'bg-gradient-to-r from-slate-950 via-[#0E131F] to-slate-950 border-slate-700'
+                    : 'bg-gradient-to-r from-slate-900 via-[#0E1629] to-slate-900 border-[#D4AF37]'
+                }`}
               >
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2 flex-wrap text-xs">
                     <span className="px-3 py-1 rounded-lg bg-[#D4AF37] text-black font-black flex items-center gap-1">
                       <Award className="w-3.5 h-3.5" />
-                      <span>#1 TOP % MOVER · {topComputed.orderVerdictLabel}</span>
+                      <span>
+                        #1 TOP ACTIONABLE ·{' '}
+                        {isTopBlocked
+                          ? topComputed.executionReadiness === 'NO_TRADE_CLOSED'
+                            ? 'SESSION CLOSED'
+                            : 'STAND ASIDE'
+                          : topComputed.orderVerdictLabel}
+                      </span>
                     </span>
                     <span
                       className={`px-2.5 py-1 rounded-lg font-black ${
@@ -1939,32 +2287,60 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                     </span>
                     <span
                       className={`px-2.5 py-0.5 rounded-lg text-xs font-black ${
-                        topComputed.direction === 'BUY'
+                        isTopBlocked
+                          ? 'bg-slate-800 text-amber-300 border border-slate-700'
+                          : topComputed.direction === 'BUY'
                           ? 'bg-[#00C261]/20 text-[#00C261] border border-[#00C261]/40'
                           : 'bg-red-500/20 text-red-300 border border-red-500/40'
                       }`}
                     >
-                      {topComputed.orderType}
+                      {isTopBlocked
+                        ? topComputed.executionReadiness === 'NO_TRADE_CLOSED'
+                          ? 'WAIT FOR SESSION OPEN'
+                          : 'STAND ASIDE — WAIT CLEAN BOS'
+                        : topComputed.executionReadiness === 'WAIT_PULLBACK'
+                        ? `${topComputed.direction} WATCHLIST @ ${topComputed.advisoryEntryPrice}`
+                        : topComputed.orderType}
                     </span>
-                    <span className="text-xs font-black text-emerald-300">
-                      Est. Net: +${topComputed.netProfitUsd.toFixed(2)} (+{topComputed.netProfitKes} KES) · {topComputed.riskReward}
-                    </span>
+                    {!isTopBlocked ? (
+                      <span className="text-xs font-black text-emerald-300">
+                        Est. Net: +${topComputed.netProfitUsd.toFixed(2)} (+{topComputed.netProfitKes} KES) · {topComputed.riskReward}
+                      </span>
+                    ) : (
+                      <span className="text-xs font-bold text-slate-400">
+                        Reference Levels Only (No Active Trade)
+                      </span>
+                    )}
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3 flex-wrap w-full lg:w-auto justify-between lg:justify-end">
                   <div className="grid grid-cols-3 gap-2.5 text-xs bg-slate-950/90 px-4 py-2.5 rounded-2xl border border-slate-800">
                     <div>
-                      <span className="text-[10px] text-slate-400 block">Entry</span>
-                      <strong className="text-white">{topComputed.entryPrice}</strong>
+                      <span className="text-[10px] text-slate-400 block">
+                        {isTopBlocked ? 'Ref Entry' : topComputed.executionReadiness === 'WAIT_PULLBACK' ? 'Limit EP' : 'Entry'}
+                      </span>
+                      <strong className={isTopBlocked ? 'text-slate-400' : 'text-white'}>
+                        {topComputed.executionReadiness === 'WAIT_PULLBACK'
+                          ? topComputed.advisoryEntryPrice
+                          : topComputed.entryPrice}
+                      </strong>
                     </div>
                     <div>
-                      <span className="text-[10px] text-red-400 block">SL (-${topComputed.actualRiskUsd.toFixed(2)})</span>
-                      <strong className="text-red-300">{topLoadedOrder ? topLoadedOrder.stopLoss : topComputed.stopLoss}</strong>
+                      <span className="text-[10px] text-red-400 block">
+                        {isTopBlocked ? 'Ref SL' : `SL (-$${topComputed.actualRiskUsd.toFixed(2)})`}
+                      </span>
+                      <strong className={isTopBlocked ? 'text-slate-400' : 'text-red-300'}>
+                        {topLoadedOrder ? topLoadedOrder.stopLoss : topComputed.stopLoss}
+                      </strong>
                     </div>
                     <div>
-                      <span className="text-[10px] text-emerald-400 block">TP2 (+${topComputed.netProfitUsd.toFixed(2)})</span>
-                      <strong className="text-[#00C261]">{topLoadedOrder ? topLoadedOrder.tp2 : topComputed.tp2}</strong>
+                      <span className="text-[10px] text-emerald-400 block">
+                        {isTopBlocked ? 'Ref TP2' : `TP2 (+$${topComputed.netProfitUsd.toFixed(2)})`}
+                      </span>
+                      <strong className={isTopBlocked ? 'text-slate-400' : 'text-[#00C261]'}>
+                        {topLoadedOrder ? topLoadedOrder.tp2 : topComputed.tp2}
+                      </strong>
                     </div>
                   </div>
 
@@ -2212,6 +2588,10 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                       const isBuy = computed.direction === 'BUY';
                       const pctPos = m.change24hPct >= 0;
                       const loadedOrder = activeOrders[m.pair];
+                      const isRowNoTrade =
+                        !loadedOrder &&
+                        (computed.executionReadiness === 'NO_TRADE_CHOP' ||
+                          computed.executionReadiness === 'NO_TRADE_CLOSED');
                       return (
                         <tr
                           key={m.pair}
@@ -2234,10 +2614,18 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                             <div className="flex items-center gap-1.5">
                               <span
                                 className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
-                                  isBuy ? 'bg-[#00C261]/20 text-[#00C261]' : 'bg-red-500/20 text-red-300'
+                                  isRowNoTrade
+                                    ? 'bg-slate-800 text-amber-300 border border-slate-700'
+                                    : isBuy
+                                    ? 'bg-[#00C261]/20 text-[#00C261]'
+                                    : 'bg-red-500/20 text-red-300'
                                 }`}
                               >
-                                {computed.direction}
+                                {isRowNoTrade
+                                  ? computed.executionReadiness === 'NO_TRADE_CLOSED'
+                                    ? 'CLOSED'
+                                    : 'STAND ASIDE'
+                                  : computed.direction}
                               </span>
                               <span className="text-[10px] text-slate-300 truncate max-w-[140px]">
                                 {computed.executionReadiness === 'READY_ENTER'
@@ -2245,17 +2633,32 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                                   : computed.executionReadiness === 'WAIT_PULLBACK'
                                   ? 'WAIT PULLBACK'
                                   : computed.executionReadiness === 'NO_TRADE_CLOSED'
-                                  ? 'CLOSED'
-                                  : 'CHOP'}
+                                  ? 'MARKET CLOSED'
+                                  : 'CHOP · NO TRADE'}
                               </span>
                             </div>
                           </td>
-                          <td className="py-3 px-3 text-right text-slate-200">{computed.entryPrice}</td>
-                          <td className="py-3 px-3 text-right text-red-300 font-bold">{computed.stopLoss}</td>
-                          <td className="py-3 px-3 text-right text-[#00C261] font-bold">{computed.tp2}</td>
+                          <td className={`py-3 px-3 text-right ${isRowNoTrade ? 'text-slate-500' : 'text-slate-200'}`}>
+                            {computed.entryPrice}
+                          </td>
+                          <td className={`py-3 px-3 text-right font-bold ${isRowNoTrade ? 'text-slate-500' : 'text-red-300'}`}>
+                            {computed.stopLoss}
+                          </td>
+                          <td className={`py-3 px-3 text-right font-bold ${isRowNoTrade ? 'text-slate-500' : 'text-[#00C261]'}`}>
+                            {computed.tp2}
+                          </td>
                           <td className="py-3 px-3 text-right">
-                            <span className="text-[#00C261] font-black">+${computed.netProfitUsd.toFixed(2)}</span>
-                            <span className="text-slate-500 block text-[10px]">{computed.riskReward}</span>
+                            {isRowNoTrade ? (
+                              <>
+                                <span className="text-slate-500 font-bold">Ref Only</span>
+                                <span className="text-slate-600 block text-[10px]">{computed.riskReward}</span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="text-[#00C261] font-black">+${computed.netProfitUsd.toFixed(2)}</span>
+                                <span className="text-slate-500 block text-[10px]">{computed.riskReward}</span>
+                              </>
+                            )}
                           </td>
                           <td className="py-3 px-3 text-right">
                             <span className="text-cyan-300 font-bold">{(computed.adxStrength ?? 21).toFixed(0)}</span>
@@ -2313,9 +2716,25 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
               </div>
             </div>
           ) : (
-          /* 15 INDEPENDENT CLICKABLE SUMMARY CARDS (Sorted Top % to Least %) */
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {filteredMarkets.map((m, idx) => {
+          /* 3-TIER ACTIONABLE SUMMARY CARDS: READY NOW | PULLBACK WATCHLIST | STAND ASIDE (COLLAPSIBLE) */
+          (() => {
+            const rankByPair = new Map<CurrencyPair, number>();
+            filteredMarkets.forEach((m, i) => rankByPair.set(m.pair, i + 1));
+
+            const readyCards = filteredMarkets.filter(
+              (m) => Boolean(activeOrders[m.pair]) || m.executionReadiness === 'READY_ENTER'
+            );
+            const pullbackCards = filteredMarkets.filter(
+              (m) => !activeOrders[m.pair] && m.executionReadiness === 'WAIT_PULLBACK'
+            );
+            const blockedCards = filteredMarkets.filter(
+              (m) =>
+                !activeOrders[m.pair] &&
+                (m.executionReadiness === 'NO_TRADE_CHOP' ||
+                  m.executionReadiness === 'NO_TRADE_CLOSED')
+            );
+
+            const renderSummaryCard = (m: MarketScanData) => {
               const activeTf = customTfs[m.pair] || m.recommendedTf;
               const cardSwings = computeCandleSwingLevels(m.candles);
               const computed = computeRealChartTradeParams({
@@ -2339,11 +2758,10 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
               });
               const isBuy = computed.direction === 'BUY';
               const pctPositive = m.change24hPct >= 0;
-              const rank = idx + 1;
+              const rank = rankByPair.get(m.pair) || 1;
               const kenyaTiming = evaluatePairKenyaTiming(m.pair);
               const tickUp = m.lastTickDir === 'UP';
               const tickDown = m.lastTickDir === 'DOWN';
-              const cardAiNote = superAiNotes[m.pair]?.note;
               const loadedOrder = activeOrders[m.pair];
               const orderMetrics = loadedOrder ? computeLiveOrderMetrics(loadedOrder, m.price, m.atrPips) : null;
               const useOrderLevelsOnCard = Boolean(
@@ -2355,6 +2773,10 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
               );
               const cardSl = useOrderLevelsOnCard ? loadedOrder!.stopLoss : computed.stopLoss;
               const cardTp = useOrderLevelsOnCard ? loadedOrder!.tp2 : computed.tp2;
+              const isCardNoTrade =
+                !loadedOrder &&
+                (computed.executionReadiness === 'NO_TRADE_CHOP' ||
+                  computed.executionReadiness === 'NO_TRADE_CLOSED');
 
               return (
                 <div
@@ -2368,108 +2790,50 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                       handleOpenPairCard(m.pair);
                     }
                   }}
-                  className={`rounded-2xl p-4 sm:p-5 border transition-all cursor-pointer flex flex-col justify-between space-y-3 font-mono tabular-nums hover:-translate-y-0.5 ${
+                  className={`rounded-2xl p-4 border transition-all cursor-pointer flex flex-col justify-between space-y-2.5 font-mono tabular-nums hover:-translate-y-0.5 ${
                     kenyaTiming.windowStatusCode === 'CLOSED_WAIT'
                       ? 'bg-[#060912] opacity-85 border-slate-800/80 hover:border-slate-600'
                       : loadedOrder
                       ? 'bg-[#081713] border-[#00C261] shadow-[0_0_20px_rgba(0,194,97,0.16)]'
-                      : rank === 1
-                      ? 'bg-[#0C1322] border-[#D4AF37] shadow-[0_0_20px_rgba(212,175,55,0.12)]'
-                      : 'bg-[#0A101E] border-slate-800 hover:border-[#D4AF37]/70'
+                      : computed.executionReadiness === 'READY_ENTER'
+                      ? 'bg-[#0A141A] border-[#00C261]/70 shadow-[0_0_16px_rgba(0,194,97,0.12)]'
+                      : computed.executionReadiness === 'WAIT_PULLBACK'
+                      ? 'bg-[#0D111C] border-amber-500/45 hover:border-[#D4AF37]'
+                      : 'bg-[#080C16] border-slate-800/80 hover:border-slate-600'
                   }`}
                 >
-                  {/* Top Row: Rank + Trend & BUY/SELL + Go-Ahead Badge */}
                   <div className="space-y-2">
+                    {/* Rank + Readiness Verdict */}
                     <div className="flex items-center justify-between gap-1 text-[10px]">
                       <span className="text-[#D4AF37] font-black">
                         #{rank} · {activeTf} · {computed.institutionalTelemetry ? `${computed.institutionalTelemetry.estimatedWinProbPct}% WinP` : `${computed.confidence}% AI`}
                       </span>
                       <span
                         className={`px-2 py-0.5 rounded font-black ${
-                          computed.institutionalTelemetry?.roboticVerdict.startsWith('PRIME')
+                          computed.executionReadiness === 'READY_ENTER'
                             ? isBuy
-                              ? 'bg-[#00C261]/25 text-[#00C261] border border-[#00C261]/40'
-                              : 'bg-red-500/25 text-red-300 border border-red-500/40'
-                            : computed.institutionalTelemetry?.roboticVerdict.startsWith('SNIPER') ||
-                              computed.executionReadiness === 'WAIT_PULLBACK'
-                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                            : computed.executionReadiness === 'READY_ENTER'
-                            ? isBuy
-                              ? 'bg-[#00C261]/20 text-[#00C261]'
-                              : 'bg-red-500/20 text-red-300'
+                              ? 'bg-[#00C261] text-black'
+                              : 'bg-red-600 text-white'
+                            : computed.executionReadiness === 'WAIT_PULLBACK'
+                            ? 'bg-amber-400 text-black'
                             : 'bg-slate-800 text-slate-300 border border-slate-700'
                         }`}
                       >
                         {computed.executionReadiness === 'NO_TRADE_CLOSED'
                           ? 'CLOSED'
-                          : computed.institutionalTelemetry
-                          ? computed.institutionalTelemetry.roboticVerdict === 'PRIME_BUY'
-                            ? 'PRIME BUY'
-                            : computed.institutionalTelemetry.roboticVerdict === 'PRIME_SELL'
-                            ? 'PRIME SELL'
-                            : computed.institutionalTelemetry.roboticVerdict === 'SNIPER_LIMIT_BUY'
-                            ? 'SNIPER BUY'
-                            : computed.institutionalTelemetry.roboticVerdict === 'SNIPER_LIMIT_SELL'
-                            ? 'SNIPER SELL'
-                            : 'STAND ASIDE'
                           : computed.executionReadiness === 'READY_ENTER'
-                          ? `READY: ${computed.direction}`
+                          ? `READY ${computed.direction}`
                           : computed.executionReadiness === 'WAIT_PULLBACK'
-                          ? 'WAIT PULLBACK'
+                          ? `WATCH ${computed.direction}`
                           : 'STAND ASIDE'}
                       </span>
                     </div>
 
-                    {/* Market Open vs. Early Settle / Opening Soon / Closed Status Badge */}
-                    {kenyaTiming.windowStatusCode === 'CLOSED_WAIT' ? (
-                      <div className="flex items-center justify-between gap-1 text-[10px] bg-red-950/70 border border-red-500/60 px-2.5 py-1 rounded-xl text-red-200">
-                        <span className="font-bold flex items-center gap-1.5 text-red-400">
-                          <Clock className="w-3 h-3 shrink-0" />
-                          <span>{kenyaTiming.isWeekendClosed ? 'MARKET CLOSED' : 'NOT RIGHT TIME'}</span>
-                        </span>
-                        <span className="text-amber-300 font-mono font-bold">Opens in {kenyaTiming.countdownFormatted}</span>
-                      </div>
-                    ) : kenyaTiming.windowStatusCode === 'OPENING_SOON' ? (
-                      <div className="flex items-center justify-between gap-1 text-[10px] bg-amber-950/70 border border-amber-500/60 px-2.5 py-1 rounded-xl text-amber-200">
-                        <span className="font-bold flex items-center gap-1.5 text-amber-300">
-                          <Clock className="w-3 h-3 shrink-0" />
-                          <span>TOO EARLY · WAIT</span>
-                        </span>
-                        <span className="text-amber-300 font-mono font-bold">Opens in {kenyaTiming.countdownFormatted}</span>
-                      </div>
-                    ) : kenyaTiming.isEarlySettlePhase ? (
-                      <div className="flex items-center justify-between gap-1 text-[10px] bg-amber-950/70 border border-amber-500/60 px-2.5 py-1 rounded-xl text-amber-200">
-                        <span className="font-bold flex items-center gap-1.5 text-amber-300">
-                          <Clock className="w-3 h-3 shrink-0" />
-                          <span>EARLY SETTLE · STUDY</span>
-                        </span>
-                        <span className="text-amber-300 font-mono font-bold">
-                          Wait {Math.max(1, Math.ceil((kenyaTiming.earlySettleSecondsLeft || 60) / 60))}m
-                        </span>
-                      </div>
-                    ) : kenyaTiming.isClosingPhase ? (
-                      <div className="flex items-center justify-between gap-1 text-[10px] bg-amber-950/70 border border-amber-500/60 px-2.5 py-1 rounded-xl text-amber-200">
-                        <span className="font-bold flex items-center gap-1.5 text-amber-300">
-                          <Clock className="w-3 h-3 shrink-0" />
-                          <span>CLOSING SOON</span>
-                        </span>
-                        <span className="text-amber-300 font-mono font-bold">Closes {kenyaTiming.countdownFormatted}</span>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-between gap-1 text-[10px] bg-emerald-950/60 border border-[#00C261]/50 px-2.5 py-1 rounded-xl text-emerald-200">
-                        <span className="font-bold flex items-center gap-1.5 text-[#00C261]">
-                          <Radio className="w-3 h-3 shrink-0" />
-                          <span>{m.pair.includes('BTC') || m.pair.includes('ETH') ? '24/7 CRYPTO LIVE' : 'SESSION BELL OPEN'}</span>
-                        </span>
-                        <span className="text-[#00C261] font-mono font-bold">Safe Window ✓</span>
-                      </div>
-                    )}
-
-                    {/* Pair Name & Promoted Live % */}
+                    {/* Pair + Live Price + 24h % */}
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-lg font-black text-white">{m.pair}</span>
                       <span
-                        className={`inline-flex items-center gap-0.5 text-sm font-black ${
+                        className={`inline-flex items-center gap-0.5 text-xs font-black ${
                           pctPositive ? 'text-[#00C261]' : 'text-red-400'
                         }`}
                       >
@@ -2478,80 +2842,101 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                       </span>
                     </div>
 
-                    <div className="text-sm font-black text-white flex items-center justify-between gap-1">
-                      <span>
-                        Candle:{' '}
-                        <span
-                          className={
-                            tickUp
-                              ? 'text-[#00C261]'
-                              : tickDown
-                              ? 'text-red-400'
-                              : 'text-[#D4AF37]'
-                          }
-                        >
-                          {tickUp ? '▲ ' : tickDown ? '▼ ' : ''}@ {m.price}
-                        </span>
+                    <div className="text-xs font-black text-white flex items-center justify-between gap-1">
+                      <span
+                        className={
+                          tickUp
+                            ? 'text-[#00C261]'
+                            : tickDown
+                            ? 'text-red-400'
+                            : 'text-[#D4AF37]'
+                        }
+                      >
+                        {tickUp ? '▲ ' : tickDown ? '▼ ' : ''}@ {m.price}
                       </span>
-                      {lockedPairs[m.pair] && (
-                        <span className="text-[10px] text-amber-300 font-bold">Custom</span>
-                      )}
+                      <span className="text-[10px] text-slate-400 truncate">
+                        {kenyaTiming.windowStatusCode === 'CLOSED_WAIT'
+                          ? `Opens ${kenyaTiming.countdownFormatted}`
+                          : computed.recommendedStrategy}
+                      </span>
                     </div>
 
-                    <div className="flex items-center justify-between gap-1 text-[10px] text-cyan-300 truncate">
-                      <span className="truncate font-bold">{computed.recommendedStrategy}</span>
-                      <span className="text-slate-400 shrink-0">{computed.tvSymbol}</span>
-                    </div>
-
-                    {/* 4-Timeframe Alignment Matrix & Institutional Tier */}
+                    {/* 4-Timeframe Alignment Strip */}
                     {computed.mtfAlignment && (
-                      <div className="flex items-center justify-between gap-1 text-[10px] bg-slate-900/90 px-2.5 py-1.5 rounded-xl border border-slate-800">
-                        <span
-                          className="font-black text-[10px] truncate"
-                          style={{ color: computed.mtfAlignment.tierColor }}
-                        >
+                      <div className="flex items-center justify-between gap-1 text-[10px] bg-slate-900/90 px-2 py-1 rounded-lg border border-slate-800">
+                        <span className="font-black truncate" style={{ color: computed.mtfAlignment.tierColor }}>
                           {computed.mtfAlignment.tierGrade}
                         </span>
                         <div className="flex items-center gap-1 font-mono text-[9px] shrink-0">
                           <span className={`px-1 rounded ${computed.mtfAlignment.m5 === 'BULLISH' ? 'text-[#00C261] bg-emerald-950/60' : 'text-red-400 bg-red-950/60'}`}>M5</span>
                           <span className={`px-1 rounded ${computed.mtfAlignment.m15 === 'BULLISH' ? 'text-[#00C261] bg-emerald-950/60' : 'text-red-400 bg-red-950/60'}`}>M15</span>
-                          <span className={`px-1 rounded font-bold border border-[#D4AF37]/50 ${computed.mtfAlignment.h1 === 'BULLISH' ? 'text-[#00C261] bg-emerald-950/80' : 'text-red-400 bg-red-950/80'}`}>1H★</span>
+                          <span className={`px-1 rounded font-bold border border-[#D4AF37]/50 ${computed.mtfAlignment.h1 === 'BULLISH' ? 'text-[#00C261] bg-emerald-950/80' : 'text-red-400 bg-red-950/80'}`}>1H</span>
                           <span className={`px-1 rounded ${computed.mtfAlignment.h4 === 'BULLISH' ? 'text-[#00C261] bg-emerald-950/60' : 'text-red-400 bg-red-950/60'}`}>H4</span>
                         </div>
                       </div>
                     )}
 
-                    {/* 1H Advisory Pullback Entry vs Market Execution */}
-                    {computed.advisoryDiscountPips && computed.advisoryDiscountPips > 0 ? (
-                      <div className="px-2.5 py-1.5 rounded-xl bg-amber-950/30 border border-amber-500/40 text-[10px] space-y-0.5">
-                        <div className="flex items-center justify-between text-amber-300 font-bold">
-                          <span>Sniper Limit EP:</span>
-                          <strong className="text-white">@ {computed.advisoryEntryPrice}</strong>
+                    {/* Trigger Corridor / Pullback Distance */}
+                    {!isCardNoTrade && computed.advisoryDiscountPips && computed.advisoryDiscountPips > 0 ? (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="px-2.5 py-1.5 rounded-xl bg-amber-950/35 border border-amber-500/40 text-[10px] flex items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0">
+                          <span className="text-amber-300 font-bold block truncate">
+                            20 EMA Limit @ {computed.advisoryEntryPrice}
+                          </span>
+                          <span className="text-slate-400 text-[9px] block">
+                            {computed.advisoryDiscountPips}p away
+                          </span>
                         </div>
-                        <span className="text-slate-400 block text-[9px]">
-                          Saves {computed.advisoryDiscountPips}p{computed.institutionalTelemetry?.drawdownSavingsPct ? ` (${computed.institutionalTelemetry.drawdownSavingsPct}% DD cut)` : ' drawdown'} · Avoid chasing
-                        </span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const armed = globalLiveStream.armPendingLimitOrder({
+                                pair: m.pair,
+                                direction: computed.direction,
+                                limitEntryPrice: computed.advisoryEntryPrice ?? m.ema20,
+                                timeframe: activeTf,
+                                broker: selectedBroker
+                              });
+                              if (armed) handleQuickCopyValue(armed.limitEntryPrice, `card-lim-${m.pair}`);
+                            }}
+                            className="px-2 py-1 rounded-lg bg-[#D4AF37]/20 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black border border-[#D4AF37]/45 font-black text-[9px] whitespace-nowrap transition"
+                            title={`Arm ${computed.direction} LIMIT @ ${computed.advisoryEntryPrice ?? m.ema20}`}
+                          >
+                            {copiedCardPair === `card-lim-${m.pair}` ? 'Limit ✓' : 'Arm Limit'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const rule = globalLiveStream.addPriceAlert({
+                                pair: m.pair,
+                                targetPrice: computed.advisoryEntryPrice ?? m.ema20,
+                                label: '20 EMA Trigger Alert'
+                              });
+                              if (rule) handleQuickCopyValue(rule.targetPrice, `card-al-${m.pair}`);
+                            }}
+                            className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-400 text-amber-300 hover:text-black border border-amber-400/40 font-black text-[9px] inline-flex items-center gap-1 shrink-0 transition"
+                          >
+                            <Bell className="w-3 h-3" />
+                            <span>{copiedCardPair === `card-al-${m.pair}` ? 'Armed' : 'Alert'}</span>
+                          </button>
+                        </div>
                       </div>
-                    ) : (
-                      <div className="px-2.5 py-1.5 rounded-xl bg-slate-900/60 border border-slate-800 text-[10px] flex items-center justify-between text-slate-300">
-                        <span>Entry Corridor:</span>
-                        <strong className="text-[#00C261]">
-                          @ {m.price} {deepAudits[m.pair] ? '· Deep Audited ✓' : '(Prime Value)'}
-                        </strong>
-                      </div>
-                    )}
+                    ) : null}
                   </div>
 
-                  {/* Active Loaded Market Order Progress Strip (When Ticked / Loaded on This Card) */}
+                  {/* Active Loaded Market Order Progress Strip */}
                   {loadedOrder && orderMetrics && (
                     <div
                       onClick={(e) => e.stopPropagation()}
-                      className="p-2.5 rounded-xl bg-emerald-950/45 border border-[#00C261]/60 space-y-1.5 text-[10px]"
+                      className="p-2 rounded-xl bg-emerald-950/45 border border-[#00C261]/60 space-y-1 text-[10px]"
                     >
                       <div className="flex items-center justify-between gap-1 font-black">
-                        <span className="text-[#00C261] flex items-center gap-1">
-                          <ShieldCheck className="w-3 h-3 shrink-0" />
-                          <span>{loadedOrder.direction} LOADED @ {loadedOrder.entryPrice}</span>
+                        <span className="text-[#00C261]">
+                          {loadedOrder.direction} @ {loadedOrder.entryPrice}
                         </span>
                         <span className={orderMetrics.netProfitUsd >= 0 ? 'text-[#00C261]' : 'text-red-300'}>
                           {orderMetrics.floatingPips >= 0 ? `+${orderMetrics.floatingPips}p` : `${orderMetrics.floatingPips}p`} ·{' '}
@@ -2560,44 +2945,34 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                             : `-$${Math.abs(orderMetrics.netProfitUsd).toFixed(2)}`}
                         </span>
                       </div>
-
                       <div className="w-full h-1.5 rounded-full bg-slate-900 overflow-hidden">
                         <div
                           className="h-full bg-[#00C261] transition-all duration-300"
                           style={{ width: `${orderMetrics.slToTpProgressPct}%` }}
                         />
                       </div>
-
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="text-slate-300">Progress: {orderMetrics.slToTpProgressPct}%</span>
-                        <button
-                          type="button"
-                          onClick={() => globalLiveStream.applySmartSlTpAction(m.pair, 'LOCK_PROFIT_55')}
-                          className="px-2 py-0.5 rounded bg-[#00C261] text-black font-black text-[9px] hover:bg-[#00dc6e] transition"
-                        >
-                          +Lock Profit SL ({orderMetrics.suggestedLockProfitSl})
-                        </button>
-                      </div>
                     </div>
                   )}
 
-                  {/* Clean SL & TP Summary Box with Direct 1-Click Copy SL & Copy TP Buttons */}
+                  {/* Concise SL & TP Summary Box */}
                   <div
                     onClick={(e) => e.stopPropagation()}
-                    className="p-3 rounded-xl bg-slate-900/90 border border-slate-800/80 text-xs space-y-2"
+                    className={`p-2.5 rounded-xl bg-slate-900/90 border border-slate-800/80 text-xs space-y-2 ${
+                      isCardNoTrade ? 'opacity-70' : ''
+                    }`}
                   >
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="flex items-center justify-between gap-1 bg-slate-950/70 px-2 py-1.5 rounded-lg border border-red-500/25">
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <div className="flex items-center justify-between gap-1 bg-slate-950/70 px-2 py-1 rounded-lg border border-red-500/25">
                         <div className="min-w-0">
                           <span className="text-[9px] text-red-400 block">
-                            {loadedOrder ? 'Active SL' : `SL (-${computed.slPips}p)`}
+                            {isCardNoTrade ? 'Ref SL' : `SL (-${computed.slPips}p)`}
                           </span>
-                          <strong className="text-red-300 text-xs truncate block">{cardSl}</strong>
+                          <strong className="text-red-300 text-[11px] truncate block">{cardSl}</strong>
                         </div>
                         <button
                           type="button"
                           onClick={() => handleQuickCopyValue(cardSl, `card-sl-${m.pair}`)}
-                          className="p-1.5 rounded bg-slate-900 hover:bg-red-950 text-red-300 border border-slate-700 shrink-0"
+                          className="p-1 rounded bg-slate-900 hover:bg-red-950 text-red-300 border border-slate-700 shrink-0"
                           title={`Copy Stop Loss ${cardSl}`}
                         >
                           {copiedCardPair === `card-sl-${m.pair}` ? (
@@ -2608,17 +2983,17 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                         </button>
                       </div>
 
-                      <div className="flex items-center justify-between gap-1 bg-slate-950/70 px-2 py-1.5 rounded-lg border border-emerald-500/25">
+                      <div className="flex items-center justify-between gap-1 bg-slate-950/70 px-2 py-1 rounded-lg border border-emerald-500/25">
                         <div className="min-w-0">
                           <span className="text-[9px] text-emerald-400 block">
-                            {loadedOrder ? 'Active TP' : `TP (+${computed.tpPips}p)`}
+                            {isCardNoTrade ? 'Ref TP' : `TP (+${computed.tpPips}p)`}
                           </span>
-                          <strong className="text-[#00C261] text-xs truncate block">{cardTp}</strong>
+                          <strong className="text-[#00C261] text-[11px] truncate block">{cardTp}</strong>
                         </div>
                         <button
                           type="button"
                           onClick={() => handleQuickCopyValue(cardTp, `card-tp-${m.pair}`)}
-                          className="p-1.5 rounded bg-slate-900 hover:bg-emerald-950 text-[#00C261] border border-slate-700 shrink-0"
+                          className="p-1 rounded bg-slate-900 hover:bg-emerald-950 text-[#00C261] border border-slate-700 shrink-0"
                           title={`Copy Take Profit ${cardTp}`}
                         >
                           {copiedCardPair === `card-tp-${m.pair}` ? (
@@ -2630,112 +3005,135 @@ input double   MaxRiskUsdPerTrade  = ${computed.actualRiskUsd.toFixed(2)};`;
                       </div>
                     </div>
 
-                    {/* ADVANCED ENTRY CONFIRMATION CONTROLLER (Compact Mode) */}
                     <EntryConfirmationController
                       pair={m.pair}
                       computed={computed}
                       kenyaTiming={kenyaTiming}
                       livePrice={m.price}
-                      timeframe={m.recommendedTf}
+                      timeframe={activeTf}
                       lockedOrder={loadedOrder}
                       variant="compact"
-                      onInspectDetails={() => {
-                        setSelectedPair(m.pair);
-                      }}
+                      onInspectDetails={() => handleOpenPairCard(m.pair)}
                     />
-
-                    <div className="pt-1 border-t border-slate-800 flex items-center justify-between text-[10px]">
-                      <span className="text-slate-400">
-                        {computed.alignedFactorsCount}/{computed.totalFactorsCount} Factors ✓
-                      </span>
-                      <span className="text-[#00C261] font-black">
-                        +${computed.netProfitUsd.toFixed(2)} ({computed.riskReward})
-                      </span>
-                    </div>
                   </div>
 
-                  {/* Real-Time AI Verdict Snippet */}
-                  <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed font-sans">
-                    {cardAiNote || computed.humanCheckNote}
-                  </p>
-
-                  {/* Card Footer: Load Market Order Quick Action OR Inspect Card */}
-                  <div className="flex items-center justify-between gap-1.5 pt-2 border-t border-slate-800/80 text-[10px]">
-                    <span
-                      className={`inline-flex items-center gap-1 font-bold truncate ${
-                        kenyaTiming.windowStatusCode === 'OPEN' && kenyaTiming.isFavorableTime
-                          ? 'text-[#00C261]'
-                          : kenyaTiming.windowStatusCode === 'OPEN' || kenyaTiming.windowStatusCode === 'OPENING_SOON'
-                          ? 'text-amber-300'
-                          : 'text-red-300'
-                      }`}
-                    >
-                      <Clock className="w-3 h-3 shrink-0" />
-                      <span className="truncate">{kenyaTiming.windowBadgeShort}</span>
-                    </span>
-
-                    <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                  {/* Single Primary Footer Action Row */}
+                  <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-800/80 text-[10px]">
+                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
                         onClick={() => onOpenTradingViewForPair(m.pair, activeTf, m.price)}
-                        className="px-2 py-1.5 rounded-lg bg-sky-950/80 hover:bg-sky-500 text-sky-300 hover:text-black border border-sky-500/40 font-black text-[10px] inline-flex items-center gap-1 transition whitespace-nowrap shrink-0"
-                        title={`Open ${m.pair} synced TradingView chart (${getTradingViewSymbol(m.pair)})`}
+                        className="px-2 py-1 rounded-lg bg-sky-950/80 hover:bg-sky-500 text-sky-300 hover:text-black border border-sky-500/40 font-black text-[10px] inline-flex items-center gap-1 transition"
                       >
                         <BarChart3 className="w-3 h-3" />
                         <span>TV</span>
                       </button>
-
-                      <a
-                        href={getTradingViewExternalUrl(m.pair, activeTf)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-1.5 rounded-lg bg-slate-900 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black border border-[#D4AF37]/40 transition shrink-0"
-                        title={`Launch ${getTradingViewSymbol(m.pair)} on TradingView.com`}
-                        aria-label={`Open ${m.pair} externally on TradingView.com`}
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-
-                      {!loadedOrder &&
-                        (computed.executionReadiness === 'NO_TRADE_CHOP' ||
-                        computed.executionReadiness === 'NO_TRADE_CLOSED' ? (
-                          <span
-                            className="px-2 py-1.5 rounded-lg bg-slate-900 text-slate-400 border border-slate-700 font-bold text-[10px] whitespace-nowrap"
-                            title={computed.executionReadinessReason}
-                          >
-                            {computed.executionReadiness === 'NO_TRADE_CLOSED' ? 'Closed' : 'Stand Aside'}
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleQuickLoadCardOrder(m.pair, computed.direction, activeTf)
-                            }
-                            className={`px-2 py-1.5 rounded-lg font-black text-[10px] transition whitespace-nowrap ${
-                              isBuy
-                                ? 'bg-[#00C261] hover:bg-[#00dc6e] text-black'
-                                : 'bg-red-600 hover:bg-red-500 text-white'
-                            }`}
-                            title={`Notify PivotFx: Placed ${computed.direction} Order With My Broker`}
-                          >
-                            Placed {computed.direction}
-                          </button>
-                        ))}
-
-                      <button
-                        type="button"
-                        onClick={() => handleOpenPairCard(m.pair)}
-                        className="px-2.5 py-1.5 rounded-lg bg-[#D4AF37]/20 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black font-black text-[10px] flex items-center gap-1 transition whitespace-nowrap"
-                      >
-                        <span>{loadedOrder ? 'Manage Order' : 'Inspect'}</span>
-                        <ArrowRight className="w-3 h-3" />
-                      </button>
+                      {!loadedOrder && computed.executionReadiness === 'READY_ENTER' && (
+                        <button
+                          type="button"
+                          onClick={() => handleQuickLoadCardOrder(m.pair, computed.direction, activeTf)}
+                          className={`px-2 py-1 rounded-lg font-black text-[10px] transition ${
+                            isBuy
+                              ? 'bg-[#00C261] hover:bg-[#00dc6e] text-black'
+                              : 'bg-red-600 hover:bg-red-500 text-white'
+                          }`}
+                        >
+                          Exec {computed.direction}
+                        </button>
+                      )}
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenPairCard(m.pair);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-[#D4AF37]/20 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black font-black text-[10px] flex items-center gap-1 transition whitespace-nowrap"
+                    >
+                      <span>{loadedOrder ? 'Manage' : 'Chart & EA'}</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </button>
                   </div>
                 </div>
               );
-            })}
-          </div>
+            };
+
+            return (
+              <div className="space-y-5 font-mono">
+                {/* TIER 1: READY TO EXECUTE NOW OR ACTIVE OPEN POSITIONS */}
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between gap-2 px-1">
+                    <div className="flex items-center gap-2 text-xs font-black text-[#00C261]">
+                      <Zap className="w-4 h-4 shrink-0" />
+                      <span>TIER 1 · READY TO EXECUTE NOW ({readyCards.length})</span>
+                    </div>
+                    <span className="text-[11px] text-slate-400">
+                      Highest probability 20/50 EMA value entries
+                    </span>
+                  </div>
+                  {readyCards.length === 0 ? (
+                    <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 text-xs text-slate-300 flex flex-wrap items-center justify-between gap-2">
+                      <span>
+                        No pair currently meets every READY_ENTER entry rule at this minute — inspect Tier 2 Pullback Watchlist below or open any chart to stage BUY/SELL manually.
+                      </span>
+                      <span className="text-amber-300 font-bold">0 Chasing Allowed</span>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {readyCards.map((m) => renderSummaryCard(m))}
+                    </div>
+                  )}
+                </div>
+
+                {/* TIER 2: PULLBACK WATCHLIST */}
+                {pullbackCards.length > 0 && (
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between gap-2 px-1">
+                      <div className="flex items-center gap-2 text-xs font-black text-amber-300">
+                        <Clock className="w-4 h-4 shrink-0" />
+                        <span>TIER 2 · PULLBACK WATCHLIST — WAIT 20 EMA RETEST ({pullbackCards.length})</span>
+                      </div>
+                      <span className="text-[11px] text-slate-400">
+                        Trend clear — arm Alert Bell at Sniper Limit price
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {pullbackCards.map((m) => renderSummaryCard(m))}
+                    </div>
+                  </div>
+                )}
+
+                {/* TIER 3: STAND ASIDE / CHOP / CLOSED (COLLAPSIBLE TO PREVENT VISUAL CLUTTER) */}
+                {blockedCards.length > 0 && (
+                  <div className="space-y-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowChopTier((prev) => !prev)}
+                      className="w-full p-3.5 rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 flex flex-wrap items-center justify-between gap-2 text-xs transition"
+                    >
+                      <div className="flex items-center gap-2 text-slate-300 font-bold">
+                        <Lock className="w-3.5 h-3.5 text-slate-400" />
+                        <span>
+                          TIER 3 · STAND ASIDE / CHOP / CLOSED ({blockedCards.length} Markets Filtered Out)
+                        </span>
+                      </div>
+                      <span className="text-[#D4AF37] font-black inline-flex items-center gap-1">
+                        <span>{showChopTier ? 'Collapse Blocked Markets' : 'Inspect Blocked Markets'}</span>
+                        {showChopTier ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </span>
+                    </button>
+
+                    {showChopTier && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {blockedCards.map((m) => renderSummaryCard(m))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()
           )}
         </div>
       )}

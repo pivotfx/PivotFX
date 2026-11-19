@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { CurrencyPair, Timeframe } from '../../types';
+import React, { useState, useEffect } from 'react';
+import { ChartReplayMarker, CurrencyPair, Timeframe } from '../../types';
 import { OhlcCandle, StructureBosAnalysis, getPairSpecs } from '../../utils/liveMarketEngine';
 import {
   CandlestickChart,
@@ -10,7 +10,8 @@ import {
   Minus,
   Activity,
   GitBranch,
-  AlertTriangle
+  AlertTriangle,
+  Clock
 } from 'lucide-react';
 
 interface LiveInteractiveCandleChartProps {
@@ -25,7 +26,14 @@ interface LiveInteractiveCandleChartProps {
   tp1: number;
   tp2: number;
   advisoryEntryPrice?: number;
+  invalidationLevel?: number;
+  pendingLimitPrice?: number | null;
+  replaySignals?: ChartReplayMarker[];
   direction: 'BUY' | 'SELL';
+  manualPreviewDirection?: 'BUY' | 'SELL' | null;
+  activeOrderDirection?: 'BUY' | 'SELL' | null;
+  selectedSideMode?: 'AUTO' | 'BUY' | 'SELL';
+  onSelectSideSync?: (side: 'AUTO' | 'BUY' | 'SELL') => void;
   change24hPct?: number;
   lotSize?: number;
   riskUsd?: number;
@@ -35,6 +43,36 @@ interface LiveInteractiveCandleChartProps {
   isLockedToCustom?: boolean;
   onCandlePriceChange: (newPrice: number) => void;
   onResetToLiveStream: () => void;
+}
+
+function getTimeframeDurationSeconds(tf: Timeframe): number {
+  switch (tf) {
+    case 'M1':
+      return 60;
+    case 'M5':
+      return 300;
+    case 'M10':
+      return 600;
+    case 'M15':
+      return 900;
+    case 'H1':
+      return 3600;
+    case 'H4':
+      return 14400;
+    case 'D1':
+      return 86400;
+    default:
+      return 900;
+  }
+}
+
+function formatBarCountdown(secondsLeft: number): string {
+  const s = Math.max(0, secondsLeft);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+  return `${String(m).padStart(2, '0')}m ${String(sec).padStart(2, '0')}s`;
 }
 
 export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProps> = ({
@@ -49,7 +87,14 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   tp1,
   tp2,
   advisoryEntryPrice,
+  invalidationLevel,
+  pendingLimitPrice = null,
+  replaySignals = [],
   direction = 'BUY',
+  manualPreviewDirection = null,
+  activeOrderDirection = null,
+  selectedSideMode,
+  onSelectSideSync,
   change24hPct = 0,
   lotSize,
   riskUsd,
@@ -72,6 +117,21 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
   const [showAdvisoryLine, setShowAdvisoryLine] = useState<boolean>(true);
   const [showBosLine, setShowBosLine] = useState<boolean>(true);
   const [showProjection, setShowProjection] = useState<boolean>(true);
+  const [showReplaySignals, setShowReplaySignals] = useState<boolean>(true);
+  const [barSecondsLeft, setBarSecondsLeft] = useState<number>(() => {
+    const dur = getTimeframeDurationSeconds(timeframe);
+    return dur - (Math.floor(Date.now() / 1000) % dur);
+  });
+
+  useEffect(() => {
+    const dur = getTimeframeDurationSeconds(timeframe);
+    const update = () => {
+      setBarSecondsLeft(dur - (Math.floor(Date.now() / 1000) % dur));
+    };
+    update();
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [timeframe]);
 
   const safeLive = safeLivePrice;
   const synthesizedFallback: OhlcCandle[] = React.useMemo(() => {
@@ -179,6 +239,8 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
     tp1,
     tp2,
     ...(advisoryEntryPrice && advisoryEntryPrice > 0 ? [advisoryEntryPrice] : []),
+    ...(pendingLimitPrice && pendingLimitPrice > 0 ? [pendingLimitPrice] : []),
+    ...(invalidationLevel && invalidationLevel > 0 ? [invalidationLevel] : []),
     ...(bosAnalysis?.bosTriggerLevel && bosAnalysis.bosTriggerLevel > 0 ? [bosAnalysis.bosTriggerLevel] : [])
   ].filter((v) => !isNaN(v) && v > 0);
 
@@ -254,7 +316,11 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
     onCandlePriceChange(next);
   };
 
-  const isBuy = direction === 'BUY';
+  const effectiveDirection = manualPreviewDirection || activeOrderDirection || direction;
+  const isBuy = effectiveDirection === 'BUY';
+  const isNoTrade = executionReadiness === 'NO_TRADE_CHOP' || executionReadiness === 'NO_TRADE_CLOSED';
+  const isManualOverrideActive = Boolean(manualPreviewDirection || activeOrderDirection);
+  const suppressProjection = isNoTrade && !isManualOverrideActive;
   const lastCandleBull = inspectedCandle ? inspectedCandle.close >= inspectedCandle.open : isBuy;
 
   // Detect if TP or SL is currently equal/already hit by candle (should never happen on live auto signals)
@@ -371,7 +437,37 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
       color: '#EF4444',
       bg: '#450A0A',
       textColor: '#EF4444'
-    }
+    },
+    ...(invalidationLevel &&
+    invalidationLevel > 0 &&
+    Math.abs(invalidationLevel - stopLoss) > 0.3 / pipMultiplier
+      ? [
+          {
+            key: 'INV',
+            label: `INV ${invalidationLevel.toFixed(decimals)}`,
+            val: invalidationLevel,
+            exactY: priceToY(invalidationLevel),
+            badgeY: priceToY(invalidationLevel),
+            color: '#F43F5E',
+            bg: '#4C0519',
+            textColor: '#FDA4AF'
+          }
+        ]
+      : []),
+    ...(pendingLimitPrice && pendingLimitPrice > 0
+      ? [
+          {
+            key: 'LIMIT',
+            label: `LMT ${pendingLimitPrice.toFixed(decimals)}`,
+            val: pendingLimitPrice,
+            exactY: priceToY(pendingLimitPrice),
+            badgeY: priceToY(pendingLimitPrice),
+            color: '#F59E0B',
+            bg: '#451A03',
+            textColor: '#FCD34D'
+          }
+        ]
+      : [])
   ];
 
   // Sort top-to-bottom and enforce minimum 17px separation between right-axis pills
@@ -469,6 +565,44 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
               {lotSize.toFixed(2)} Lots{riskUsd !== undefined && Number.isFinite(riskUsd) ? ` · $${riskUsd.toFixed(2)} Risk` : ''}
             </span>
           )}
+          <span
+            className={`px-2 py-0.5 rounded border text-[10px] font-black inline-flex items-center gap-1 ${
+              barSecondsLeft <= 30
+                ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                : 'bg-slate-900 border-slate-700 text-cyan-300'
+            }`}
+            title={`Time remaining until current ${timeframe} candle closes`}
+          >
+            <Clock className="w-3 h-3" />
+            <span>Bar closes in {formatBarCountdown(barSecondsLeft)}</span>
+          </span>
+          {onSelectSideSync && (
+            <div className="inline-flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-700">
+              {(['BUY', 'SELL', 'AUTO'] as const).map((sideBtn) => (
+                <button
+                  key={sideBtn}
+                  type="button"
+                  onClick={() => onSelectSideSync(sideBtn)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-black transition ${
+                    selectedSideMode === sideBtn
+                      ? sideBtn === 'BUY'
+                        ? 'bg-[#00C261] text-black'
+                        : sideBtn === 'SELL'
+                        ? 'bg-red-500 text-white'
+                        : 'bg-[#D4AF37] text-black'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title={
+                    sideBtn === 'AUTO'
+                      ? 'Follow AI Directional Signal'
+                      : `Lock Chart & Order Ticket to ${sideBtn}`
+                  }
+                >
+                  {sideBtn}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Interactive Indicator Toggles & Legend */}
@@ -546,7 +680,7 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
           <button
             type="button"
             onClick={() => setShowProjection(!showProjection)}
-            className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
+            className={`px-2 py-0.5 rounded text-[10px] font-bold border transition whitespace-nowrap ${
               showProjection
                 ? 'bg-emerald-950/80 text-[#00C261] border-[#00C261]/60'
                 : 'bg-slate-900 text-slate-500 border-slate-800'
@@ -555,6 +689,20 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
           >
             Projection {showProjection ? 'ON' : 'OFF'}
           </button>
+          {replaySignals.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowReplaySignals(!showReplaySignals)}
+              className={`px-2 py-0.5 rounded text-[10px] font-bold border transition whitespace-nowrap ${
+                showReplaySignals
+                  ? 'bg-cyan-950/80 text-cyan-300 border-cyan-500/60'
+                  : 'bg-slate-900 text-slate-500 border-slate-800'
+              }`}
+              title="Toggle Historical Backtest Signal Outcome Markers"
+            >
+              Replay Signals ({replaySignals.length})
+            </button>
+          )}
         </div>
       </div>
 
@@ -564,21 +712,55 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
           viewBox={`0 0 ${svgWidth} ${svgHeight}`}
           className="w-full h-[250px] sm:h-[305px] select-none block"
         >
-          {/* Profit & Risk Zone Bands showing exact BUY/SELL direction relative to EP & Candle */}
+          {/* Profit & Risk Zone Bands showing exact BUY/SELL direction relative to EP & Candle (muted when suppressed) */}
           <rect
             x={padLeft}
             y={profitBandTop}
             width={plotW}
             height={profitBandHeight}
-            fill="rgba(0,194,97,0.06)"
+            fill={suppressProjection ? 'rgba(148,163,184,0.03)' : 'rgba(0,194,97,0.06)'}
           />
           <rect
             x={padLeft}
             y={riskBandTop}
             width={plotW}
             height={riskBandHeight}
-            fill="rgba(239,68,68,0.06)"
+            fill={suppressProjection ? 'rgba(148,163,184,0.03)' : 'rgba(239,68,68,0.06)'}
           />
+          {/* Armed Pending Limit Entry Corridor */}
+          {pendingLimitPrice && pendingLimitPrice > 0 && (() => {
+            const yLim = priceToY(pendingLimitPrice);
+            return (
+              <rect
+                x={padLeft}
+                y={Math.max(padTop, yLim - 5)}
+                width={plotW}
+                height={10}
+                fill="rgba(245,158,11,0.14)"
+                stroke="rgba(245,158,11,0.45)"
+                strokeDasharray="4 2"
+                strokeWidth="0.9"
+              />
+            );
+          })()}
+
+          {/* 20 EMA Trigger Retest Corridor (When actionable or manually synced) */}
+          {!suppressProjection && advisoryEntryPrice && advisoryEntryPrice > 0 && (() => {
+            const yAdv = priceToY(advisoryEntryPrice);
+            const bandHalf = Math.max(4, Math.min(10, Math.abs(yEntry - ySl) * 0.14));
+            return (
+              <rect
+                x={padLeft}
+                y={Math.max(padTop, yAdv - bandHalf)}
+                width={plotW}
+                height={bandHalf * 2}
+                fill="rgba(212,175,55,0.09)"
+                stroke="rgba(212,175,55,0.28)"
+                strokeDasharray="3 3"
+                strokeWidth="0.7"
+              />
+            );
+          })()}
 
           {/* Horizontal Grid Lines */}
           {[0.15, 0.38, 0.62, 0.85].map((frac, idx) => {
@@ -682,8 +864,65 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
             );
           })}
 
-          {/* Projected Multi-Point Candlestick Trajectory (Live -> Pullback/Retest -> TP1 -> TP2 + Ghost Projected Bars) */}
-          {showProjection && (
+          {/* Replay Signals: Historical Signal Outcome Markers on Matching Candles */}
+          {showReplaySignals &&
+            replaySignals.length > 0 &&
+            replaySignals.map((sig, sIdx) => {
+              let matchIdx = visibleCandles.findIndex((c) => c.time === sig.time);
+              if (matchIdx === -1 && visibleCandles.length > 0) {
+                let bestDist = Infinity;
+                visibleCandles.forEach((c, idx) => {
+                  const dist = Math.abs(c.time - sig.time);
+                  if (dist < bestDist) {
+                    bestDist = dist;
+                    matchIdx = idx;
+                  }
+                });
+                if (bestDist > getTimeframeDurationSeconds(timeframe) * 2) matchIdx = -1;
+              }
+              if (matchIdx === -1) return null;
+              const candle = visibleCandles[matchIdx];
+              const cx = indexToX(matchIdx);
+              const isWin = sig.outcome === 'TP2_WIN' || sig.outcome === 'TP1_BE_SAVE';
+              const isLoss = sig.outcome === 'SL_LOSS';
+              const markerColor = isWin ? '#00C261' : isLoss ? '#F43F5E' : '#F59E0B';
+              const isSigBuy = sig.direction === 'BUY';
+              const anchorY = isSigBuy
+                ? Math.min(svgHeight - padBottom - 8, priceToY(candle.low) + 12)
+                : Math.max(padTop + 10, priceToY(candle.high) - 12);
+              const label = isWin
+                ? `+${sig.rMultiple.toFixed(1)}R`
+                : isLoss
+                ? '-1R'
+                : 'OP';
+
+              return (
+                <g key={`rpl-${sIdx}`}>
+                  <polygon
+                    points={
+                      isSigBuy
+                        ? `${cx},${anchorY - 6} ${cx - 4},${anchorY} ${cx + 4},${anchorY}`
+                        : `${cx},${anchorY + 6} ${cx - 4},${anchorY} ${cx + 4},${anchorY}`
+                    }
+                    fill={markerColor}
+                  />
+                  <text
+                    x={cx}
+                    y={isSigBuy ? anchorY + 8 : anchorY - 4}
+                    fill={markerColor}
+                    fontSize="7"
+                    fontWeight="bold"
+                    fontFamily="monospace"
+                    textAnchor="middle"
+                  >
+                    {label}
+                  </text>
+                </g>
+              );
+            })}
+
+          {/* Projected Multi-Point Candlestick Trajectory (Respects manual BUY/SELL sync or actionable directional signal) */}
+          {showProjection && !suppressProjection && (
             <g opacity="0.96">
               {/* Vertical separator dividing Live Candles from Forward Projection Lane */}
               <line
@@ -779,6 +1018,49 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
               </text>
             </g>
           )}
+          {showProjection && suppressProjection && (
+            <g opacity="0.9">
+              <line
+                x1={lastCandleX + 4}
+                y1={padTop}
+                x2={lastCandleX + 4}
+                y2={svgHeight - padBottom}
+                stroke="rgba(148,163,184,0.3)"
+                strokeDasharray="2 3"
+              />
+              <rect
+                x={lastCandleX + 8}
+                y={svgHeight / 2 - 22}
+                width={Math.max(54, svgWidth - padRight - lastCandleX - 12)}
+                height={44}
+                rx={6}
+                fill="rgba(15,23,42,0.9)"
+                stroke="rgba(239,68,68,0.5)"
+                strokeDasharray="3 2"
+              />
+              <text
+                x={lastCandleX + 8 + Math.max(54, svgWidth - padRight - lastCandleX - 12) / 2}
+                y={svgHeight / 2 - 3}
+                fill="#FCA5A5"
+                fontSize="8"
+                fontFamily="monospace"
+                fontWeight="bold"
+                textAnchor="middle"
+              >
+                {executionReadiness === 'NO_TRADE_CLOSED' ? 'CLOSED' : 'CHOP'}
+              </text>
+              <text
+                x={lastCandleX + 8 + Math.max(54, svgWidth - padRight - lastCandleX - 12) / 2}
+                y={svgHeight / 2 + 10}
+                fill="#94A3B8"
+                fontSize="7"
+                fontFamily="monospace"
+                textAnchor="middle"
+              >
+                STAND ASIDE
+              </text>
+            </g>
+          )}
 
           {/* Horizontal Price Lines (Exact Price Y) + De-Collided Axis Pills */}
           {sortedTags.map((tag) => (
@@ -832,10 +1114,24 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
         <div className="absolute top-2.5 left-3 flex flex-wrap items-center gap-2 pointer-events-none">
           <span
             className={`px-2 py-0.5 rounded text-[10px] font-black shadow ${
-              isBuy ? 'bg-[#00C261] text-black' : 'bg-red-600 text-white'
+              suppressProjection
+                ? 'bg-slate-800 text-slate-200 border border-slate-600'
+                : isBuy
+                ? 'bg-[#00C261] text-black'
+                : 'bg-red-600 text-white'
             }`}
           >
-            {isBuy ? 'BUY STRUCTURE ▲' : 'SELL STRUCTURE ▼'}
+            {suppressProjection
+              ? executionReadiness === 'NO_TRADE_CLOSED'
+                ? 'MARKET CLOSED — STAND ASIDE'
+                : 'CHOP — NO VALID ENTRY'
+              : activeOrderDirection
+              ? `ACTIVE ${effectiveDirection} ORDER ${isBuy ? '▲' : '▼'}`
+              : manualPreviewDirection && isNoTrade
+              ? `MANUAL ${effectiveDirection} SYNC ${isBuy ? '▲' : '▼'}`
+              : isBuy
+              ? 'BUY STRUCTURE ▲'
+              : 'SELL STRUCTURE ▼'}
           </span>
           {executionReadiness && (
             <span
@@ -892,7 +1188,9 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
       {/* Mathematical Direction & SL/EP/TP Proof Bar */}
       <div
         className={`px-3 py-2 rounded-xl border text-[11px] flex flex-wrap items-center justify-between gap-2 ${
-          isGeometryValid
+          suppressProjection
+            ? 'bg-slate-900/80 border-slate-700 text-slate-300'
+            : isGeometryValid
             ? isBuy
               ? 'bg-emerald-950/35 border-emerald-500/35 text-emerald-200'
               : 'bg-red-950/35 border-red-500/35 text-red-200'
@@ -902,10 +1200,20 @@ export const LiveInteractiveCandleChart: React.FC<LiveInteractiveCandleChartProp
         <div className="flex items-center gap-2 flex-wrap">
           <span
             className={`px-1.5 py-0.5 rounded font-black text-[10px] ${
-              isBuy ? 'bg-[#00C261] text-black' : 'bg-red-600 text-white'
+              suppressProjection
+                ? 'bg-slate-800 text-amber-300 border border-slate-700'
+                : isBuy
+                ? 'bg-[#00C261] text-black'
+                : 'bg-red-600 text-white'
             }`}
           >
-            {isBuy ? 'BUY PROOF ▲' : 'SELL PROOF ▼'}
+            {suppressProjection
+              ? 'REF LEVELS (NO ACTIVE ENTRY)'
+              : manualPreviewDirection && isNoTrade
+              ? `MANUAL ${effectiveDirection} SIM ${isBuy ? '▲' : '▼'}`
+              : isBuy
+              ? 'BUY PROOF ▲'
+              : 'SELL PROOF ▼'}
           </span>
           {isBuy ? (
             <span>

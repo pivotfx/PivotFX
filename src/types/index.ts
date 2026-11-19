@@ -324,3 +324,74 @@ export interface MasterclassStrategy {
   };
   gilgilLore: string;
 }
+
+export interface EaSignalLedgerEntry {
+  id: string;
+  pair: CurrencyPair;
+  timeframe: Timeframe;
+  direction: 'BUY' | 'SELL';
+  entryPrice: number;
+  stopLoss: number;
+  tp1: number;
+  tp2: number;
+  confidence: number;
+  strategy: string;
+  openedAtEat: string;
+  openedTimestampMs: number;
+  status: 'OPEN' | 'TP1_BE_SAVE' | 'TP2_WIN' | 'SL_LOSS';
+  tp1Reached?: boolean;
+  peakPips: number;
+  currentPips: number;
+  realizedR: number;
+  resolvedAtEat?: string;
+  resolvedPrice?: number;
+}
+
+export interface EaLedgerStats {
+  total: number;
+  open: number;
+  wins: number;
+  tp1Saves: number;
+  losses: number;
+  winRatePct: number;
+  netR: number;
+  profitFactor: number;
+}
+
+export interface PendingLimitOrder {
+  id: string;
+  pair: CurrencyPair;
+  direction: 'BUY' | 'SELL';
+  limitEntryPrice: number;
+  stopLoss: number;
+  tp1: number;
+  tp2: number;
+  tp3: number;
+  invalidationPrice: number;
+  lotSize: number;
+  timeframe: Timeframe;
+  broker: BrokerId;
+  armedAtEat: string;
+  armedTimestampMs: number;
+  status: 'PENDING' | 'FILLED' | 'CANCELLED_INVALIDATED' | 'CANCELLED_MANUAL';
+  reason: string;
+}
+
+export interface EaCircuitBreakerState {
+  tripped: boolean;
+  reason?: string;
+  dailyRealizedUsd: number;
+  consecutiveLosses: number;
+  maxDailyLossUsd: number;
+  maxLossStreak: number;
+  dateEat: string;
+}
+
+export interface ChartReplayMarker {
+  time: number;
+  price: number;
+  direction: 'BUY' | 'SELL';
+  outcome: 'TP2_WIN' | 'TP1_BE_SAVE' | 'SL_LOSS' | 'OPEN';
+  rMultiple: number;
+}
+

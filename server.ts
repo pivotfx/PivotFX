@@ -1759,6 +1759,129 @@ async function startServer() {
     }
   });
 
+  let calendarCache: {
+    fetchedAt: number;
+    source: 'live-calendar' | 'eat-session-schedule';
+    events: Array<{
+      id: string;
+      currency: string;
+      name: string;
+      impact: 'HIGH' | 'EXTREME';
+      timeEAT: string;
+      timestampMs: number;
+      minutesUntil: number;
+      status: 'ACTIVE_NOW' | 'IMMINENT' | 'UPCOMING' | 'PASSED';
+      tradingDirective: string;
+    }>;
+  } | null = null;
+
+  app.get('/api/economic-calendar', async (_req, res) => {
+    const nowMs = Date.now();
+    const recomputeTiming = (
+      rawList: Array<{ id: string; currency: string; name: string; impact: 'HIGH' | 'EXTREME'; timestampMs: number; tradingDirective: string }>
+    ) =>
+      rawList.map((ev) => {
+        const diffMins = Math.round((ev.timestampMs - nowMs) / 60000);
+        const dt = new Date(ev.timestampMs);
+        const timeEAT =
+          dt.toLocaleTimeString('en-GB', {
+            timeZone: 'Africa/Nairobi',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          }) + ' EAT';
+        const status: 'ACTIVE_NOW' | 'IMMINENT' | 'UPCOMING' | 'PASSED' =
+          diffMins < -20
+            ? 'PASSED'
+            : diffMins >= -20 && diffMins <= 15
+            ? 'ACTIVE_NOW'
+            : diffMins > 15 && diffMins <= 90
+            ? 'IMMINENT'
+            : 'UPCOMING';
+        return {
+          id: ev.id,
+          currency: ev.currency,
+          name: ev.name,
+          impact: ev.impact,
+          timeEAT,
+          timestampMs: ev.timestampMs,
+          minutesUntil: diffMins,
+          status,
+          tradingDirective: ev.tradingDirective
+        };
+      });
+
+    if (calendarCache && nowMs - calendarCache.fetchedAt < 15 * 60 * 1000) {
+      res.json({
+        fetchedAt: calendarCache.fetchedAt,
+        source: calendarCache.source,
+        events: recomputeTiming(calendarCache.events)
+      });
+      return;
+    }
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4500);
+      const ffRes = await fetch('https://nfs.faireconomy.media/ff_calendar_thisweek.json', {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'PivotFX-Market-Engine/1.0' }
+      });
+      clearTimeout(timeoutId);
+
+      if (ffRes.ok) {
+        const rawJson = (await ffRes.json()) as Array<{
+          title?: string;
+          country?: string;
+          date?: string;
+          impact?: string;
+          forecast?: string;
+          previous?: string;
+        }>;
+        const trackedCurrencies = new Set(['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'XAU']);
+        const parsed = (Array.isArray(rawJson) ? rawJson : [])
+          .filter((item) => {
+            const ccy = String(item.country || '').toUpperCase();
+            const imp = String(item.impact || '').toLowerCase();
+            return trackedCurrencies.has(ccy) && (imp === 'high' || imp === 'holiday');
+          })
+          .map((item, idx) => {
+            const ts = item.date ? Date.parse(item.date) : NaN;
+            const ccy = String(item.country || 'USD').toUpperCase();
+            const title = String(item.title || 'High-Impact Macro Release').trim();
+            const isExtreme = /cpi|nfp|non-farm|fomc|rate|fed|ecb|boe|boj|gdp|powell/i.test(title);
+            const forecastNote = item.forecast ? ` Forecast ${item.forecast}${item.previous ? ` vs Prev ${item.previous}` : ''}.` : '';
+            return {
+              id: `ff-${idx}-${ccy}-${Number.isFinite(ts) ? ts : nowMs}`,
+              currency: ccy,
+              name: title,
+              impact: (isExtreme ? 'EXTREME' : 'HIGH') as 'HIGH' | 'EXTREME',
+              timestampMs: Number.isFinite(ts) ? ts : nowMs + 3600_000,
+              tradingDirective: `NEWS SHIELD (${ccy}): Blackout -15m to +15m around release.${forecastNote}`
+            };
+          })
+          .filter((ev) => ev.timestampMs >= nowMs - 4 * 3600_000 && ev.timestampMs <= nowMs + 72 * 3600_000)
+          .sort((a, b) => a.timestampMs - b.timestampMs)
+          .slice(0, 16);
+
+        if (parsed.length > 0) {
+          const normalized = recomputeTiming(parsed);
+          calendarCache = { fetchedAt: nowMs, source: 'live-calendar', events: normalized };
+          res.json({ fetchedAt: nowMs, source: 'live-calendar', events: normalized });
+          return;
+        }
+      }
+    } catch {
+      // Fallback cleanly to deterministic EAT macro windows below
+    }
+
+    res.json({
+      fetchedAt: nowMs,
+      source: 'eat-session-schedule',
+      events: []
+    });
+  });
+
   app.post('/api/ai/super-analysis', async (req, res) => {
     const body = (req.body || {}) as SuperAnalysisRequest;
     const baseline = buildDeterministicSuperNote(body);

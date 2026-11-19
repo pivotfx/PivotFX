@@ -79,15 +79,15 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
   const [isAudioOn, setIsAudioOn] = useState<boolean>(() => audioAlertEngine.isEnabled());
   const [loggedToast, setLoggedToast] = useState<string | null>(null);
   const [execMode, setExecMode] = useState<'MARKET' | 'LIMIT_20EMA'>(
-    computed.executionReadiness === 'WAIT_PULLBACK' ? 'LIMIT_20EMA' : 'MARKET'
+    computed.executionReadiness === 'READY_ENTER' ? 'MARKET' : 'LIMIT_20EMA'
   );
   const [showStaleOrderLocal, setShowStaleOrderLocal] = useState(false);
 
   useEffect(() => {
-    if (computed.executionReadiness === 'WAIT_PULLBACK') {
-      setExecMode('LIMIT_20EMA');
-    } else if (computed.executionReadiness === 'READY_ENTER') {
+    if (computed.executionReadiness === 'READY_ENTER') {
       setExecMode('MARKET');
+    } else {
+      setExecMode('LIMIT_20EMA');
     }
   }, [pair, computed.executionReadiness]);
 
@@ -291,8 +291,10 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
               </span>
             </span>
             <span className="text-[9px] text-slate-400 font-normal shrink-0">
-              {computed.executionReadiness === 'WAIT_PULLBACK'
-                ? `${formatCycleCountdown(secondsRemainingInCycle)}`
+              {computed.executionReadiness === 'NO_TRADE_CHOP' || computed.executionReadiness === 'NO_TRADE_CLOSED'
+                ? 'Locked'
+                : computed.executionReadiness === 'WAIT_PULLBACK'
+                ? 'Limit Only'
                 : 'Audit'}
             </span>
           </button>
@@ -310,27 +312,37 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
                 ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/50'
                 : sustainability.status === 'MODERATE_SUSTAINABLE'
                 ? 'bg-cyan-950/40 border-cyan-500/50 text-cyan-300 hover:bg-cyan-900/50'
-                : 'bg-amber-950/40 border-amber-500/50 text-amber-300 hover:bg-amber-900/50'
+                : 'bg-red-950/40 border-red-500/50 text-red-300 hover:bg-red-900/50'
             }`}
             title={sustainability.structuralReason}
           >
             <span className="flex items-center gap-1 truncate font-bold">
               <ShieldCheck className="w-3 h-3 shrink-0" style={{ color: sustainability.themeColor }} />
-              <span className="truncate">{sustainability.integrityPct}% Locked</span>
+              <span className="truncate">
+                {computed.executionReadiness === 'NO_TRADE_CHOP'
+                  ? 'Algo Stand Aside'
+                  : `${sustainability.integrityPct}% Locked`}
+              </span>
             </span>
             <span className="text-[9px] text-slate-400 font-normal shrink-0">
-              {computed.h1TrendDirection === 'UPTREND' ? 'BUY' : 'SELL'}
+              {computed.executionReadiness === 'NO_TRADE_CHOP'
+                ? 'LOCK'
+                : computed.h1TrendDirection === 'UPTREND'
+                ? 'BUY'
+                : 'SELL'}
             </span>
           </button>
         </div>
 
-        {/* Dynamic Entry Countdown Strip */}
+        {/* Dynamic Entry Guidance Strip */}
         <div className="flex items-center justify-between text-[9px] font-mono text-slate-400 px-1">
           <span className="flex items-center gap-1">
             <Clock className="w-2.5 h-2.5 text-[#D4AF37]" />
             <span>
-              {entryMoment.status === 'PRIME_NOW'
-                ? `Prime EP Valid: ${formatCycleCountdown(secondsRemainingInCycle)}`
+              {entryMoment.status === 'STAND_ASIDE'
+                ? 'Algo Locked: Stand Aside (Do NOT Enter)'
+                : entryMoment.status === 'PRIME_NOW'
+                ? `Prime Candle Window: ${formatCycleCountdown(secondsRemainingInCycle)}`
                 : kenyaTiming.isEarlySettlePhase
                 ? `Too Early · Wait ${Math.max(1, Math.ceil((kenyaTiming.earlySettleSecondsLeft || 60) / 60))}m`
                 : kenyaTiming.isClosingPhase
@@ -340,7 +352,7 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
                 : activeNewsLockout
                 ? entryMoment.badge
                 : entryMoment.status === 'WAIT_PULLBACK'
-                ? `Retest Pullback Timer: ${formatCycleCountdown(secondsRemainingInCycle)}`
+                ? `Wait Price @ ${entryMoment.advisoryPrice ?? computed.advisoryEntryPrice} (Not Timer)`
                 : entryMoment.badge}
             </span>
           </span>
@@ -506,14 +518,24 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
           <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800 shrink-0">
             <button
               type="button"
-              onClick={() => setExecMode('MARKET')}
+              disabled={computed.executionReadiness !== 'READY_ENTER'}
+              onClick={() => {
+                if (computed.executionReadiness === 'READY_ENTER') setExecMode('MARKET');
+              }}
               className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${
-                execMode === 'MARKET'
+                computed.executionReadiness !== 'READY_ENTER'
+                  ? 'text-slate-600 cursor-not-allowed opacity-60'
+                  : execMode === 'MARKET'
                   ? 'bg-[#D4AF37] text-black'
                   : 'text-slate-400 hover:text-white'
               }`}
+              title={
+                computed.executionReadiness !== 'READY_ENTER'
+                  ? 'Market EP locked until all READY_ENTER gates pass — use 20 EMA Limit'
+                  : 'Use Market Entry'
+              }
             >
-              Market EP ({computed.entryPrice})
+              {computed.executionReadiness === 'READY_ENTER' ? `Market EP (${computed.entryPrice})` : 'Market Locked'}
             </button>
             <button
               type="button"
@@ -705,13 +727,15 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
               >
                 {entryMoment.status === 'PRIME_NOW'
                   ? 'ENTRY TIMING: PRIME MOMENT CONFIRMED ✓'
+                  : entryMoment.status === 'STAND_ASIDE'
+                  ? 'ENTRY LOCKED: STAND ASIDE (LOW PROBABILITY)'
                   : entryMoment.status === 'WAIT_PULLBACK' &&
                     !kenyaTiming.isEarlySettlePhase &&
                     !kenyaTiming.isClosingPhase &&
                     kenyaTiming.windowStatusCode === 'OPEN' &&
                     !activeNewsLockout &&
                     Boolean(entryMoment.discountPips)
-                  ? `WAIT PULLBACK: ${entryMoment.advisoryPrice}`
+                  ? `STAGE LIMIT EP: ${entryMoment.advisoryPrice}`
                   : entryMoment.badge}
               </span>
             </div>
@@ -722,8 +746,10 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
               <span className="flex items-center gap-1">
                 <Clock className="w-3 h-3 text-[#D4AF37]" />
                 <span className="text-[#D4AF37] font-bold">
-                  {entryMoment.status === 'PRIME_NOW'
-                    ? `Optimal Entry Window: ${formatCycleCountdown(secondsRemainingInCycle)}`
+                  {entryMoment.status === 'STAND_ASIDE'
+                    ? 'Algorithmic Lock Active — Do NOT Enter on Any Timer'
+                    : entryMoment.status === 'PRIME_NOW'
+                    ? `Candle Close Window: ${formatCycleCountdown(secondsRemainingInCycle)}`
                     : kenyaTiming.isEarlySettlePhase
                     ? `Settle Wait: ${Math.max(1, Math.ceil((kenyaTiming.earlySettleSecondsLeft || 60) / 60))}m (Closes ${kenyaTiming.countdownFormatted})`
                     : kenyaTiming.isClosingPhase
@@ -733,7 +759,7 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
                     : activeNewsLockout
                     ? `News Caution · Session ${kenyaTiming.countdownFormatted}`
                     : entryMoment.status === 'WAIT_PULLBACK'
-                    ? `Retest Pullback Countdown: ${formatCycleCountdown(secondsRemainingInCycle)}`
+                    ? `Wait Price Retest @ ${entryMoment.advisoryPrice ?? computed.advisoryEntryPrice} (Not Timer-Based)`
                     : `Opens in ${kenyaTiming.countdownFormatted}`}
                 </span>
               </span>
@@ -753,7 +779,9 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
                 border: `1px solid ${entryMoment.themeColor}55`
               }}
             >
-              {entryMoment.status === 'PRIME_NOW'
+              {entryMoment.status === 'STAND_ASIDE'
+                ? 'Algo Locked'
+                : entryMoment.status === 'PRIME_NOW'
                 ? 'Safe to Copy SL/TP'
                 : kenyaTiming.isEarlySettlePhase
                 ? 'Too Early'
@@ -766,8 +794,8 @@ export const EntryConfirmationController: React.FC<EntryConfirmationControllerPr
                 : activeNewsLockout
                 ? 'News Caution'
                 : entryMoment.status === 'WAIT_PULLBACK' && entryMoment.discountPips
-                ? `Save ${entryMoment.discountPips}p`
-                : 'Wait & Study'}
+                ? `Limit -${entryMoment.discountPips}p`
+                : 'Limit / Wait'}
             </span>
             <div className="mt-1 text-slate-400 text-xs flex justify-end">
               {showEntryAudit ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}

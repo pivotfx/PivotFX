@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import {
   BrokerId,
   CurrencyPair,
+  EaCircuitBreakerState,
+  EaLedgerStats,
+  EaSignalLedgerEntry,
+  PendingLimitOrder,
   SuggestedSignalLogEntry,
   Timeframe
 } from '../../types';
@@ -15,7 +19,8 @@ import {
   evaluatePortfolioRiskExposure,
   getCurrentMacroContext,
   getPairSpecs,
-  positionRiskStore
+  positionRiskStore,
+  resolveMarketDirection
 } from '../../utils/liveMarketEngine';
 import {
   AlertTriangle,
@@ -23,6 +28,7 @@ import {
   Check,
   CheckCircle2,
   ClipboardList,
+  Clock,
   Copy,
   History,
   Lock,
@@ -34,6 +40,8 @@ import {
   Trash2,
   TrendingDown,
   TrendingUp,
+  Volume2,
+  VolumeX,
   XCircle
 } from 'lucide-react';
 
@@ -85,6 +93,16 @@ export const TradeLogAndNotificationsView: React.FC<TradeLogAndNotificationsView
   const [suggestedSignals, setSuggestedSignals] = useState<SuggestedSignalLogEntry[]>(
     initialState.suggestedSignals
   );
+  const [eaAutoPilot, setEaAutoPilot] = useState<boolean>(initialState.eaAutoPilot);
+  const [eaLedger, setEaLedger] = useState<EaSignalLedgerEntry[]>(initialState.eaLedger);
+  const [eaLedgerStats, setEaLedgerStats] = useState<EaLedgerStats>(initialState.eaLedgerStats);
+  const [pendingLimits, setPendingLimits] = useState<PendingLimitOrder[]>(initialState.pendingLimits);
+  const [soundAlertsEnabled, setSoundAlertsEnabled] = useState<boolean>(
+    initialState.soundAlertsEnabled
+  );
+  const [eaCircuitBreaker, setEaCircuitBreaker] = useState<EaCircuitBreakerState>(
+    initialState.eaCircuitBreaker
+  );
 
   const [signalFilter, setSignalFilter] = useState<'ALL' | 'SUGGESTED' | 'PLACED_WITH_BROKER'>('ALL');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -116,6 +134,12 @@ export const TradeLogAndNotificationsView: React.FC<TradeLogAndNotificationsView
       setActiveOrders(state.activeOrders);
       setOrderHistory(state.orderHistory);
       setSuggestedSignals(state.suggestedSignals);
+      setEaAutoPilot(state.eaAutoPilot);
+      setEaLedger(state.eaLedger);
+      setEaLedgerStats(state.eaLedgerStats);
+      setPendingLimits(state.pendingLimits);
+      setSoundAlertsEnabled(state.soundAlertsEnabled);
+      setEaCircuitBreaker(state.eaCircuitBreaker);
     });
     const unsubRisk = positionRiskStore.subscribe((cfg) => setRiskConfig(cfg));
     return () => {
@@ -155,7 +179,7 @@ export const TradeLogAndNotificationsView: React.FC<TradeLogAndNotificationsView
     const mkt = markets.find((m) => m.pair === targetPair) || markets[0];
     setFormPair(targetPair);
     if (mkt) {
-      setFormDirection(mkt.bias === 'STRONG_SELL' ? 'SELL' : 'BUY');
+      setFormDirection(resolveMarketDirection(mkt));
       setFormEntry(String(mkt.price));
       setFormSl(String(mkt.suggestedSL));
       setFormTp(String(mkt.suggestedTP2));
@@ -325,6 +349,42 @@ export const TradeLogAndNotificationsView: React.FC<TradeLogAndNotificationsView
           <div className="flex items-center gap-2.5 flex-wrap shrink-0">
             <button
               type="button"
+              onClick={() => {
+                const next = globalLiveStream.toggleEaAutoPilot();
+                flashBanner(
+                  next
+                    ? 'MT5 EA AUTO-PILOT ACTIVATED · Qualified READY setups auto-stage, trail SL, 50% banks at TP1 & auto-settle.'
+                    : 'MT5 EA AUTO-PILOT PAUSED · Manual tracking remains active.'
+                );
+              }}
+              className={`px-3.5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-1.5 transition whitespace-nowrap border ${
+                eaAutoPilot
+                  ? 'bg-[#00C261] text-black border-[#00C261]'
+                  : 'bg-slate-900 hover:bg-slate-800 text-amber-300 border-amber-500/45'
+              }`}
+            >
+              <Bot className="w-4 h-4" />
+              <span>MT5 EA Auto: {eaAutoPilot ? 'ON' : 'OFF'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const next = globalLiveStream.toggleSoundAlerts();
+                flashBanner(next ? 'AUDIO CHIME ALERTS ENABLED' : 'AUDIO CHIME ALERTS MUTED');
+              }}
+              className={`px-3 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition whitespace-nowrap border ${
+                soundAlertsEnabled
+                  ? 'bg-amber-950/60 text-amber-300 border-amber-500/45'
+                  : 'bg-slate-900 text-slate-400 hover:text-white border-slate-800'
+              }`}
+            >
+              {soundAlertsEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+              <span>Sound: {soundAlertsEnabled ? 'ON' : 'OFF'}</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => openManualFormForPair(formPair)}
               className="px-4 py-2.5 rounded-xl bg-[#00C261] hover:bg-[#00dc6e] text-black font-black text-xs uppercase tracking-wider flex items-center gap-1.5 transition whitespace-nowrap"
             >
@@ -332,30 +392,111 @@ export const TradeLogAndNotificationsView: React.FC<TradeLogAndNotificationsView
               <span>Log Broker Order Placed</span>
             </button>
 
-            {markets[0] && (
-              <button
-                type="button"
-                onClick={() => {
-                  const top = markets[0];
-                  const logged = globalLiveStream.logSuggestedSetup({
-                    pair: top.pair,
-                    timeframe: top.recommendedTf,
-                    broker: activeBroker,
-                    direction: top.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
-                    reasonSummary: top.entryTimingWarning || top.projection
-                  });
-                  if (logged) {
-                    flashBanner(
-                      `LOGGED #1 SUGGESTED SETUP: ${logged.pair} ${logged.direction} @ ${logged.entryPrice}`
-                    );
-                  }
-                }}
-                className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/40 font-bold text-xs transition whitespace-nowrap"
-              >
-                + Save #1 Top Market ({markets[0].pair})
-              </button>
-            )}
+            {(() => {
+              const topActionable =
+                markets.find(
+                  (m) =>
+                    m.executionReadiness === 'READY_ENTER' ||
+                    m.executionReadiness === 'WAIT_PULLBACK'
+                ) || markets[0];
+              if (!topActionable) return null;
+              const isNoTradeTop =
+                topActionable.executionReadiness === 'NO_TRADE_CHOP' ||
+                topActionable.executionReadiness === 'NO_TRADE_CLOSED';
+              return (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const logged = globalLiveStream.logSuggestedSetup({
+                      pair: topActionable.pair,
+                      timeframe: topActionable.recommendedTf,
+                      broker: activeBroker,
+                      direction: resolveMarketDirection(topActionable),
+                      reasonSummary: topActionable.entryTimingWarning || topActionable.projection
+                    });
+                    if (logged) {
+                      flashBanner(
+                        `LOGGED #1 SUGGESTED SETUP: ${logged.pair} ${logged.direction} @ ${logged.entryPrice}`
+                      );
+                    }
+                  }}
+                  className={`px-4 py-2.5 rounded-xl font-bold text-xs transition whitespace-nowrap border ${
+                    isNoTradeTop
+                      ? 'bg-slate-900 hover:bg-slate-800 text-amber-300 border-amber-500/40'
+                      : 'bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border-[#D4AF37]/40'
+                  }`}
+                >
+                  {isNoTradeTop
+                    ? `+ Log Ref (${topActionable.pair} · Chop)`
+                    : `+ Save #1 Top Setup (${topActionable.pair})`}
+                </button>
+              );
+            })()}
           </div>
+        </div>
+
+        {/* Auto-Scored Signal Proof Banner */}
+        <div className="p-3.5 rounded-xl bg-slate-950/90 border border-cyan-500/35 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[10px] font-black">
+              VERIFIED EA SIGNAL PROOF ({eaLedger.length} Signals)
+            </span>
+            <span className="text-slate-200 font-bold">
+              {eaLedger.length === 0
+                ? 'Awaiting next qualified READY_ENTER setup to track automatically against live ticks.'
+                : `${eaLedgerStats.wins} Wins (${eaLedgerStats.tp1Saves} TP1 BE Saves) · ${eaLedgerStats.losses} Losses · ${eaLedgerStats.winRatePct}% Win Rate · Net ${
+                    eaLedgerStats.netR >= 0 ? `+${eaLedgerStats.netR}` : eaLedgerStats.netR
+                  }R`}
+            </span>
+          </div>
+          {eaLedger.length > 0 && (
+            <button
+              type="button"
+              onClick={() => globalLiveStream.clearEaLedger()}
+              className="px-2.5 py-1 rounded bg-slate-900 hover:bg-red-950 text-red-300 border border-red-500/40 text-[10px] font-bold"
+            >
+              Reset Signal Proof
+            </button>
+          )}
+        </div>
+
+        {/* EA Daily Drawdown & Loss-Streak Circuit Breaker Guard */}
+        <div
+          className={`p-3.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 text-xs ${
+            eaCircuitBreaker.tripped
+              ? 'bg-rose-950/50 border-rose-500/60 text-rose-200'
+              : 'bg-slate-950/90 border-slate-800 text-slate-300'
+          }`}
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            {eaCircuitBreaker.tripped ? (
+              <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
+            ) : (
+              <ShieldCheck className="w-4 h-4 text-[#00C261] shrink-0" />
+            )}
+            <strong className={eaCircuitBreaker.tripped ? 'text-rose-200' : 'text-white'}>
+              {eaCircuitBreaker.tripped
+                ? 'EA CIRCUIT BREAKER TRIPPED (AUTO-ENTRIES PAUSED):'
+                : 'EA Daily Protection Guard Active:'}
+            </strong>
+            <span className="font-sans">
+              {eaCircuitBreaker.tripped
+                ? eaCircuitBreaker.reason
+                : `Session Realized ${eaCircuitBreaker.dailyRealizedUsd >= 0 ? `+$${eaCircuitBreaker.dailyRealizedUsd.toFixed(2)}` : `-$${Math.abs(eaCircuitBreaker.dailyRealizedUsd).toFixed(2)}`} · Streak ${eaCircuitBreaker.consecutiveLosses}/${eaCircuitBreaker.maxLossStreak} SL · Daily Cap -$${eaCircuitBreaker.maxDailyLossUsd.toFixed(2)}`}
+            </span>
+          </div>
+          {eaCircuitBreaker.tripped && (
+            <button
+              type="button"
+              onClick={() => {
+                globalLiveStream.resetEaCircuitBreaker();
+                flashBanner('EA CIRCUIT BREAKER RESET · Protection counter cleared.');
+              }}
+              className="px-3 py-1 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-black text-[11px] whitespace-nowrap"
+            >
+              Reset Circuit Breaker
+            </button>
+          )}
         </div>
 
         {/* 4 Summary Metric Blocks */}
@@ -575,6 +716,115 @@ export const TradeLogAndNotificationsView: React.FC<TradeLogAndNotificationsView
         )}
       </div>
 
+      {/* 1B. ARMED PENDING BUY/SELL LIMIT QUEUE */}
+      {pendingLimits.length > 0 && (
+        <div className="p-5 sm:p-6 rounded-2xl bg-[#0B101E] border border-amber-500/45 space-y-3.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2 text-xs font-black text-amber-300">
+              <Clock className="w-4 h-4 shrink-0" />
+              <span>
+                ARMED PENDING BUY/SELL LIMIT QUEUE ({pendingLimits.filter((l) => l.status === 'PENDING').length} ACTIVE)
+              </span>
+            </div>
+            <span className="text-[11px] text-slate-400 font-sans">
+              Automatically fills at 20 EMA value pullback or auto-cancels if invalidation level is broken.
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 text-xs">
+            {pendingLimits.slice(0, 8).map((lim) => {
+              const isPending = lim.status === 'PENDING';
+              const isBuy = lim.direction === 'BUY';
+              return (
+                <div
+                  key={lim.id}
+                  className={`p-4 rounded-xl bg-slate-950 border space-y-2.5 ${
+                    isPending
+                      ? 'border-amber-500/55'
+                      : lim.status === 'FILLED'
+                      ? 'border-[#00C261]/50 opacity-85'
+                      : 'border-slate-800 opacity-70'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`px-2 py-0.5 rounded font-black text-[10px] ${
+                          isBuy ? 'bg-[#00C261] text-black' : 'bg-red-600 text-white'
+                        }`}
+                      >
+                        {lim.direction} LIMIT
+                      </span>
+                      <strong className="text-white text-sm">{lim.pair}</strong>
+                      <span className="text-[11px] text-slate-400">
+                        {lim.timeframe} · {lim.lotSize.toFixed(2)} Lot
+                      </span>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                        isPending
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                          : lim.status === 'FILLED'
+                          ? 'bg-emerald-950 text-[#00C261]'
+                          : 'bg-slate-900 text-slate-400'
+                      }`}
+                    >
+                      {lim.status.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-1.5 text-[11px]">
+                    <div className="p-2 rounded-lg bg-slate-900 border border-slate-800">
+                      <span className="text-[9px] text-amber-300 block">Limit Entry</span>
+                      <strong className="text-white">{lim.limitEntryPrice}</strong>
+                    </div>
+                    <div className="p-2 rounded-lg bg-red-950/25 border border-red-500/30">
+                      <span className="text-[9px] text-red-400 block">SL</span>
+                      <strong className="text-red-300">{lim.stopLoss}</strong>
+                    </div>
+                    <div className="p-2 rounded-lg bg-emerald-950/25 border border-[#00C261]/30">
+                      <span className="text-[9px] text-emerald-400 block">TP2</span>
+                      <strong className="text-[#00C261]">{lim.tp2}</strong>
+                    </div>
+                    <div className="p-2 rounded-lg bg-rose-950/25 border border-rose-500/30">
+                      <span className="text-[9px] text-rose-300 block">Invalidation</span>
+                      <strong className="text-rose-200">{lim.invalidationPrice}</strong>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-1 text-[11px]">
+                    <span className="text-slate-400 truncate">{lim.armedAtEat}</span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {onSelectPairForChart && (
+                        <button
+                          type="button"
+                          onClick={() => onSelectPairForChart(lim.pair)}
+                          className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-slate-700 font-bold"
+                        >
+                          Chart
+                        </button>
+                      )}
+                      {isPending && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            globalLiveStream.cancelPendingLimitOrder(lim.id);
+                            flashBanner(`Cancelled pending ${lim.direction} LIMIT on ${lim.pair}`);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-red-950 text-red-300 border border-red-500/40 font-bold"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* 2. ACTIVE PLACED BROKER ORDERS WITH SUPER AI POSITION & DRAWDOWN COACH */}
       <div className="p-5 sm:p-6 rounded-2xl bg-[#0B101E] border border-slate-800 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
@@ -772,6 +1022,26 @@ export const TradeLogAndNotificationsView: React.FC<TradeLogAndNotificationsView
                         >
                           +Lock +55% Profit SL
                         </button>
+                        {!ord.partialTp1Banked ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const upd = globalLiveStream.bankPartialTp1(ord.pair);
+                              if (upd) {
+                                flashBanner(
+                                  `BANKED 50% @ TP1 (${ord.pair}): +$${(upd.partialBankedUsd || 0).toFixed(2)} closed · Runner @ BE SL ${upd.stopLoss}`
+                                );
+                              }
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-cyan-950/80 hover:bg-cyan-500 text-cyan-200 hover:text-black border border-cyan-500/40 font-black transition whitespace-nowrap"
+                          >
+                            Bank 50% @ TP1 + BE
+                          </button>
+                        ) : (
+                          <span className="px-2.5 py-1.5 rounded-lg bg-emerald-950/70 text-[#00C261] border border-[#00C261]/40 font-black whitespace-nowrap">
+                            50% Banked: +${(ord.partialBankedUsd || 0).toFixed(2)}
+                          </span>
+                        )}
                         <button
                           type="button"
                           onClick={() => globalLiveStream.closeMarketOrder(ord.pair)}

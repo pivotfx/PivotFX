@@ -231,6 +231,40 @@ export const DeepScanVerificationPanel: React.FC<DeepScanVerificationPanelProps>
         </div>
       )}
 
+      {/* Conditional Projected CHoCH Reversal Scenario (If/Then Structural Flip E.P./SL/TP) */}
+      {tel?.projectedChochReversal && (
+        <div className="p-3 rounded-xl bg-slate-950/80 border border-cyan-500/35 space-y-1.5 text-[11px]">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-cyan-300 font-black inline-flex items-center gap-1.5">
+              <GitBranch className="w-3.5 h-3.5" />
+              <span>
+                Projected Structural CHoCH Flip (If Close{' '}
+                {tel.projectedChochReversal.conditionalDirection === 'BUY' ? '>' : '<'}{' '}
+                {tel.projectedChochReversal.triggerLevel.toFixed(decimals)} →{' '}
+                {tel.projectedChochReversal.conditionalDirection})
+              </span>
+            </span>
+            <div className="flex flex-wrap items-center gap-2.5 text-[11px] font-black">
+              <span className="text-white">
+                Retest EP {tel.projectedChochReversal.retestEntryPrice.toFixed(decimals)}
+              </span>
+              <span className="text-red-400">
+                SL {tel.projectedChochReversal.stopLoss.toFixed(decimals)}
+              </span>
+              <span className="text-cyan-300">
+                TP1 {tel.projectedChochReversal.tp1.toFixed(decimals)}
+              </span>
+              <span className="text-[#00C261]">
+                TP2 {tel.projectedChochReversal.tp2.toFixed(decimals)}
+              </span>
+            </div>
+          </div>
+          <p className="text-[10px] text-slate-300 font-sans leading-snug">
+            {tel.projectedChochReversal.ruleSummary}
+          </p>
+        </div>
+      )}
+
       {/* AI-Calibrated Sniper EP / SL / TP Levels (When Issued & Geometry-Validated) */}
       {matchedAudit?.refinedLevels && !isDanger && (
         <div className="p-3 rounded-xl bg-slate-950/90 border border-[#D4AF37]/45 space-y-1.5 text-[11px]">

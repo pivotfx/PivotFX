@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrokerId, CurrencyPair, Timeframe } from '../../types';
+import { BrokerId, CurrencyPair, PendingLimitOrder, Timeframe } from '../../types';
 import {
   ActiveMarketOrder,
   ClosedOrderHistoryEntry,
@@ -12,7 +12,8 @@ import {
   getCurrentMacroContext,
   getPairSpecs,
   RiskManagementConfig,
-  positionRiskStore
+  positionRiskStore,
+  resolveMarketDirection
 } from '../../utils/liveMarketEngine';
 import {
   TrendingUp,
@@ -30,7 +31,8 @@ import {
   SlidersHorizontal,
   Bot,
   ClipboardList,
-  AlertTriangle
+  AlertTriangle,
+  Clock
 } from 'lucide-react';
 
 interface ActiveMarketOrderPanelProps {
@@ -40,6 +42,7 @@ interface ActiveMarketOrderPanelProps {
   timeframe?: Timeframe;
   broker?: BrokerId;
   onInspectPairCard?: (pair: CurrencyPair) => void;
+  onSideSyncRequest?: (side: 'BUY' | 'SELL') => void;
 }
 
 export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
@@ -48,11 +51,15 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
   direction = 'BUY',
   timeframe = 'M15',
   broker = 'fxpesa',
-  onInspectPairCard
+  onInspectPairCard,
+  onSideSyncRequest
 }) => {
   const [markets, setMarkets] = useState<MarketScanData[]>(() => globalLiveStream.getState().markets);
   const [activeOrders, setActiveOrders] = useState<Partial<Record<CurrencyPair, ActiveMarketOrder>>>(
     () => globalLiveStream.getState().activeOrders
+  );
+  const [pendingLimits, setPendingLimits] = useState<PendingLimitOrder[]>(
+    () => globalLiveStream.getState().pendingLimits
   );
   const [orderHistory, setOrderHistory] = useState<ClosedOrderHistoryEntry[]>(
     () => globalLiveStream.getState().orderHistory
@@ -88,6 +95,7 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
     const unsubscribe = globalLiveStream.subscribe((state) => {
       setMarkets(state.markets);
       setActiveOrders(state.activeOrders);
+      setPendingLimits(state.pendingLimits);
       setOrderHistory(state.orderHistory);
     });
     const unsubRisk = positionRiskStore.subscribe((nextCfg) => setRiskConfig(nextCfg));
@@ -133,8 +141,9 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
       setSlDraftByPair((prev) => ({ ...prev, [targetPair]: String(loaded.stopLoss) }));
       setTpDraftByPair((prev) => ({ ...prev, [targetPair]: String(loaded.tp2) }));
       setCustomEntryDraft('');
+      onSideSyncRequest?.(targetDir);
       flashNotice(
-        `BROKER ORDER NOTIFIED & LOGGED · ${loaded.direction} ${loaded.pair} @ ${loaded.entryPrice} | SL ${loaded.stopLoss} | TP ${loaded.tp2}`
+        `MT5 SYNCED & LOGGED · ${loaded.direction} ${loaded.pair} @ ${loaded.entryPrice} | SL ${loaded.stopLoss} | TP ${loaded.tp2}`
       );
     }
   };
@@ -379,7 +388,16 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
   // MODE 2: BROKERS PAGE / GLOBAL LIVE ORDER BOOK TERMINAL
   // ============================================================================
   if (mode === 'broker_terminal') {
-    const activeMarketForDefault = markets.find((m) => m.pair === pair) || markets[0];
+    const activeMarketForDefault =
+      markets.find(
+        (m) =>
+          m.pair === pair &&
+          (m.executionReadiness === 'READY_ENTER' || m.executionReadiness === 'WAIT_PULLBACK')
+      ) ||
+      markets.find(
+        (m) => m.executionReadiness === 'READY_ENTER' || m.executionReadiness === 'WAIT_PULLBACK'
+      ) ||
+      null;
 
     return (
       <div className="p-5 sm:p-6 rounded-3xl bg-[#0A101E] border-2 border-[#D4AF37]/60 space-y-5 font-mono tabular-nums">
@@ -415,20 +433,26 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
               <option value="0.05">0.05 Micro Lot ($10 Cap)</option>
             </select>
 
-            {activeMarketForDefault && !activeOrders[activeMarketForDefault.pair] && (
+            {activeMarketForDefault && !activeOrders[activeMarketForDefault.pair] ? (
               <button
                 type="button"
                 onClick={() =>
                   handleLoadOrder(
                     activeMarketForDefault.pair,
-                    activeMarketForDefault.bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
+                    resolveMarketDirection(activeMarketForDefault),
                     activeMarketForDefault.recommendedTf
                   )
                 }
                 className="px-4 py-2 rounded-xl btn-gold text-black font-black text-xs uppercase tracking-wider whitespace-nowrap shrink-0"
               >
-                Load #{1} {activeMarketForDefault.pair} Order
+                Load #{1} {activeMarketForDefault.pair} {resolveMarketDirection(activeMarketForDefault)} Order
               </button>
+            ) : (
+              activeOrderEntries.length === 0 && (
+                <span className="px-3.5 py-2 rounded-xl bg-slate-900 border border-amber-500/40 text-amber-300 font-bold text-xs whitespace-nowrap">
+                  Stand Aside · All Signals Chop / Closed
+                </span>
+              )
             )}
           </div>
         </div>
@@ -705,6 +729,27 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
                         Auto-Lock SL &amp; Extend TP ({metrics.suggestedExpandedTp2})
                       </button>
 
+                      {!ord.partialTp1Banked ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = globalLiveStream.bankPartialTp1(ord.pair);
+                            if (updated) {
+                              flashNotice(
+                                `BANKED 50% @ TP1 (${ord.pair}): +$${(updated.partialBankedUsd || 0).toFixed(2)} realized · Remaining 50% runner @ BE SL ${updated.stopLoss}`
+                              );
+                            }
+                          }}
+                          className="px-3 py-2 rounded-xl bg-cyan-950/80 hover:bg-cyan-500 text-cyan-200 hover:text-black border border-cyan-500/50 text-xs font-black transition whitespace-nowrap"
+                        >
+                          Bank 50% @ TP1 + BE
+                        </button>
+                      ) : (
+                        <span className="px-2.5 py-1.5 rounded-xl bg-emerald-950/70 text-[#00C261] border border-[#00C261]/40 text-[11px] font-black whitespace-nowrap">
+                          50% Banked: +${(ord.partialBankedUsd || 0).toFixed(2)}
+                        </span>
+                      )}
+
                       <button
                         type="button"
                         onClick={() =>
@@ -781,24 +826,37 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
             <div className="space-y-1">
               <strong className="text-white text-sm block">No Market Order Currently Loaded</strong>
               <p className="text-xs text-slate-400 font-sans">
-                Click "Load BUY/SELL Market Order" on any pair card (or click the button on the right for our top ranked signal) to track live P&amp;L progress and auto-trail SL &amp; TP across the entire site.
+                Click "Load BUY/SELL Market Order" on any actionable pair card (or click the button on the right for our top validated signal) to track live P&amp;L progress and auto-trail SL &amp; TP across the entire site.
               </p>
             </div>
-            {markets[0] && (
-              <button
-                type="button"
-                onClick={() =>
-                  handleLoadOrder(
-                    markets[0].pair,
-                    markets[0].bias === 'STRONG_SELL' ? 'SELL' : 'BUY',
-                    markets[0].recommendedTf
-                  )
-                }
-                className="px-4 py-2.5 rounded-xl bg-[#00C261] hover:bg-[#00dc6e] text-black font-black text-xs uppercase tracking-wider whitespace-nowrap shrink-0"
-              >
-                Load {markets[0].pair} {markets[0].bias === 'STRONG_SELL' ? 'SELL' : 'BUY'} Order Now
-              </button>
-            )}
+            {(() => {
+              const topActionableMarket = markets.find(
+                (m) => m.executionReadiness === 'READY_ENTER' || m.executionReadiness === 'WAIT_PULLBACK'
+              );
+              if (!topActionableMarket) {
+                return (
+                  <span className="px-4 py-2.5 rounded-xl bg-slate-900 border border-amber-500/40 text-amber-300 font-black text-xs uppercase tracking-wider whitespace-nowrap shrink-0">
+                    Stand Aside — No Valid Setup
+                  </span>
+                );
+              }
+              const resolvedDir = resolveMarketDirection(topActionableMarket);
+              return (
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleLoadOrder(
+                      topActionableMarket.pair,
+                      resolvedDir,
+                      topActionableMarket.recommendedTf
+                    )
+                  }
+                  className="px-4 py-2.5 rounded-xl bg-[#00C261] hover:bg-[#00dc6e] text-black font-black text-xs uppercase tracking-wider whitespace-nowrap shrink-0"
+                >
+                  Load {topActionableMarket.pair} {resolvedDir} Order Now
+                </button>
+              );
+            })()}
           </div>
         )}
 
@@ -905,8 +963,13 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
   });
 
   const existingOrder = activeOrders[pair] || null;
+  const activePendingLimit =
+    pendingLimits.find((l) => l.pair === pair && l.status === 'PENDING') || null;
   const pairHistory = orderHistory.filter((h) => h.pair === pair).slice(0, 4);
   const isBuyPlanned = computed.direction === 'BUY';
+  const isNoTradeGate =
+    !existingOrder &&
+    (computed.executionReadiness === 'NO_TRADE_CLOSED' || computed.executionReadiness === 'NO_TRADE_CHOP');
   const candidateExposure = !existingOrder
     ? evaluatePortfolioRiskExposure(activeOrders, riskConfig, {
         pair,
@@ -914,9 +977,16 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
         riskUsd: computed.actualRiskUsd
       })
     : portfolioExposure;
+  const advisoryLimitPrice = computed.advisoryEntryPrice && computed.advisoryEntryPrice > 0
+    ? computed.advisoryEntryPrice
+    : computed.entryPrice;
 
   return (
-    <div className="p-5 rounded-2xl bg-[#0A1120] border-2 border-[#00C261]/55 space-y-4 font-mono tabular-nums">
+    <div
+      className={`p-5 rounded-2xl bg-[#0A1120] border-2 space-y-4 font-mono tabular-nums ${
+        isNoTradeGate ? 'border-slate-700' : 'border-[#00C261]/55'
+      }`}
+    >
       {/* Header Row */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-800 pb-3.5">
         <div className="space-y-1">
@@ -941,6 +1011,8 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
           <h4 className="text-base sm:text-lg font-black text-white">
             {existingOrder
               ? `Placed Broker Order Active: ${existingOrder.direction} ${existingOrder.pair} @ ${existingOrder.entryPrice}`
+              : isNoTradeGate
+              ? `Stand Aside (${computed.executionReadiness === 'NO_TRADE_CLOSED' ? 'CLOSED' : 'CHOP'}): ${pair} · Reference Levels Only`
               : `Broker Execution Ticket & Order Notification: ${pair} (${computed.orderType})`}
           </h4>
         </div>
@@ -951,18 +1023,33 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
             type="button"
             onClick={() => {
               const activeLot = existingOrder ? existingOrder.lotSize : computed.lotSize;
-              const fullPacket = `${computed.brokerSymbol} ${existingOrder ? existingOrder.direction : computed.direction} | Entry: ${existingOrder ? existingOrder.entryPrice : computed.entryPrice} | SL: ${existingOrder ? existingOrder.stopLoss : computed.stopLoss} | TP1: ${existingOrder ? existingOrder.tp1 : computed.tp1} | TP2: ${existingOrder ? existingOrder.tp2 : computed.tp2} | Lot: ${activeLot.toFixed(2)} (Max Risk: $${computed.actualRiskUsd.toFixed(2)})`;
+              const labelMode = existingOrder
+                ? existingOrder.direction
+                : isNoTradeGate
+                ? `REF (${computed.executionReadiness})`
+                : computed.direction;
+              const fullPacket = `${computed.brokerSymbol} ${labelMode} | Entry: ${existingOrder ? existingOrder.entryPrice : computed.entryPrice} | SL: ${existingOrder ? existingOrder.stopLoss : computed.stopLoss} | TP1: ${existingOrder ? existingOrder.tp1 : computed.tp1} | TP2: ${existingOrder ? existingOrder.tp2 : computed.tp2} | Lot: ${activeLot.toFixed(2)} (Max Risk: $${computed.actualRiskUsd.toFixed(2)})`;
               copyValue(fullPacket, `top-full-${pair}`);
-              flashNotice(`COPIED FULL MT4/MT5 TICKET · ${computed.brokerSymbol} ${existingOrder ? existingOrder.direction : computed.direction}`);
+              flashNotice(`COPIED ${isNoTradeGate ? 'REFERENCE' : 'FULL MT4/MT5'} TICKET · ${computed.brokerSymbol}`);
             }}
-            className="px-3.5 py-2 rounded-xl bg-[#D4AF37] hover:bg-amber-400 text-black text-xs font-black flex items-center gap-1.5 transition whitespace-nowrap shadow-md"
+            className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition whitespace-nowrap shadow-md ${
+              isNoTradeGate
+                ? 'bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40'
+                : 'bg-[#D4AF37] hover:bg-amber-400 text-black'
+            }`}
           >
             {copiedKey === `top-full-${pair}` ? (
               <Check className="w-3.5 h-3.5" />
             ) : (
               <Copy className="w-3.5 h-3.5" />
             )}
-            <span>{copiedKey === `top-full-${pair}` ? 'Full Ticket Copied ✓' : 'Copy Full MT4/MT5 Ticket'}</span>
+            <span>
+              {copiedKey === `top-full-${pair}`
+                ? 'Levels Copied ✓'
+                : isNoTradeGate
+                ? 'Copy Ref Levels (Blocked)'
+                : 'Copy Full MT4/MT5 Ticket'}
+            </span>
           </button>
 
           <button
@@ -1005,6 +1092,85 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Pre-Flight Precision Safety Strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+        <div
+          className={`p-2.5 rounded-xl border ${
+            computed.spreadSafetyBlocked
+              ? 'bg-red-950/40 border-red-500/50 text-red-200'
+              : 'bg-slate-950 border-slate-800 text-slate-200'
+          }`}
+          title="Broker spread as a percentage of Stop-Loss distance (blocked above 22%)"
+        >
+          <span className="text-[10px] text-slate-400 block">Spread % SL</span>
+          <strong className={computed.spreadSafetyBlocked ? 'text-red-300' : 'text-[#00C261]'}>
+            {(computed.spreadSlRatioPct ?? 0).toFixed(1)}% {computed.spreadSafetyBlocked ? '(WIDE)' : '(OK)'}
+          </strong>
+        </div>
+
+        <div
+          className="p-2.5 rounded-xl bg-slate-950 border border-slate-800"
+          title={computed.candleCloseStatusText || 'Candle bar-close confirmation'}
+        >
+          <span className="text-[10px] text-slate-400 block">Bar Close</span>
+          <strong className={computed.candleCloseConfirmed ? 'text-[#00C261]' : 'text-amber-300'}>
+            {computed.candleCloseConfirmed ? 'Confirmed ✓' : 'Waiting Close'}
+          </strong>
+        </div>
+
+        <div
+          className={`p-2.5 rounded-xl border ${
+            computed.newsBlackoutActive
+              ? 'bg-red-950/40 border-red-500/50 text-red-200'
+              : 'bg-slate-950 border-slate-800 text-slate-200'
+          }`}
+          title={computed.newsBlackoutReason || 'Live high-impact economic calendar shield'}
+        >
+          <span className="text-[10px] text-slate-400 block">News Shield</span>
+          <strong className={computed.newsBlackoutActive ? 'text-red-300' : 'text-[#00C261]'}>
+            {computed.newsBlackoutActive ? 'BLACKOUT ACTIVE' : 'Clear Sky'}
+          </strong>
+        </div>
+
+        <div
+          className="p-2.5 rounded-xl bg-slate-950 border border-slate-800"
+          title={computed.invalidationReason || 'Hard structural thesis invalidation price'}
+        >
+          <span className="text-[10px] text-slate-400 block">Hard Invalidation</span>
+          <strong className="text-rose-300">
+            {computed.invalidationLevel ?? computed.stopLoss}
+          </strong>
+        </div>
+      </div>
+
+      {/* Active Armed Pending LIMIT Card for this Pair */}
+      {!existingOrder && activePendingLimit && (
+        <div className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-500/55 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2 text-amber-300 font-black">
+              <Clock className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                ARMED {activePendingLimit.direction} LIMIT @ {activePendingLimit.limitEntryPrice}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-300 font-sans">
+              SL {activePendingLimit.stopLoss} · TP2 {activePendingLimit.tp2} · Auto-cancels if invalidated @{' '}
+              <strong className="text-rose-300">{activePendingLimit.invalidationPrice}</strong>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              globalLiveStream.cancelPendingLimitOrder(activePendingLimit.id);
+              flashNotice(`Cancelled pending ${activePendingLimit.direction} LIMIT on ${pair}`);
+            }}
+            className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-red-950 text-red-300 border border-red-500/40 font-bold text-[11px] whitespace-nowrap shrink-0 transition"
+          >
+            Cancel Limit
+          </button>
+        </div>
+      )}
 
       {/* Execution Readiness Gate Warning Banner */}
       {!existingOrder &&
@@ -1121,28 +1287,89 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
-            <button
-              type="button"
-              onClick={() => {
-                const logged = globalLiveStream.logSuggestedSetup({
-                  pair,
-                  timeframe,
-                  broker,
-                  direction: computed.direction,
-                  customEntryPrice:
-                    !isNaN(parsedCustomEntry) && parsedCustomEntry > 0 ? parsedCustomEntry : undefined,
-                  reasonSummary: computed.entryTimingWarning || `${computed.trendProjectionText} · ${computed.goAheadAssurance}`
-                });
-                if (logged) {
-                  flashNotice(
-                    `SAVED TO SUGGESTED TRADE LOG · ${logged.pair} ${logged.direction} @ ${logged.entryPrice}`
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  const logged = globalLiveStream.logSuggestedSetup({
+                    pair,
+                    timeframe,
+                    broker,
+                    direction: computed.direction,
+                    customEntryPrice:
+                      !isNaN(parsedCustomEntry) && parsedCustomEntry > 0 ? parsedCustomEntry : undefined,
+                    reasonSummary: computed.entryTimingWarning || `${computed.trendProjectionText} · ${computed.goAheadAssurance}`
+                  });
+                  if (logged) {
+                    flashNotice(
+                      `SAVED TO SUGGESTED TRADE LOG · ${logged.pair} ${logged.direction} @ ${logged.entryPrice}`
+                    );
+                  }
+                }}
+                className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/40 font-bold text-xs transition whitespace-nowrap"
+              >
+                Save Suggested Log
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const armed = globalLiveStream.armPendingLimitOrder({
+                    pair,
+                    direction: computed.direction,
+                    limitEntryPrice:
+                      !isNaN(parsedCustomEntry) && parsedCustomEntry > 0
+                        ? parsedCustomEntry
+                        : advisoryLimitPrice,
+                    timeframe,
+                    broker,
+                    lotSize: selectedLotSize === 'AUTO' ? computed.lotSize : selectedLotSize
+                  });
+                  if (armed) {
+                    flashNotice(
+                      `ARMED ${armed.direction} LIMIT · ${armed.pair} @ ${armed.limitEntryPrice} (Auto-cancels @ ${armed.invalidationPrice})`
+                    );
+                  }
+                }}
+                className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-400 text-amber-300 hover:text-black border border-amber-400/50 font-black text-xs transition whitespace-nowrap"
+              >
+                Arm {computed.direction} LIMIT @ {advisoryLimitPrice}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onSideSyncRequest?.('BUY');
+                  handleLoadOrder(
+                    pair,
+                    'BUY',
+                    timeframe,
+                    !isNaN(parsedCustomEntry) && parsedCustomEntry > 0 ? parsedCustomEntry : undefined
                   );
-                }
-              }}
-              className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-[#D4AF37] border border-[#D4AF37]/40 font-bold text-xs transition whitespace-nowrap"
-            >
-              Save Setup to Suggested Trade Log
-            </button>
+                }}
+                className="px-3.5 py-2 rounded-xl bg-[#00C261] hover:bg-[#00dc6e] text-black font-black text-xs uppercase tracking-wider transition whitespace-nowrap shadow-md"
+                title="MT5 One-Click: Execute BUY & lock Chart + SL/TP to BUY trajectory"
+              >
+                ▲ BUY (Chart+Order)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onSideSyncRequest?.('SELL');
+                  handleLoadOrder(
+                    pair,
+                    'SELL',
+                    timeframe,
+                    !isNaN(parsedCustomEntry) && parsedCustomEntry > 0 ? parsedCustomEntry : undefined
+                  );
+                }}
+                className="px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs uppercase tracking-wider transition whitespace-nowrap shadow-md"
+                title="MT5 One-Click: Execute SELL & lock Chart + SL/TP to SELL trajectory"
+              >
+                ▼ SELL (Chart+Order)
+              </button>
+            </div>
 
             <button
               type="button"
@@ -1154,15 +1381,19 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
                   !isNaN(parsedCustomEntry) && parsedCustomEntry > 0 ? parsedCustomEntry : undefined
                 )
               }
-              className={`px-5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-2 transition shadow-lg whitespace-nowrap ${
-                isBuyPlanned
-                  ? 'bg-[#00C261] hover:bg-[#00dc6e] text-black'
-                  : 'bg-red-600 hover:bg-red-500 text-white'
+              className={`px-4 py-2 rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-1.5 transition shadow-lg whitespace-nowrap ${
+                isNoTradeGate
+                  ? 'bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40'
+                  : isBuyPlanned
+                  ? 'bg-emerald-950/80 hover:bg-emerald-900 text-[#00C261] border border-[#00C261]/60'
+                  : 'bg-red-950/80 hover:bg-red-900 text-red-300 border border-red-500/60'
               }`}
             >
               <CheckCircle2 className="w-4 h-4" />
               <span>
-                I Placed {computed.direction} Order With My Broker ({computed.entryPrice})
+                {isNoTradeGate
+                  ? `Log ${computed.direction} (Gate Override)`
+                  : `Confirm ${computed.direction} @ ${computed.entryPrice}`}
               </span>
             </button>
           </div>
@@ -1329,6 +1560,27 @@ export const ActiveMarketOrderPanel: React.FC<ActiveMarketOrderPanelProps> = ({
                   >
                     Lock Profit SL + Extend TP Simultaneously
                   </button>
+
+                  {!existingOrder.partialTp1Banked ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const updated = globalLiveStream.bankPartialTp1(pair);
+                        if (updated) {
+                          flashNotice(
+                            `BANKED 50% @ TP1 (${pair}): +$${(updated.partialBankedUsd || 0).toFixed(2)} closed · Remaining 50% runner protected @ SL ${updated.stopLoss}`
+                          );
+                        }
+                      }}
+                      className="px-3.5 py-2 rounded-xl bg-cyan-950/80 hover:bg-cyan-500 text-cyan-200 hover:text-black border border-cyan-500/50 font-black transition whitespace-nowrap"
+                    >
+                      Bank 50% @ TP1 + BE
+                    </button>
+                  ) : (
+                    <span className="px-3 py-2 rounded-xl bg-emerald-950/70 text-[#00C261] border border-[#00C261]/50 font-black whitespace-nowrap">
+                      50% Banked: +${(existingOrder.partialBankedUsd || 0).toFixed(2)} ✓
+                    </span>
+                  )}
                 </div>
 
                 {/* Manual SL & TP Inputs with Instant Copy + Close Order */}

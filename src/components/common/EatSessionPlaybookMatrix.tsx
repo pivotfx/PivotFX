@@ -745,13 +745,19 @@ export const EatSessionPlaybookMatrix: React.FC = () => {
                         const m = marketByPair.get(pk);
                         if (!m) return null;
                         const isPos = m.change24hPct >= 0;
-                        const dirLabel = m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
+                        const isChop = m.bias === 'NEUTRAL_CHOP';
+                        const dirLabel = isChop ? 'CHOP' : m.bias === 'STRONG_SELL' ? 'SELL' : 'BUY';
+                        const dirClass = isChop
+                          ? 'text-amber-300'
+                          : dirLabel === 'BUY'
+                          ? 'text-[#00C261]'
+                          : 'text-red-400';
                         return (
                           <div key={pk} className="flex items-center justify-between gap-1 truncate">
                             <span className="text-slate-300 font-bold truncate">{pk}</span>
                             <span className="text-right shrink-0">
                               <span className="text-white">{m.price}</span>{' '}
-                              <span className={isPos ? 'text-[#00C261]' : 'text-red-400'}>
+                              <span className={isClosedDimmed ? (isPos ? 'text-[#00C261]' : 'text-red-400') : dirClass}>
                                 {isClosedDimmed ? `${isPos ? '+' : ''}${m.change24hPct.toFixed(1)}%` : dirLabel}
                               </span>
                             </span>
